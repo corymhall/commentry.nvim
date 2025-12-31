@@ -31,7 +31,11 @@
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-[Gates determined based on constitution file]
+- Review-first workflow preserved (diff -> comment -> submit -> export).
+- Line-accurate annotation model defined (file path + base/head line reference).
+- Local-first artifacts (text-based, diff-friendly, no network by default).
+- Neovim-native UX (buffers/extmarks/virtual text, keyboard-first).
+- Test coverage planned for data model and export behavior changes.
 
 ## Project Structure
 
