@@ -1,0 +1,149 @@
+openapi: 3.0.3
+info:
+  title: Commentry Review Draft API
+  version: 0.1.0
+  description: Local API contract for diff view and draft comment actions.
+servers:
+  - url: http://localhost
+paths:
+  /diffs/current:
+    get:
+      summary: Get current local diff view
+      responses:
+        '200':
+          description: Current diff view
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiffView'
+  /comments:
+    get:
+      summary: List draft comments for current diff
+      parameters:
+        - in: query
+          name: diff_id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Draft comments
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DraftComment'
+    post:
+      summary: Create a draft comment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DraftCommentInput'
+      responses:
+        '201':
+          description: Draft comment created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DraftComment'
+  /comments/{id}:
+    patch:
+      summary: Edit a draft comment
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DraftCommentUpdate'
+      responses:
+        '200':
+          description: Draft comment updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DraftComment'
+    delete:
+      summary: Delete a draft comment
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Draft comment deleted
+components:
+  schemas:
+    DiffView:
+      type: object
+      required: [id, project_root, files]
+      properties:
+        id:
+          type: string
+        project_root:
+          type: string
+        base_ref:
+          type: string
+        head_ref:
+          type: string
+        files:
+          type: array
+          items:
+            type: object
+            required: [path]
+            properties:
+              path:
+                type: string
+              hunks:
+                type: integer
+    DraftComment:
+      type: object
+      required: [id, diff_id, file_path, line_number, line_side, body]
+      properties:
+        id:
+          type: string
+        diff_id:
+          type: string
+        file_path:
+          type: string
+        line_number:
+          type: integer
+        line_side:
+          type: string
+          enum: [base, head]
+        body:
+          type: string
+        created_at:
+          type: string
+        updated_at:
+          type: string
+    DraftCommentInput:
+      type: object
+      required: [diff_id, file_path, line_number, line_side, body]
+      properties:
+        diff_id:
+          type: string
+        file_path:
+          type: string
+        line_number:
+          type: integer
+        line_side:
+          type: string
+          enum: [base, head]
+        body:
+          type: string
+    DraftCommentUpdate:
+      type: object
+      properties:
+        body:
+          type: string

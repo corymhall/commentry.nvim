@@ -9,9 +9,12 @@ Using lazy.nvim:
 ```lua
 {
   "commentry/commentry.nvim",
+  dependencies = { "sindrets/diffview.nvim" },
   opts = {},
 }
 ```
+
+`diffview.nvim` is required for the diff UI.
 
 ## Setup
 
