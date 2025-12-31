@@ -1,0 +1,25 @@
+*commentry.txt*  AI review scaffolding for Neovim
+
+INTRODUCTION                                     *commentry*
+
+commentry.nvim is a Neovim plugin scaffold intended for building
+PR-style review workflows for AI-generated code. This doc is minimal
+and will expand as features are added.
+
+SETUP                                             *commentry.setup*
+
+Use the Lua API to configure the plugin:
+>
+  require("commentry").setup({
+    -- configuration goes here
+  })
+<
+
+COMMANDS                                          *commentry.commands*
+
+:Commentry
+  Base command entry point for commentry. Subcommands will be added as
+  the plugin evolves.
+
+=============================================================================
+vim:tw=78:ts=2:sw=2:et:ft=help
