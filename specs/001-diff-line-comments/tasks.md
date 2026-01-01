@@ -105,7 +105,7 @@ description: "Task list template for feature implementation"
 
 **Purpose**: Improvements that affect multiple user stories
 
-- [ ] T022 [P] Update README usage docs in README.md
+- [X] T022 [P] Update README usage docs in README.md
 - [X] T023 [P] Add health check for diffview dependency in lua/commentry/health.lua
 - [ ] T024 [P] Manual test pass and cleanup notes in specs/001-diff-line-comments/quickstart.md
 

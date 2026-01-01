@@ -26,8 +26,22 @@ require("commentry").setup({
 
 ## Commands
 
-`commentry.nvim` provides a `:Commentry` command. Subcommands can be registered
-by the plugin as features are added.
+`commentry.nvim` provides a `:Commentry` command with subcommands.
+
+- `:Commentry open` opens a diffview for local changes (shortcut).
+
+If you open diffview directly (for example `:DiffviewOpen main`), Commentry will
+auto-attach to diff buffers by default.
+
+You can disable auto-attach with:
+
+```lua
+require("commentry").setup({
+  diffview = {
+    auto_attach = false,
+  },
+})
+```
 
 ## Development
 
