@@ -1,3 +1,5 @@
+local Config = require("commentry.config")
+local Diffview = require("commentry.diffview")
 local Util = require("commentry.util")
 
 local M = {}
@@ -18,6 +20,34 @@ function M.setup()
     return
   end
   initialized = true
+
+  M.register("open", function(_, cmd_args)
+    if not Config.diffview.enabled then
+      Util.warn("Diff view is disabled in config")
+      return
+    end
+    local args = nil
+    if type(cmd_args) == "string" and cmd_args ~= "" then
+      args = vim.split(cmd_args, "%s+", { trimempty = true })
+    end
+    local ok, err = Diffview.open(args)
+    if ok then
+      return
+    end
+    if err == "no_changes" then
+      Util.info("No local changes to review")
+      return
+    end
+    if err == "not_git_repo" then
+      Util.error("Current directory is not a git repository")
+      return
+    end
+    if err == "git_status_failed" then
+      Util.error("Failed to read git status")
+      return
+    end
+    Util.error(err or "Failed to open diff view")
+  end)
 
   for _, module_name in ipairs(feature_modules) do
     local ok, mod = pcall(require, module_name)

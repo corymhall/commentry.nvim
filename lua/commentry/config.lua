@@ -14,6 +14,7 @@ M.ns = vim.api.nvim_create_namespace("commentry")
 ---@class commentry.DiffviewConfig
 ---@field enabled boolean
 ---@field prefer string
+---@field auto_attach boolean
 
 ---@class commentry.Config
 ---@field debug boolean
@@ -33,6 +34,7 @@ local defaults = {
   diffview = {
     enabled = true,
     prefer = "diffview.nvim",
+    auto_attach = true,
   },
 }
 

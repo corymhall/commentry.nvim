@@ -58,10 +58,10 @@ description: "Task list template for feature implementation"
 
 ### Implementation for User Story 1
 
-- [ ] T010 [US1] Implement diff view open command in lua/commentry/commands.lua
-- [ ] T011 [US1] Implement diff view open logic and buffer setup in lua/commentry/diffview.lua
-- [ ] T012 [US1] Add empty-state handling for no local changes in lua/commentry/diffview.lua
-- [ ] T013 [US1] Wire command to main entry point in lua/commentry/init.lua
+- [X] T010 [US1] Implement diff view open command in lua/commentry/commands.lua
+- [X] T011 [US1] Implement diff view open logic and buffer setup in lua/commentry/diffview.lua
+- [X] T012 [US1] Add empty-state handling for no local changes in lua/commentry/diffview.lua
+- [X] T013 [US1] Wire command to main entry point in lua/commentry/init.lua
 
 **Checkpoint**: At this point, User Story 1 should be fully functional and testable independently
 
