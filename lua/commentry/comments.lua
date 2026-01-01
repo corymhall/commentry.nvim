@@ -1,7 +1,14 @@
+local Diffview = require("commentry.diffview")
+local Util = require("commentry.util")
+
 local M = {}
 
 local uv = vim.uv or vim.loop
 local seeded = false
+
+local state = {
+  diffs = {},
+}
 
 ---@param value any
 ---@return boolean
@@ -21,6 +28,190 @@ end
 ---@return string
 local function timestamp()
   return os.date("!%Y-%m-%dT%H:%M:%SZ")
+end
+
+---@param diff_id string
+---@return table
+local function diff_state(diff_id)
+  if not state.diffs[diff_id] then
+    state.diffs[diff_id] = {
+      comments = {},
+      threads = {},
+      comments_by_id = {},
+      threads_by_id = {},
+    }
+  end
+  return state.diffs[diff_id]
+end
+
+---@param view? table
+---@return string
+local function diff_id_for_view(view)
+  local id = nil
+  if type(view) == "table" then
+    id = view.id or view.tabpage or view.tabnr or view.view_id
+  end
+  if not id then
+    id = vim.api.nvim_get_current_tabpage()
+  end
+  return tostring(id)
+end
+
+---@param context table
+---@return commentry.Anchor|nil, string|nil
+local function anchor_from_context(context)
+  if type(context) ~= "table" then
+    return nil, "diffview context is required"
+  end
+  return M.build_anchor(context.file_path, context.line_number, context.line_side)
+end
+
+---@param diff_id string
+---@param anchor commentry.Anchor
+---@return commentry.CommentThread|nil, string|nil
+local function ensure_thread(diff_id, anchor)
+  local thread_id, err = M.thread_id(diff_id, anchor)
+  if not thread_id then
+    return nil, err
+  end
+  local dstate = diff_state(diff_id)
+  local thread = dstate.threads_by_id[thread_id]
+  if thread then
+    return thread, nil
+  end
+  local created, thread_err = M.new_thread(diff_id, anchor)
+  if not created then
+    return nil, thread_err
+  end
+  dstate.threads_by_id[thread_id] = created
+  dstate.threads[#dstate.threads + 1] = created
+  return created, nil
+end
+
+---@param diff_id string
+---@param anchor commentry.Anchor
+---@return commentry.CommentThread|nil, string|nil
+local function find_thread(diff_id, anchor)
+  local thread_id, err = M.thread_id(diff_id, anchor)
+  if not thread_id then
+    return nil, err
+  end
+  local dstate = diff_state(diff_id)
+  return dstate.threads_by_id[thread_id], nil
+end
+
+---@param dstate table
+---@param comment commentry.DraftComment
+local function upsert_comment(dstate, comment)
+  dstate.comments_by_id[comment.id] = comment
+  for index, existing in ipairs(dstate.comments) do
+    if existing.id == comment.id then
+      dstate.comments[index] = comment
+      return
+    end
+  end
+  dstate.comments[#dstate.comments + 1] = comment
+end
+
+---@param dstate table
+---@param comment_id string
+local function remove_comment(dstate, comment_id)
+  dstate.comments_by_id[comment_id] = nil
+  for index = #dstate.comments, 1, -1 do
+    if dstate.comments[index].id == comment_id then
+      table.remove(dstate.comments, index)
+      break
+    end
+  end
+end
+
+---@param thread commentry.CommentThread
+---@param comment_id string
+local function remove_from_thread(thread, comment_id)
+  for index = #thread.comment_ids, 1, -1 do
+    if thread.comment_ids[index] == comment_id then
+      table.remove(thread.comment_ids, index)
+      break
+    end
+  end
+end
+
+---@param dstate table
+---@param thread commentry.CommentThread
+local function maybe_drop_thread(dstate, thread)
+  if #thread.comment_ids > 0 then
+    return
+  end
+  dstate.threads_by_id[thread.id] = nil
+  for index = #dstate.threads, 1, -1 do
+    if dstate.threads[index].id == thread.id then
+      table.remove(dstate.threads, index)
+      break
+    end
+  end
+end
+
+---@param dstate table
+---@param thread commentry.CommentThread
+---@return commentry.DraftComment[]
+local function comments_for_thread(dstate, thread)
+  local results = {}
+  for _, comment_id in ipairs(thread.comment_ids) do
+    local comment = dstate.comments_by_id[comment_id]
+    if comment then
+      results[#results + 1] = comment
+    end
+  end
+  return results
+end
+
+---@param comments commentry.DraftComment[]
+---@param prompt string
+---@param cb fun(comment: commentry.DraftComment)
+local function select_comment(comments, prompt, cb)
+  if #comments == 0 then
+    return
+  end
+  if #comments == 1 then
+    cb(comments[1])
+    return
+  end
+  vim.ui.select(comments, {
+    prompt = prompt,
+    format_item = function(item)
+      local preview = item.body:gsub("\n", " ")
+      if #preview > 60 then
+        preview = preview:sub(1, 57) .. "..."
+      end
+      return preview
+    end,
+  }, function(choice)
+    if choice then
+      cb(choice)
+    end
+  end)
+end
+
+---@param context table
+local function render_for_context(context)
+  local diff_id = diff_id_for_view(context.view)
+  local dstate = diff_state(diff_id)
+  local comments = {}
+  for _, comment in ipairs(dstate.comments) do
+    if comment.file_path == context.file_path and comment.line_side == context.line_side then
+      comments[#comments + 1] = comment
+    end
+  end
+  Diffview.render_comment_markers(context.bufnr, comments)
+end
+
+---@return table|nil, string|nil
+local function current_context()
+  local context, err = Diffview.current_file_context()
+  if not context then
+    return nil, err
+  end
+  return context, nil
 end
 
 ---@param file_path string
@@ -192,6 +383,126 @@ function M.new_thread(diff_id, anchor, comment_ids)
     line_side = anchor.line_side,
     comment_ids = comment_ids or {},
   }, nil
+end
+
+function M.render_current_buffer()
+  local context, err = current_context()
+  if not context then
+    Util.warn(err or "No diffview context")
+    return
+  end
+  render_for_context(context)
+end
+
+function M.add_comment()
+  local context, err = current_context()
+  if not context then
+    Util.error(err or "No diffview context")
+    return
+  end
+  local anchor, anchor_err = anchor_from_context(context)
+  if not anchor then
+    Util.error(anchor_err or "Invalid line anchor")
+    return
+  end
+  vim.ui.input({ prompt = "Add comment: " }, function(input)
+    if not input or input == "" then
+      return
+    end
+    local diff_id = diff_id_for_view(context.view)
+    local comment, comment_err = M.new_comment(diff_id, anchor, input)
+    if not comment then
+      Util.error(comment_err or "Failed to create comment")
+      return
+    end
+    local dstate = diff_state(diff_id)
+    upsert_comment(dstate, comment)
+    local thread, thread_err = ensure_thread(diff_id, anchor)
+    if not thread then
+      Util.error(thread_err or "Failed to create thread")
+      return
+    end
+    thread.comment_ids[#thread.comment_ids + 1] = comment.id
+    render_for_context(context)
+  end)
+end
+
+function M.edit_comment()
+  local context, err = current_context()
+  if not context then
+    Util.error(err or "No diffview context")
+    return
+  end
+  local anchor, anchor_err = anchor_from_context(context)
+  if not anchor then
+    Util.error(anchor_err or "Invalid line anchor")
+    return
+  end
+  local diff_id = diff_id_for_view(context.view)
+  local dstate = diff_state(diff_id)
+  local thread, thread_err = find_thread(diff_id, anchor)
+  if not thread then
+    if thread_err then
+      Util.error(thread_err)
+    else
+      Util.info("No draft comments for this line")
+    end
+    return
+  end
+  local comments = comments_for_thread(dstate, thread)
+  if #comments == 0 then
+    Util.info("No draft comments for this line")
+    return
+  end
+  select_comment(comments, "Edit comment", function(target)
+    vim.ui.input({ prompt = "Edit comment: ", default = target.body }, function(input)
+      if not input or input == "" then
+        return
+      end
+      local updated, update_err = M.update_body(target, input)
+      if not updated then
+        Util.error(update_err or "Failed to update comment")
+        return
+      end
+      upsert_comment(dstate, updated)
+      render_for_context(context)
+    end)
+  end)
+end
+
+function M.delete_comment()
+  local context, err = current_context()
+  if not context then
+    Util.error(err or "No diffview context")
+    return
+  end
+  local anchor, anchor_err = anchor_from_context(context)
+  if not anchor then
+    Util.error(anchor_err or "Invalid line anchor")
+    return
+  end
+  local diff_id = diff_id_for_view(context.view)
+  local dstate = diff_state(diff_id)
+  local thread, thread_err = find_thread(diff_id, anchor)
+  if not thread then
+    if thread_err then
+      Util.error(thread_err)
+    else
+      Util.info("No draft comments for this line")
+    end
+    return
+  end
+  local comments = comments_for_thread(dstate, thread)
+  if #comments == 0 then
+    Util.info("No draft comments for this line")
+    return
+  end
+  select_comment(comments, "Delete comment", function(target)
+    remove_comment(dstate, target.id)
+    remove_from_thread(thread, target.id)
+    maybe_drop_thread(dstate, thread)
+    render_for_context(context)
+  end)
 end
 
 return M

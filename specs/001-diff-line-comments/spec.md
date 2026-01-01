@@ -67,11 +67,49 @@ comments reappear on the same diff lines.
 
 ---
 
+### User Story 4 - Preview comments on hover (Priority: P2)
+
+As a user, I can see the comment text when my cursor lands on a line with a
+comment so I can review feedback without opening any extra UI.
+
+**Why this priority**: Quick review of comment content keeps the flow in the
+diff view.
+
+**Independent Test**: With a line that has a draft comment, moving the cursor
+onto the line shows the comment text.
+
+**Acceptance Scenarios**:
+
+1. **Given** a diff line with a draft comment, **When** I move the cursor onto
+   that line, **Then** the comment text is displayed.
+2. **Given** a diff line without a draft comment, **When** I move the cursor
+   onto that line, **Then** no comment preview is shown.
+
+---
+
+### User Story 5 - List comments with Snacks picker (Priority: P3)
+
+As a user, I can open a picker listing all draft comments in the current diff
+so I can jump directly to a comment line.
+
+**Why this priority**: A global list speeds up navigation in larger diffs.
+
+**Independent Test**: Running the list-comments command opens a Snacks picker
+with all draft comments; selecting an item moves the cursor to the comment line.
+
+**Acceptance Scenarios**:
+
+1. **Given** draft comments exist, **When** I run the list-comments command,
+   **Then** a Snacks picker opens listing each comment.
+2. **Given** I select a comment in the picker, **When** I press Enter, **Then**
+   the cursor moves to the comment line in the diff view.
+
 ### Edge Cases
 
 - What happens when the diff is empty and the user tries to add a comment?
 - What happens when a previously commented line no longer exists in the diff?
 - How does the system handle multiple comments on the same line?
+- How does the hover preview behave when multiple comments exist on one line?
 
 ## Requirements *(mandatory)*
 

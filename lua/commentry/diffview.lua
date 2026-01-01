@@ -178,4 +178,35 @@ function M.current_file_context()
   }, nil
 end
 
+---@param bufnr integer
+---@param comments commentry.DraftComment[]
+function M.render_comment_markers(bufnr, comments)
+  if type(bufnr) ~= "number" or not vim.api.nvim_buf_is_valid(bufnr) then
+    return
+  end
+
+  vim.api.nvim_buf_clear_namespace(bufnr, Config.ns, 0, -1)
+
+  if type(comments) ~= "table" then
+    return
+  end
+
+  local counts = {}
+  for _, comment in ipairs(comments) do
+    if type(comment) == "table" and type(comment.line_number) == "number" then
+      counts[comment.line_number] = (counts[comment.line_number] or 0) + 1
+    end
+  end
+
+  for line_number, count in pairs(counts) do
+    local label = count == 1 and "[c]" or ("[c:%d]"):format(count)
+    local line = math.max(line_number - 1, 0)
+    pcall(vim.api.nvim_buf_set_extmark, bufnr, Config.ns, line, 0, {
+      virt_text = { { label, "Comment" } },
+      virt_text_pos = "eol",
+      hl_mode = "combine",
+    })
+  end
+end
+
 return M

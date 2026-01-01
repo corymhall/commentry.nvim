@@ -1,4 +1,5 @@
 local Config = require("commentry.config")
+local Comments = require("commentry.comments")
 local Diffview = require("commentry.diffview")
 local Util = require("commentry.util")
 
@@ -14,6 +15,60 @@ local feature_modules = {
 
 ---@type table<string, commentry.command.Fn>
 M.commands = {}
+
+---@param bufnr integer
+---@return table
+local function buffer_debug_info(bufnr)
+  return {
+    bufnr = bufnr,
+    current = vim.api.nvim_get_current_buf(),
+    name = vim.api.nvim_buf_get_name(bufnr),
+    filetype = vim.bo[bufnr].filetype,
+    buftype = vim.bo[bufnr].buftype,
+    is_diff = vim.b[bufnr].commentry_diffview,
+  }
+end
+
+---@param bufnr integer
+local function maybe_attach_keymaps(bufnr)
+  if type(bufnr) ~= "number" or not vim.api.nvim_buf_is_valid(bufnr) then
+    Util.debug("Skipping keymap attach: invalid buffer", { bufnr = bufnr })
+    return
+  end
+  local is_diff = vim.b[bufnr].commentry_diffview
+  if is_diff == nil then
+    local ok, value = pcall(vim.api.nvim_buf_get_var, bufnr, "commentry_diffview")
+    if ok then
+      is_diff = value
+    end
+  end
+  if not is_diff then
+    Util.debug("Skipping keymap attach: not a diffview buffer", buffer_debug_info(bufnr))
+    return
+  end
+  if vim.b[bufnr].commentry_keymaps then
+    Util.debug("Keymaps already attached", buffer_debug_info(bufnr))
+    Comments.render_current_buffer()
+    return
+  end
+  vim.b[bufnr].commentry_keymaps = true
+
+  Util.debug("Attaching comment keymaps", buffer_debug_info(bufnr))
+
+  vim.keymap.set("n", Config.keymaps.add_comment, function()
+    Comments.add_comment()
+  end, { buffer = bufnr, desc = "Commentry add comment" })
+
+  vim.keymap.set("n", Config.keymaps.edit_comment, function()
+    Comments.edit_comment()
+  end, { buffer = bufnr, desc = "Commentry edit comment" })
+
+  vim.keymap.set("n", Config.keymaps.delete_comment, function()
+    Comments.delete_comment()
+  end, { buffer = bufnr, desc = "Commentry delete comment" })
+
+  Comments.render_current_buffer()
+end
 
 function M.setup()
   if initialized then
@@ -55,6 +110,22 @@ function M.setup()
       mod.register_commands(M.register)
     end
   end
+
+  vim.api.nvim_create_user_command("CommentryDebugBuf", function()
+    local bufnr = vim.api.nvim_get_current_buf()
+    Util.info(vim.inspect(buffer_debug_info(bufnr)))
+  end, { desc = "Commentry debug current buffer context" })
+
+  vim.api.nvim_create_autocmd("User", {
+    group = Config.augroup,
+    pattern = "DiffviewDiffBufWinEnter",
+    callback = function()
+      local bufnr = vim.api.nvim_get_current_buf()
+      vim.schedule(function()
+        maybe_attach_keymaps(bufnr)
+      end)
+    end,
+  })
 end
 
 ---@param name string

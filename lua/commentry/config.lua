@@ -24,9 +24,9 @@ M.ns = vim.api.nvim_create_namespace("commentry")
 local defaults = {
   debug = false,
   keymaps = {
-    add_comment = "gc",
-    edit_comment = "ge",
-    delete_comment = "gd",
+    add_comment = "mc",
+    edit_comment = "me",
+    delete_comment = "md",
   },
   store = {
     filename = "commentry.json",

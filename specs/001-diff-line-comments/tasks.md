@@ -75,11 +75,11 @@ description: "Task list template for feature implementation"
 
 ### Implementation for User Story 2
 
-- [ ] T014 [US2] Implement add-comment action and input flow in lua/commentry/comments.lua
-- [ ] T015 [US2] Implement edit-comment action in lua/commentry/comments.lua
-- [ ] T016 [US2] Implement delete-comment action in lua/commentry/comments.lua
-- [ ] T017 [US2] Render draft comment markers for diff lines in lua/commentry/diffview.lua
-- [ ] T018 [US2] Register keymaps for add/edit/delete in lua/commentry/commands.lua
+- [X] T014 [US2] Implement add-comment action and input flow in lua/commentry/comments.lua
+- [X] T015 [US2] Implement edit-comment action in lua/commentry/comments.lua
+- [X] T016 [US2] Implement delete-comment action in lua/commentry/comments.lua
+- [X] T017 [US2] Render draft comment markers for diff lines in lua/commentry/diffview.lua
+- [X] T018 [US2] Register keymaps for add/edit/delete in lua/commentry/commands.lua
 
 **Checkpoint**: At this point, User Stories 1 AND 2 should both work independently
 
@@ -98,6 +98,40 @@ description: "Task list template for feature implementation"
 - [ ] T021 [US3] Reconcile missing or moved lines on reload in lua/commentry/comments.lua
 
 **Checkpoint**: All user stories should now be independently functional
+
+---
+
+## Phase 6: User Story 4 - Preview comments on hover (Priority: P2)
+
+**Goal**: Show comment text when the cursor lands on a line with comments.
+
+**Independent Test**: Moving the cursor onto a commented line shows the comment
+text without leaving the diff view.
+
+### Implementation for User Story 4
+
+- [ ] T025 [US4] Render hover preview for comment text in lua/commentry/diffview.lua
+- [ ] T026 [US4] Wire cursor-move handler for comment hover in lua/commentry/comments.lua
+
+**Checkpoint**: Comment text is visible on cursor hover in diff view
+
+---
+
+## Phase 7: User Story 5 - List comments with Snacks picker (Priority: P3)
+
+**Goal**: Provide a Snacks picker command to list all draft comments in the
+current diff and jump to the selected line.
+
+**Independent Test**: Running the command opens a Snacks picker and selecting an
+entry moves the cursor to the comment line.
+
+### Implementation for User Story 5
+
+- [ ] T027 [US5] Build Snacks picker entries for draft comments in lua/commentry/comments.lua
+- [ ] T028 [US5] Add Snacks picker command wiring in lua/commentry/commands.lua
+- [ ] T029 [US5] Add Snacks dependency health check in lua/commentry/health.lua
+
+**Checkpoint**: User can list all comments via Snacks picker and jump to line
 
 ---
 
