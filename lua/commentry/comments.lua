@@ -332,7 +332,8 @@ function M.new_comment(diff_id, anchor, body, opts)
     created_at = created_at,
     updated_at = updated_at,
     status = opts.status,
-  }, nil
+  },
+    nil
 end
 
 ---@param comment commentry.DraftComment
@@ -382,7 +383,8 @@ function M.new_thread(diff_id, anchor, comment_ids)
     line_number = anchor.line_number,
     line_side = anchor.line_side,
     comment_ids = comment_ids or {},
-  }, nil
+  },
+    nil
 end
 
 function M.render_current_buffer()

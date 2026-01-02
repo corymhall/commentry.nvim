@@ -51,8 +51,7 @@ end
 ---@param line string
 ---@return commentry.DiffHunkHeader|nil
 function M.parse_hunk_header(line)
-  local base_start, base_count, head_start, head_count =
-    line:match("^@@%s+%-(%d+),?(%d*)%s+%+(%d+),?(%d*)%s+@@")
+  local base_start, base_count, head_start, head_count = line:match("^@@%s+%-(%d+),?(%d*)%s+%+(%d+),?(%d*)%s+@@")
   if not base_start then
     return nil
   end

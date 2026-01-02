@@ -175,7 +175,8 @@ function M.current_file_context()
     line_side = line_side,
     bufnr = bufnr,
     view = view,
-  }, nil
+  },
+    nil
 end
 
 ---@param bufnr integer

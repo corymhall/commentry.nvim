@@ -1,5 +1,5 @@
-local Config = require("commentry.config")
 local Comments = require("commentry.comments")
+local Config = require("commentry.config")
 local Diffview = require("commentry.diffview")
 local Util = require("commentry.util")
 

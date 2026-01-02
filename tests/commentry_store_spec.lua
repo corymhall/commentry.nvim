@@ -1,9 +1,6 @@
-local MiniTest = require("mini.test")
-local expect = MiniTest.expect
+---@module 'luassert'
 
 local Store = require("commentry.store")
-
-local T = MiniTest.new_set()
 
 local function make_temp_dir()
   local path = vim.fn.tempname()
@@ -38,61 +35,61 @@ local function sample_store(root)
   }
 end
 
-T["path_for_project builds path under project root"] = function()
-  local root = make_temp_dir()
-  local path, err = Store.path_for_project(root)
-  expect.equality(err, nil)
-  local expected = vim.fs.joinpath(vim.fs.normalize(root), ".commentry", "commentry.json")
-  expect.equality(path, expected)
-end
+describe("commentry.store", function()
+  it("builds path under project root", function()
+    local root = make_temp_dir()
+    local path, err = Store.path_for_project(root)
+    assert.is_nil(err)
+    local expected = vim.fs.joinpath(vim.fs.normalize(root), ".commentry", "commentry.json")
+    assert.are.same(expected, path)
+  end)
 
-T["write/read persists store"] = function()
-  local root = make_temp_dir()
-  local path = Store.path_for_project(root)
-  local store = sample_store(root)
+  it("persists store data", function()
+    local root = make_temp_dir()
+    local path = Store.path_for_project(root)
+    local store = sample_store(root)
 
-  local ok, err = Store.write(path, store)
-  expect.equality(ok, true)
-  expect.equality(err, nil)
+    local ok, err = Store.write(path, store)
+    assert.is_true(ok)
+    assert.is_nil(err)
 
-  local data, read_err = Store.read(path)
-  expect.equality(read_err, nil)
-  expect.equality(data, store)
-end
+    local data, read_err = Store.read(path)
+    assert.is_nil(read_err)
+    assert.are.same(store, data)
+  end)
 
-T["validate rejects invalid line anchors"] = function()
-  local store = {
-    project_root = "root",
-    diff_id = "diff",
-    comments = {
-      {
-        id = "c1",
-        diff_id = "diff",
-        file_path = "lua/commentry/store.lua",
-        line_number = 0,
-        line_side = "middle",
-        body = "Bad anchor",
+  it("rejects invalid line anchors", function()
+    local store = {
+      project_root = "root",
+      diff_id = "diff",
+      comments = {
+        {
+          id = "c1",
+          diff_id = "diff",
+          file_path = "lua/commentry/store.lua",
+          line_number = 0,
+          line_side = "middle",
+          body = "Bad anchor",
+        },
       },
-    },
-    threads = {
-      {
-        id = "t1",
-        diff_id = "diff",
-        file_path = "lua/commentry/store.lua",
-        line_number = -1,
-        line_side = "side",
-        comment_ids = { "c1" },
+      threads = {
+        {
+          id = "t1",
+          diff_id = "diff",
+          file_path = "lua/commentry/store.lua",
+          line_number = -1,
+          line_side = "side",
+          comment_ids = { "c1" },
+        },
       },
-    },
-  }
+    }
 
-  local ok, errors = Store.validate(store)
-  expect.equality(ok, false)
-  expect.equality(type(errors), "table")
+    local ok, errors = Store.validate(store)
+    assert.is_false(ok)
+    assert.is_table(errors)
 
-  local combined = table.concat(errors, "\n")
-  expect.equality(combined:find("line_number", 1, true) ~= nil, true)
-  expect.equality(combined:find("line_side", 1, true) ~= nil, true)
-end
-
-return T
+    local combined = table.concat(errors, "\n")
+    assert.is_true(combined:find("line_number", 1, true) ~= nil)
+    assert.is_true(combined:find("line_side", 1, true) ~= nil)
+  end)
+end)
