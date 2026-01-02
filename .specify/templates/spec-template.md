@@ -18,6 +18,9 @@
   - Tested independently
   - Deployed independently
   - Demonstrated to users independently
+
+  Each user story MUST have corresponding test tasks in tasks.md. If any tests
+  are considered optional, they must be flagged for clarification.
 -->
 
 ### User Story 1 - [Brief Title] (Priority: P1)

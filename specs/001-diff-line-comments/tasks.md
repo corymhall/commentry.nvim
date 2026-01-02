@@ -8,7 +8,8 @@ description: "Task list template for feature implementation"
 **Input**: Design documents from `/specs/001-diff-line-comments/`
 **Prerequisites**: plan.md (required), spec.md (required for user stories), research.md, data-model.md, contracts/
 
-**Tests**: The examples below include test tasks. Tests are REQUIRED when the constitution or spec mandates them; otherwise optional.
+**Tests**: Each user story MUST include test tasks. Optional tests require
+explicit clarification before proceeding to avoid over-testing.
 
 **Organization**: Tasks are grouped by user story to enable independent implementation and testing of each story.
 
@@ -62,6 +63,7 @@ description: "Task list template for feature implementation"
 - [X] T011 [US1] Implement diff view open logic and buffer setup in lua/commentry/diffview.lua
 - [X] T012 [US1] Add empty-state handling for no local changes in lua/commentry/diffview.lua
 - [X] T013 [US1] Wire command to main entry point in lua/commentry/init.lua
+- [ ] T030 [US1] Add tests for diff anchor mapping helpers in tests/commentry_util_spec.lua
 
 **Checkpoint**: At this point, User Story 1 should be fully functional and testable independently
 
@@ -80,6 +82,7 @@ description: "Task list template for feature implementation"
 - [X] T016 [US2] Implement delete-comment action in lua/commentry/comments.lua
 - [X] T017 [US2] Render draft comment markers for diff lines in lua/commentry/diffview.lua
 - [X] T018 [US2] Register keymaps for add/edit/delete in lua/commentry/commands.lua
+- [ ] T031 [US2] Add tests for comment identity and thread helpers in tests/commentry_comments_spec.lua
 
 **Checkpoint**: At this point, User Stories 1 AND 2 should both work independently
 
@@ -93,9 +96,11 @@ description: "Task list template for feature implementation"
 
 ### Implementation for User Story 3
 
-- [ ] T019 [US3] Load draft comments on diff view open in lua/commentry/diffview.lua
-- [ ] T020 [US3] Save draft comments on add/edit/delete actions in lua/commentry/comments.lua
-- [ ] T021 [US3] Reconcile missing or moved lines on reload in lua/commentry/comments.lua
+- [X] T019 [US3] Load draft comments on diff view open in lua/commentry/diffview.lua
+- [X] T020 [US3] Save draft comments on add/edit/delete actions in lua/commentry/comments.lua
+- [X] T021 [US3] Reconcile missing or moved lines on reload in lua/commentry/comments.lua
+- [ ] T032 [US3] Add tests for store path/read/write validation in tests/commentry_store_spec.lua
+- [ ] T033 [US3] Add tests for persistence load/save/reconcile in tests/commentry_comments_spec.lua
 
 **Checkpoint**: All user stories should now be independently functional
 

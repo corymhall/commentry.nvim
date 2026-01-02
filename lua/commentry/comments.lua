@@ -1,4 +1,5 @@
 local Diffview = require("commentry.diffview")
+local Store = require("commentry.store")
 local Util = require("commentry.util")
 
 local M = {}
@@ -47,6 +48,16 @@ end
 ---@param view? table
 ---@return string
 local function diff_id_for_view(view)
+  local root = nil
+  if type(view) == "table" then
+    root = view.git_root or view.toplevel or view.root or view.cwd or view.path
+    if type(root) == "string" and root:match("/%.git$") then
+      root = vim.fn.fnamemodify(root, ":h")
+    end
+  end
+  if type(root) == "string" and root ~= "" then
+    return vim.fs.normalize(root)
+  end
   local id = nil
   if type(view) == "table" then
     id = view.id or view.tabpage or view.tabnr or view.view_id
@@ -55,6 +66,24 @@ local function diff_id_for_view(view)
     id = vim.api.nvim_get_current_tabpage()
   end
   return tostring(id)
+end
+
+---@param view? table
+---@return string|nil
+local function project_root_for_view(view)
+  local diff_id = diff_id_for_view(view)
+  if diff_id and diff_id:sub(1, 1) == "/" then
+    return diff_id
+  end
+  local output = vim.fn.systemlist({ "git", "rev-parse", "--show-toplevel" })
+  if vim.v.shell_error ~= 0 then
+    return nil
+  end
+  local root = output[1]
+  if type(root) ~= "string" or root == "" then
+    return nil
+  end
+  return vim.fs.normalize(root)
 end
 
 ---@param context table
@@ -165,6 +194,84 @@ local function comments_for_thread(dstate, thread)
   return results
 end
 
+---@param diff_id string
+---@param store table
+local function apply_store(diff_id, store)
+  local dstate = diff_state(diff_id)
+  dstate.comments = {}
+  dstate.threads = {}
+  dstate.comments_by_id = {}
+  dstate.threads_by_id = {}
+
+  if type(store.comments) == "table" then
+    for _, comment in ipairs(store.comments) do
+      if type(comment) == "table" then
+        upsert_comment(dstate, comment)
+      end
+    end
+  end
+
+  if type(store.threads) == "table" then
+    for _, thread in ipairs(store.threads) do
+      if type(thread) == "table" and type(thread.id) == "string" then
+        dstate.threads_by_id[thread.id] = thread
+        dstate.threads[#dstate.threads + 1] = thread
+      end
+    end
+  end
+end
+
+---@param diff_id string
+---@param project_root string
+---@return boolean, string|string[]|nil
+local function save_store(diff_id, project_root)
+  local path, path_err = Store.path_for_project(project_root)
+  if not path then
+    return false, path_err or "store_path_failed"
+  end
+
+  local dstate = diff_state(diff_id)
+  local store = {
+    project_root = project_root,
+    diff_id = diff_id,
+    comments = vim.deepcopy(dstate.comments),
+    threads = vim.deepcopy(dstate.threads),
+  }
+
+  return Store.write(path, store)
+end
+
+---@param diff_id string
+---@param context table
+---@return boolean
+local function reconcile_for_context(diff_id, context)
+  if type(context) ~= "table" or type(context.bufnr) ~= "number" then
+    return false
+  end
+  local line_count = vim.api.nvim_buf_line_count(context.bufnr)
+  local dstate = diff_state(diff_id)
+  local removed = {}
+  for _, comment in ipairs(dstate.comments) do
+    if comment.file_path == context.file_path
+      and comment.line_side == context.line_side
+      and comment.line_number > line_count then
+      removed[#removed + 1] = comment.id
+    end
+  end
+  if #removed == 0 then
+    return false
+  end
+
+  for _, comment_id in ipairs(removed) do
+    remove_comment(dstate, comment_id)
+    for _, thread in ipairs(dstate.threads) do
+      remove_from_thread(thread, comment_id)
+      maybe_drop_thread(dstate, thread)
+    end
+  end
+  return true
+end
+
 ---@param comments commentry.DraftComment[]
 ---@param prompt string
 ---@param cb fun(comment: commentry.DraftComment)
@@ -195,6 +302,7 @@ end
 ---@param context table
 local function render_for_context(context)
   local diff_id = diff_id_for_view(context.view)
+  local reconciled = reconcile_for_context(diff_id, context)
   local dstate = diff_state(diff_id)
   local comments = {}
   for _, comment in ipairs(dstate.comments) do
@@ -203,6 +311,15 @@ local function render_for_context(context)
     end
   end
   Diffview.render_comment_markers(context.bufnr, comments)
+  if reconciled then
+    local root = project_root_for_view(context.view)
+    if root then
+      local ok, err = save_store(diff_id, root)
+      if not ok then
+        Util.warn(err or "Failed to persist reconciled comments")
+      end
+    end
+  end
 end
 
 ---@return table|nil, string|nil
@@ -396,6 +513,42 @@ function M.render_current_buffer()
   render_for_context(context)
 end
 
+---@param view table
+---@return boolean
+function M.load_for_view(view)
+  local root = project_root_for_view(view)
+  if not root then
+    Util.warn("Unable to resolve project root for comment store")
+    return false
+  end
+  local path, path_err = Store.path_for_project(root)
+  if not path then
+    Util.warn(path_err or "Failed to resolve comment store path")
+    return false
+  end
+  local store, read_err = Store.read(path)
+  if read_err == "not_found" then
+    return false
+  end
+  if read_err then
+    Util.warn(read_err)
+    return false
+  end
+  local diff_id = diff_id_for_view(view)
+  apply_store(diff_id, store)
+  return true
+end
+
+---@return boolean
+function M.load_current_view()
+  local view, err = Diffview.get_current_view()
+  if not view then
+    Util.warn(err or "No diffview view found")
+    return false
+  end
+  return M.load_for_view(view)
+end
+
 function M.add_comment()
   local context, err = current_context()
   if not context then
@@ -426,6 +579,13 @@ function M.add_comment()
     end
     thread.comment_ids[#thread.comment_ids + 1] = comment.id
     render_for_context(context)
+    local root = project_root_for_view(context.view)
+    if root then
+      local ok, save_err = save_store(diff_id, root)
+      if not ok then
+        Util.warn(save_err or "Failed to persist comment")
+      end
+    end
   end)
 end
 
@@ -468,6 +628,13 @@ function M.edit_comment()
       end
       upsert_comment(dstate, updated)
       render_for_context(context)
+      local root = project_root_for_view(context.view)
+      if root then
+        local ok, save_err = save_store(diff_id, root)
+        if not ok then
+          Util.warn(save_err or "Failed to persist comment")
+        end
+      end
     end)
   end)
 end
@@ -504,6 +671,13 @@ function M.delete_comment()
     remove_from_thread(thread, target.id)
     maybe_drop_thread(dstate, thread)
     render_for_context(context)
+    local root = project_root_for_view(context.view)
+    if root then
+      local ok, save_err = save_store(diff_id, root)
+      if not ok then
+        Util.warn(save_err or "Failed to persist comment")
+      end
+    end
   end)
 end
 

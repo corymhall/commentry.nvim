@@ -95,7 +95,14 @@ function M.open(args)
     args = { args }
   end
   diffview.open(args or {})
-  vim.schedule(mark_view_buffers)
+  vim.schedule(function()
+    mark_view_buffers()
+    local ok, comments = pcall(require, "commentry.comments")
+    if ok and type(comments.load_current_view) == "function" then
+      comments.load_current_view()
+      comments.render_current_buffer()
+    end
+  end)
   return true, nil
 end
 
