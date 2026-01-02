@@ -66,7 +66,12 @@ end
 ---@param header string|commentry.DiffHunkHeader
 ---@return commentry.DiffCounters|nil
 function M.start_hunk_counters(header)
-  local parsed = type(header) == "string" and M.parse_hunk_header(header) or header
+  local parsed
+  if type(header) == "string" then
+    parsed = M.parse_hunk_header(header)
+  else
+    parsed = header
+  end
   if not parsed then
     return nil
   end

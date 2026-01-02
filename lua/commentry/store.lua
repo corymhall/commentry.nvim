@@ -123,13 +123,13 @@ function M.validate(store)
   end
 
   if is_array(store.comments or {}) then
-    for index, comment in ipairs(store.comments) do
+    for index, comment in ipairs(store.comments or {}) do
       validate_comment(comment, errors, index)
     end
   end
 
   if is_array(store.threads or {}) then
-    for index, thread in ipairs(store.threads) do
+    for index, thread in ipairs(store.threads or {}) do
       validate_thread(thread, errors, index)
     end
   end

@@ -63,7 +63,7 @@ explicit clarification before proceeding to avoid over-testing.
 - [X] T011 [US1] Implement diff view open logic and buffer setup in lua/commentry/diffview.lua
 - [X] T012 [US1] Add empty-state handling for no local changes in lua/commentry/diffview.lua
 - [X] T013 [US1] Wire command to main entry point in lua/commentry/init.lua
-- [ ] T030 [US1] Add tests for diff anchor mapping helpers in tests/commentry_util_spec.lua
+- [X] T030 [US1] Add tests for diff anchor mapping helpers in tests/commentry_util_spec.lua
 
 **Checkpoint**: At this point, User Story 1 should be fully functional and testable independently
 
@@ -82,7 +82,7 @@ explicit clarification before proceeding to avoid over-testing.
 - [X] T016 [US2] Implement delete-comment action in lua/commentry/comments.lua
 - [X] T017 [US2] Render draft comment markers for diff lines in lua/commentry/diffview.lua
 - [X] T018 [US2] Register keymaps for add/edit/delete in lua/commentry/commands.lua
-- [ ] T031 [US2] Add tests for comment identity and thread helpers in tests/commentry_comments_spec.lua
+- [X] T031 [US2] Add tests for comment identity and thread helpers in tests/commentry_comments_spec.lua
 
 **Checkpoint**: At this point, User Stories 1 AND 2 should both work independently
 
@@ -99,8 +99,8 @@ explicit clarification before proceeding to avoid over-testing.
 - [X] T019 [US3] Load draft comments on diff view open in lua/commentry/diffview.lua
 - [X] T020 [US3] Save draft comments on add/edit/delete actions in lua/commentry/comments.lua
 - [X] T021 [US3] Reconcile missing or moved lines on reload in lua/commentry/comments.lua
-- [ ] T032 [US3] Add tests for store path/read/write validation in tests/commentry_store_spec.lua
-- [ ] T033 [US3] Add tests for persistence load/save/reconcile in tests/commentry_comments_spec.lua
+- [X] T032 [US3] Add tests for store path/read/write validation in tests/commentry_store_spec.lua
+- [X] T033 [US3] Add tests for persistence load/save/reconcile in tests/commentry_comments_spec.lua
 
 **Checkpoint**: All user stories should now be independently functional
 
@@ -117,6 +117,7 @@ text without leaving the diff view.
 
 - [ ] T025 [US4] Render hover preview for comment text in lua/commentry/diffview.lua
 - [ ] T026 [US4] Wire cursor-move handler for comment hover in lua/commentry/comments.lua
+- [ ] T034 [US4] Add tests for hover preview rendering and cursor handler in tests/commentry_diffview_spec.lua
 
 **Checkpoint**: Comment text is visible on cursor hover in diff view
 
@@ -135,6 +136,7 @@ entry moves the cursor to the comment line.
 - [ ] T027 [US5] Build Snacks picker entries for draft comments in lua/commentry/comments.lua
 - [ ] T028 [US5] Add Snacks picker command wiring in lua/commentry/commands.lua
 - [ ] T029 [US5] Add Snacks dependency health check in lua/commentry/health.lua
+- [ ] T035 [US5] Add tests for Snacks picker entries, command wiring, and health check in tests/commentry_comments_spec.lua, tests/commentry_commands_spec.lua, tests/commentry_health_spec.lua
 
 **Checkpoint**: User can list all comments via Snacks picker and jump to line
 

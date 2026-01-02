@@ -1,0 +1,234 @@
+---@module 'luassert'
+
+local Comments = require("commentry.comments")
+
+local function make_anchor()
+  return {
+    file_path = "lua/commentry/comments.lua",
+    line_number = 12,
+    line_side = "head",
+  }
+end
+
+describe("commentry.comments helpers", function()
+  it("builds and validates anchors", function()
+    local anchor, err = Comments.build_anchor("file.lua", 5, "head")
+    assert.is_nil(err)
+    assert.are.same({ file_path = "file.lua", line_number = 5, line_side = "head" }, anchor)
+
+    local invalid, invalid_err = Comments.build_anchor("", 0, "side")
+    assert.is_nil(invalid)
+    assert.is_true(invalid_err:find("file_path", 1, true) ~= nil)
+  end)
+
+  it("builds anchor keys", function()
+    local key, err = Comments.anchor_key(make_anchor())
+    assert.is_nil(err)
+    assert.are.same("lua/commentry/comments.lua|head|12", key)
+
+    local invalid, invalid_err = Comments.anchor_key({})
+    assert.is_nil(invalid)
+    assert.is_true(invalid_err:find("file_path", 1, true) ~= nil)
+  end)
+
+  it("builds thread ids", function()
+    local thread_id, err = Comments.thread_id("diff-1", make_anchor())
+    assert.is_nil(err)
+    assert.are.same("t-diff-1-lua/commentry/comments.lua|head|12", thread_id)
+
+    local invalid, invalid_err = Comments.thread_id("", make_anchor())
+    assert.is_nil(invalid)
+    assert.are.same("diff_id is required", invalid_err)
+  end)
+
+  it("creates and updates draft comments", function()
+    local anchor = make_anchor()
+    local comment, err = Comments.new_comment("diff-1", anchor, "Hello")
+    assert.is_nil(err)
+    assert.are.same("diff-1", comment.diff_id)
+    assert.are.same(anchor.file_path, comment.file_path)
+    assert.are.same(anchor.line_number, comment.line_number)
+    assert.are.same(anchor.line_side, comment.line_side)
+    assert.are.same("Hello", comment.body)
+    assert.is_true(type(comment.id) == "string" and comment.id ~= "")
+
+    local updated, update_err = Comments.update_body(comment, "Updated")
+    assert.is_nil(update_err)
+    assert.are.same("Updated", updated.body)
+    assert.is_true(type(updated.updated_at) == "string" and updated.updated_at ~= "")
+  end)
+
+  it("creates threads with default comment ids", function()
+    local anchor = make_anchor()
+    local thread, err = Comments.new_thread("diff-1", anchor)
+    assert.is_nil(err)
+    assert.are.same("diff-1", thread.diff_id)
+    assert.are.same(anchor.file_path, thread.file_path)
+    assert.are.same(anchor.line_side, thread.line_side)
+    assert.are.same({}, thread.comment_ids)
+  end)
+end)
+
+describe("commentry.comments persistence", function()
+  local original_store
+  local original_diffview
+  local original_comments
+  local original_buf_line_count
+
+  local function load_with_stubs(stubs)
+    original_store = package.loaded["commentry.store"]
+    original_diffview = package.loaded["commentry.diffview"]
+    original_comments = package.loaded["commentry.comments"]
+
+    package.loaded["commentry.store"] = stubs.store
+    package.loaded["commentry.diffview"] = stubs.diffview
+    package.loaded["commentry.comments"] = nil
+
+    return require("commentry.comments")
+  end
+
+  before_each(function()
+    original_buf_line_count = vim.api.nvim_buf_line_count
+  end)
+
+  after_each(function()
+    vim.api.nvim_buf_line_count = original_buf_line_count
+    package.loaded["commentry.store"] = original_store
+    package.loaded["commentry.diffview"] = original_diffview
+    package.loaded["commentry.comments"] = original_comments
+  end)
+
+  it("loads stored comments for a view", function()
+    local captured = {}
+    local store_data = {
+      project_root = "/tmp/project",
+      diff_id = "/tmp/project",
+      comments = {
+        {
+          id = "c1",
+          diff_id = "/tmp/project",
+          file_path = "file.lua",
+          line_number = 3,
+          line_side = "head",
+          body = "Persisted",
+        },
+      },
+      threads = {
+        {
+          id = "t-/tmp/project-file.lua|head|3",
+          diff_id = "/tmp/project",
+          file_path = "file.lua",
+          line_number = 3,
+          line_side = "head",
+          comment_ids = { "c1" },
+        },
+      },
+    }
+
+    local comments = load_with_stubs({
+      store = {
+        path_for_project = function()
+          return "/tmp/project/.commentry/commentry.json"
+        end,
+        read = function()
+          return store_data
+        end,
+        write = function()
+          return true
+        end,
+      },
+      diffview = {
+        current_file_context = function()
+          return {
+            file_path = "file.lua",
+            line_number = 3,
+            line_side = "head",
+            bufnr = 1,
+            view = { git_root = "/tmp/project" },
+          }
+        end,
+        render_comment_markers = function(_, comments_to_render)
+          captured = comments_to_render
+        end,
+      },
+    })
+
+    vim.api.nvim_buf_line_count = function()
+      return 10
+    end
+
+    local ok = comments.load_for_view({ git_root = "/tmp/project" })
+    assert.is_true(ok)
+    comments.render_current_buffer()
+    assert.are.same(1, #captured)
+    assert.are.same("c1", captured[1].id)
+  end)
+
+  it("reconciles comments beyond buffer length and persists", function()
+    local persisted = nil
+    local store_data = {
+      project_root = "/tmp/project",
+      diff_id = "/tmp/project",
+      comments = {
+        {
+          id = "c1",
+          diff_id = "/tmp/project",
+          file_path = "file.lua",
+          line_number = 5,
+          line_side = "head",
+          body = "Out of range",
+        },
+      },
+      threads = {
+        {
+          id = "t-/tmp/project-file.lua|head|5",
+          diff_id = "/tmp/project",
+          file_path = "file.lua",
+          line_number = 5,
+          line_side = "head",
+          comment_ids = { "c1" },
+        },
+      },
+    }
+
+    local comments = load_with_stubs({
+      store = {
+        path_for_project = function()
+          return "/tmp/project/.commentry/commentry.json"
+        end,
+        read = function()
+          return store_data
+        end,
+        write = function(_, store)
+          persisted = store
+          return true
+        end,
+      },
+      diffview = {
+        current_file_context = function()
+          return {
+            file_path = "file.lua",
+            line_number = 1,
+            line_side = "head",
+            bufnr = 1,
+            view = { git_root = "/tmp/project" },
+          }
+        end,
+        render_comment_markers = function()
+          return
+        end,
+      },
+    })
+
+    vim.api.nvim_buf_line_count = function()
+      return 1
+    end
+
+    comments.load_for_view({ git_root = "/tmp/project" })
+    comments.render_current_buffer()
+
+    assert.is_table(persisted)
+    assert.are.same(0, #persisted.comments)
+    assert.are.same(0, #persisted.threads)
+  end)
+end)
