@@ -35,7 +35,8 @@
 - Line-accurate annotation model defined (file path + base/head line reference).
 - Local-first artifacts (text-based, diff-friendly, no network by default).
 - Neovim-native UX (buffers/extmarks/virtual text, keyboard-first).
-- Test coverage planned for data model and export behavior changes.
+- Test tasks planned for each user story; optional tests flagged for clarification.
+- Tests will be executed before tasks are marked complete.
 
 ## Project Structure
 

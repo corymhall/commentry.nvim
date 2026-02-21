@@ -3,9 +3,39 @@ local M = {}
 
 M.ns = vim.api.nvim_create_namespace("commentry")
 
+---@class commentry.Keymaps
+---@field add_comment string
+---@field edit_comment string
+---@field delete_comment string
+
+---@class commentry.StoreConfig
+---@field filename string
+
+---@class commentry.DiffviewConfig
+---@field enabled boolean
+---@field prefer string
+---@field auto_attach boolean
+
 ---@class commentry.Config
+---@field debug boolean
+---@field keymaps commentry.Keymaps
+---@field store commentry.StoreConfig
+---@field diffview commentry.DiffviewConfig
 local defaults = {
   debug = false,
+  keymaps = {
+    add_comment = "mc",
+    edit_comment = "me",
+    delete_comment = "md",
+  },
+  store = {
+    filename = "commentry.json",
+  },
+  diffview = {
+    enabled = true,
+    prefer = "diffview.nvim",
+    auto_attach = true,
+  },
 }
 
 local state_dir = vim.fn.stdpath("state") .. "/commentry"

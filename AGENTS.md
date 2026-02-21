@@ -41,3 +41,10 @@ The core structure, scripts, and tests are copied from that repo to serve as a s
 - Tests entry point: `tests/minit.lua`
 
 Keep this sheet handy when automating changes or onboarding new agents.
+
+## Active Technologies
+- Lua (Neovim 0.9+) + Neovim runtime, `mini.test` (tests), optional (001-diff-line-comments)
+- Local filesystem (project-scoped draft comment store) (001-diff-line-comments)
+
+## Recent Changes
+- 001-diff-line-comments: Added Lua (Neovim 0.9+) + Neovim runtime, `mini.test` (tests), optional

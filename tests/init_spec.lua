@@ -1,11 +1,8 @@
-local MiniTest = require("mini.test")
-local expect = MiniTest.expect
+---@module 'luassert'
 
-local T = MiniTest.new_set()
-
-T["setup"] = function()
-  local ok = pcall(require("commentry").setup, {})
-  expect.equality(ok, true)
-end
-
-return T
+describe("commentry.setup", function()
+  it("does not error", function()
+    local ok = pcall(require("commentry").setup, {})
+    assert.is_true(ok)
+  end)
+end)

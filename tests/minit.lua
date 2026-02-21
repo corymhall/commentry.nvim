@@ -15,6 +15,8 @@ require("lazy.minit").setup({
       dir = vim.uv.cwd(),
       opts = {},
     },
-    { "echasnovski/mini.nvim", version = false },
+    -- { "nvim-lua/plenary.nvim" },
   },
 })
+
+-- require("plenary.busted")

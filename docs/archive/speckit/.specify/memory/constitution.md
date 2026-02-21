@@ -1,13 +1,13 @@
 <!--
 Sync Impact Report
-- Version change: N/A -> 0.1.0
-- Modified principles: N/A (initial fill from template)
-- Added sections: Core Principles (filled), Scope Boundaries & Non-Goals, Intended Workflows & Terminology, Governance (filled)
+- Version change: 0.1.0 -> 0.2.0
+- Modified principles: V. Testable, Stable Core -> V. Testing Discipline & Stability
+- Added sections: None
 - Removed sections: None
 - Templates requiring updates:
   - ✅ .specify/templates/plan-template.md
   - ✅ .specify/templates/tasks-template.md
-  - ✅ .specify/templates/spec-template.md (reviewed, no changes needed)
+  - ✅ .specify/templates/spec-template.md
   - ✅ .specify/templates/checklist-template.md (reviewed, no changes needed)
   - ⚠ .specify/templates/commands/*.md (directory missing)
 - Follow-up TODOs:
@@ -37,10 +37,12 @@ The plugin MUST use Neovim-native primitives (buffers, extmarks, virtual text,
 quickfix, signs) and avoid external GUI dependencies. Interaction should be
 keyboard-first and fast in headless or offline environments.
 
-### V. Testable, Stable Core
-Changes to the data model, annotation mapping, or review export MUST include
-tests that validate behavior. Backward-incompatible changes require explicit
-migration guidance and a version bump.
+### V. Testing Discipline & Stability
+Each user story MUST include explicit test tasks in plans and tasks. Optional
+tests must be labeled as such and require explicit clarification before
+proceeding to avoid over-testing. Tests MUST be executed and pass before a task
+is marked complete. Backward-incompatible changes require explicit migration
+guidance and a version bump.
 
 ## Scope Boundaries & Non-Goals
 
@@ -76,7 +78,9 @@ migration guidance and a version bump.
   principles/sections, PATCH for clarifications).
 - All specs and implementation plans MUST include a constitution compliance
   check before design and again before implementation.
+- Plans and tasks MUST call out per-user-story tests and record test execution
+  before marking tasks complete.
 - If a change violates a principle, it MUST be rejected or accompanied by a
   documented exception and migration plan.
 
-**Version**: 0.1.0 | **Ratified**: TODO(RATIFICATION_DATE): not found in repo history | **Last Amended**: 2025-12-31
+**Version**: 0.2.0 | **Ratified**: 2026-01-02 | **Last Amended**: 2026-01-02

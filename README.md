@@ -9,9 +9,12 @@ Using lazy.nvim:
 ```lua
 {
   "commentry/commentry.nvim",
+  dependencies = { "sindrets/diffview.nvim" },
   opts = {},
 }
 ```
+
+`diffview.nvim` is required for the diff UI.
 
 ## Setup
 
@@ -23,10 +26,26 @@ require("commentry").setup({
 
 ## Commands
 
-`commentry.nvim` provides a `:Commentry` command. Subcommands can be registered
-by the plugin as features are added.
+`commentry.nvim` provides a `:Commentry` command with subcommands.
+
+- `:Commentry open` opens a diffview for local changes (shortcut).
+
+If you open diffview directly (for example `:DiffviewOpen main`), Commentry will
+auto-attach to diff buffers by default.
+
+You can disable auto-attach with:
+
+```lua
+require("commentry").setup({
+  diffview = {
+    auto_attach = false,
+  },
+})
+```
 
 ## Development
 
 - Run tests: `./scripts/test`
 - Generate docs (stub): `./scripts/docs`
+- Canonical feature/design plans: `docs/plans/`
+- Legacy Speckit archive (read-only history): `docs/archive/speckit/`
