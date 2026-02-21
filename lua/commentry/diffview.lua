@@ -262,13 +262,40 @@ function M.render_comment_markers(bufnr, comments)
 
   local counts = {}
   for _, comment in ipairs(comments) do
-    if type(comment) == "table" and type(comment.line_number) == "number" then
-      counts[comment.line_number] = (counts[comment.line_number] or 0) + 1
+    if type(comment) == "table" then
+      local line_start = comment.line_start or comment.line_number
+      if type(line_start) == "number" and line_start > 0 then
+        local key = line_start
+        if not counts[key] then
+          counts[key] = { total = 0, by_type = {} }
+        end
+        counts[key].total = counts[key].total + 1
+        local comment_type = comment.comment_type or "note"
+        counts[key].by_type[comment_type] = (counts[key].by_type[comment_type] or 0) + 1
+      end
     end
   end
 
-  for line_number, count in pairs(counts) do
-    local label = count == 1 and "[c]" or ("[c:%d]"):format(count)
+  for line_number, group in pairs(counts) do
+    local types = vim.tbl_keys(group.by_type)
+    table.sort(types)
+    local label = nil
+    if #types == 1 then
+      local only_type = types[1]
+      local count = group.by_type[only_type]
+      label = count == 1 and ("[%s]"):format(only_type) or ("[%s:%d]"):format(only_type, count)
+    else
+      local pieces = {}
+      for _, comment_type in ipairs(types) do
+        local count = group.by_type[comment_type]
+        if count == 1 then
+          pieces[#pieces + 1] = comment_type
+        else
+          pieces[#pieces + 1] = ("%s:%d"):format(comment_type, count)
+        end
+      end
+      label = ("[%s]"):format(table.concat(pieces, ","))
+    end
     local line = math.max(line_number - 1, 0)
     pcall(vim.api.nvim_buf_set_extmark, bufnr, Config.ns, line, 0, {
       virt_text = { { label, "Comment" } },
@@ -305,7 +332,8 @@ function M.render_hover_preview(bufnr, line_number, comments)
   for _, comment in ipairs(comments) do
     if type(comment) == "table" and type(comment.body) == "string" and comment.body ~= "" then
       local body = comment.body:gsub("\n", " ")
-      virt_lines[#virt_lines + 1] = { { ("[comment] %s"):format(body), "Comment" } }
+      local comment_type = comment.comment_type or "note"
+      virt_lines[#virt_lines + 1] = { { ("[%s] %s"):format(comment_type, body), "Comment" } }
     end
   end
   if #virt_lines == 0 then

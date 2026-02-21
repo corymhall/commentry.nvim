@@ -14,7 +14,12 @@ describe("commentry.comments helpers", function()
   it("builds and validates anchors", function()
     local anchor, err = Comments.build_anchor("file.lua", 5, "head")
     assert.is_nil(err)
-    assert.are.same({ file_path = "file.lua", line_number = 5, line_side = "head" }, anchor)
+    assert.are.same({ file_path = "file.lua", line_number = 5, line_start = 5, line_end = 5, line_side = "head" }, anchor)
+
+    local ranged, ranged_err = Comments.build_anchor("file.lua", 5, "head", 9)
+    assert.is_nil(ranged_err)
+    assert.are.same(5, ranged.line_start)
+    assert.are.same(9, ranged.line_end)
 
     local invalid, invalid_err = Comments.build_anchor("", 0, "side")
     assert.is_nil(invalid)
@@ -24,7 +29,7 @@ describe("commentry.comments helpers", function()
   it("builds anchor keys", function()
     local key, err = Comments.anchor_key(make_anchor())
     assert.is_nil(err)
-    assert.are.same("lua/commentry/comments.lua|head|12", key)
+    assert.are.same("lua/commentry/comments.lua|head|12-12", key)
 
     local invalid, invalid_err = Comments.anchor_key({})
     assert.is_nil(invalid)
@@ -34,7 +39,7 @@ describe("commentry.comments helpers", function()
   it("builds thread ids", function()
     local thread_id, err = Comments.thread_id("diff-1", make_anchor())
     assert.is_nil(err)
-    assert.are.same("t-diff-1-lua/commentry/comments.lua|head|12", thread_id)
+    assert.are.same("t-diff-1-lua/commentry/comments.lua|head|12-12", thread_id)
 
     local invalid, invalid_err = Comments.thread_id("", make_anchor())
     assert.is_nil(invalid)
@@ -94,6 +99,7 @@ describe("commentry.comments persistence", function()
   local original_win_set_cursor
   local original_ui_input
   local original_ui_select
+  local original_getpos
   local original_snacks
   local original_util
 
@@ -115,6 +121,7 @@ describe("commentry.comments persistence", function()
     original_win_set_cursor = vim.api.nvim_win_set_cursor
     original_ui_input = vim.ui.input
     original_ui_select = vim.ui.select
+    original_getpos = vim.fn.getpos
     original_snacks = package.loaded["snacks"]
     original_util = package.loaded["commentry.util"]
   end)
@@ -125,6 +132,7 @@ describe("commentry.comments persistence", function()
     vim.api.nvim_win_set_cursor = original_win_set_cursor
     vim.ui.input = original_ui_input
     vim.ui.select = original_ui_select
+    vim.fn.getpos = original_getpos
     package.loaded["snacks"] = original_snacks
     package.loaded["commentry.util"] = original_util
     package.loaded["commentry.store"] = original_store
@@ -802,6 +810,66 @@ describe("commentry.comments persistence", function()
     assert.are.same("note", writes[2].comments[1].comment_type)
     assert.are.same(0, #writes[3].comments)
     assert.are.same(0, #writes[3].threads)
+  end)
+
+  it("creates range comments from visual line selection", function()
+    local writes = {}
+    local context = {
+      file_path = "file.lua",
+      line_number = 4,
+      line_side = "head",
+      bufnr = 1,
+      view = { git_root = "/tmp/project" },
+    }
+
+    local comments = load_with_stubs({
+      store = {
+        path_for_project = function()
+          return "/tmp/project/.commentry/commentry.json"
+        end,
+        read = function()
+          return nil, "not_found"
+        end,
+        write = function(_, store)
+          writes[#writes + 1] = vim.deepcopy(store)
+          return true
+        end,
+      },
+      diffview = {
+        current_file_context = function()
+          return context
+        end,
+        render_comment_markers = function()
+          return
+        end,
+      },
+    })
+
+    vim.api.nvim_buf_line_count = function()
+      return 30
+    end
+    vim.api.nvim_buf_get_lines = function()
+      return { "line text" }
+    end
+    vim.fn.getpos = function(mark)
+      if mark == "'<" then
+        return { 1, 4, 1, 0 }
+      end
+      return { 1, 7, 1, 0 }
+    end
+    vim.ui.input = function(_, cb)
+      cb("Range note")
+    end
+
+    comments.add_range_comment()
+
+    assert.are.same(1, #writes)
+    assert.are.same(1, #writes[1].comments)
+    assert.are.same(4, writes[1].comments[1].line_start)
+    assert.are.same(7, writes[1].comments[1].line_end)
+    assert.are.same(1, #writes[1].threads)
+    assert.are.same(4, writes[1].threads[1].line_start)
+    assert.are.same(7, writes[1].threads[1].line_end)
   end)
 
   it("sets selected comment type for a line comment and persists", function()

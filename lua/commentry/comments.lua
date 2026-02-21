@@ -186,7 +186,47 @@ local function anchor_from_context(context)
   if type(context) ~= "table" then
     return nil, "diffview context is required"
   end
-  return M.build_anchor(context.file_path, context.line_number, context.line_side)
+  return M.build_anchor(context.file_path, context.line_number, context.line_side, context.line_end)
+end
+
+---@param item table
+---@return integer|nil
+local function line_start_for(item)
+  if type(item) ~= "table" then
+    return nil
+  end
+  local line_start = item.line_start or item.line_number
+  if type(line_start) ~= "number" then
+    return nil
+  end
+  return line_start
+end
+
+---@param item table
+---@return integer|nil
+local function line_end_for(item)
+  if type(item) ~= "table" then
+    return nil
+  end
+  local line_start = line_start_for(item)
+  local line_end = item.line_end or line_start
+  if type(line_end) ~= "number" then
+    return nil
+  end
+  return line_end
+end
+
+---@param item table
+---@param line_number integer
+---@return boolean
+local function contains_line(item, line_number)
+  local line_start = line_start_for(item)
+  local line_end = line_end_for(item)
+  return type(line_start) == "number"
+    and type(line_end) == "number"
+    and type(line_number) == "number"
+    and line_number >= line_start
+    and line_number <= line_end
 end
 
 ---@param diff_id string
@@ -220,7 +260,19 @@ local function find_thread(diff_id, anchor)
     return nil, err
   end
   local dstate = diff_state(diff_id)
-  return dstate.threads_by_id[thread_id], nil
+  local exact = dstate.threads_by_id[thread_id]
+  if exact then
+    return exact, nil
+  end
+
+  for _, thread in ipairs(dstate.threads) do
+    if thread.file_path == anchor.file_path
+      and thread.line_side == anchor.line_side
+      and contains_line(thread, anchor.line_start or anchor.line_number) then
+      return thread, nil
+    end
+  end
+  return nil, nil
 end
 
 ---@param dstate table
@@ -360,6 +412,12 @@ local function apply_store(diff_id, store)
         }
         dstate.threads_by_id[thread.id] = runtime_thread
         dstate.threads[#dstate.threads + 1] = runtime_thread
+        local canonical_id, canonical_err = M.thread_id(context_id, runtime_thread)
+        if canonical_id then
+          dstate.threads_by_id[canonical_id] = runtime_thread
+        elseif canonical_err then
+          Util.debug("Unable to build canonical thread id while loading", canonical_err)
+        end
       end
     end
   end
@@ -477,17 +535,18 @@ local function reconcile_for_context(diff_id, context)
   local hydrated = 0
   for _, comment in ipairs(dstate.comments) do
     local in_target = comment.file_path == context.file_path and comment.line_side == context.line_side
-    local in_range = comment.line_number >= 1 and comment.line_number <= line_count
+    local anchor_line = line_start_for(comment)
+    local in_range = type(anchor_line) == "number" and anchor_line >= 1 and anchor_line <= line_count
     local missing_line_content = in_target and in_range and type(comment.line_content) ~= "string"
     local mismatched = false
     if missing_line_content then
-      local current = line_text_at(context.bufnr, comment.line_number)
+      local current = line_text_at(context.bufnr, anchor_line)
       if type(current) == "string" then
         comment.line_content = current
         hydrated = hydrated + 1
       end
     elseif in_target and in_range then
-      local current = line_text_at(context.bufnr, comment.line_number)
+      local current = line_text_at(context.bufnr, anchor_line)
       mismatched = current ~= nil and current ~= comment.line_content
     end
     if comment.file_path == context.file_path
@@ -571,7 +630,7 @@ local function active_comments_for_line(context)
   for _, comment in ipairs(dstate.comments) do
     if comment.file_path == context.file_path
       and comment.line_side == context.line_side
-      and comment.line_number == context.line_number
+      and contains_line(comment, context.line_number)
       and comment.status ~= "unresolved" then
       comments[#comments + 1] = comment
     end
@@ -599,8 +658,10 @@ local function jumpable_comments_for_context(diff_id, context)
     if a.line_side ~= b.line_side then
       return a.line_side < b.line_side
     end
-    if a.line_number ~= b.line_number then
-      return a.line_number < b.line_number
+    local a_start = line_start_for(a) or 1
+    local b_start = line_start_for(b) or 1
+    if a_start ~= b_start then
+      return a_start < b_start
     end
     return (a.created_at or "") < (b.created_at or "")
   end)
@@ -615,7 +676,10 @@ local function list_entry_label(comment)
     preview = preview:sub(1, 69) .. "..."
   end
   local comment_type = comment.comment_type or "note"
-  return ("%s:%d [%s] [%s] %s"):format(comment.file_path, comment.line_number, comment.line_side, comment_type, preview)
+  local line_start = line_start_for(comment) or 1
+  local line_end = line_end_for(comment) or line_start
+  local line_label = line_start == line_end and tostring(line_start) or ("%d-%d"):format(line_start, line_end)
+  return ("%s:%s [%s] [%s] %s"):format(comment.file_path, line_label, comment.line_side, comment_type, preview)
 end
 
 ---@param comment commentry.DraftComment
@@ -631,6 +695,7 @@ local function jump_to_comment(comment)
     return false
   end
   local line = math.max(comment.line_number, 1)
+  line = math.max(line_start_for(comment) or line, 1)
   vim.api.nvim_win_set_cursor(0, { line, 0 })
   return true
 end
@@ -658,15 +723,22 @@ current_context = function()
 end
 
 ---@param file_path string
----@param line_number integer
+---@param line_start integer
+---@param line_end integer
 ---@param line_side string
 ---@return boolean, string|nil
-local function validate_anchor(file_path, line_number, line_side)
+local function validate_anchor(file_path, line_start, line_end, line_side)
   if type(file_path) ~= "string" or file_path == "" then
     return false, "file_path is required"
   end
-  if not is_integer(line_number) then
-    return false, "line_number must be a positive integer"
+  if not is_integer(line_start) then
+    return false, "line_start must be a positive integer"
+  end
+  if not is_integer(line_end) then
+    return false, "line_end must be a positive integer"
+  end
+  if line_end < line_start then
+    return false, "line_end must be >= line_start"
   end
   if line_side ~= "base" and line_side ~= "head" then
     return false, "line_side must be 'base' or 'head'"
@@ -684,20 +756,26 @@ end
 ---@class commentry.Anchor
 ---@field file_path string
 ---@field line_number integer
+---@field line_start integer
+---@field line_end integer
 ---@field line_side '"base"'|'"head"'
 
 ---@param file_path string
----@param line_number integer
+---@param line_start integer
 ---@param line_side '"base"'|'"head"'
+---@param line_end? integer
 ---@return commentry.Anchor|nil, string|nil
-function M.build_anchor(file_path, line_number, line_side)
-  local ok, err = validate_anchor(file_path, line_number, line_side)
+function M.build_anchor(file_path, line_start, line_side, line_end)
+  line_end = line_end or line_start
+  local ok, err = validate_anchor(file_path, line_start, line_end, line_side)
   if not ok then
     return nil, err
   end
   return {
     file_path = file_path,
-    line_number = line_number,
+    line_number = line_start,
+    line_start = line_start,
+    line_end = line_end,
     line_side = line_side,
   }, nil
 end
@@ -708,11 +786,13 @@ function M.anchor_key(anchor)
   if type(anchor) ~= "table" then
     return nil, "anchor is required"
   end
-  local ok, err = validate_anchor(anchor.file_path, anchor.line_number, anchor.line_side)
+  local line_start = anchor.line_start or anchor.line_number
+  local line_end = anchor.line_end or line_start
+  local ok, err = validate_anchor(anchor.file_path, line_start, line_end, anchor.line_side)
   if not ok then
     return nil, err
   end
-  return ("%s|%s|%d"):format(anchor.file_path, anchor.line_side, anchor.line_number), nil
+  return ("%s|%s|%d-%d"):format(anchor.file_path, anchor.line_side, line_start, line_end), nil
 end
 
 ---@param diff_id string
@@ -763,7 +843,9 @@ function M.new_comment(diff_id, anchor, body, opts)
   if type(body) ~= "string" or body == "" then
     return nil, "body is required"
   end
-  local ok, err = validate_anchor(anchor.file_path, anchor.line_number, anchor.line_side)
+  local line_start = anchor.line_start or anchor.line_number
+  local line_end = anchor.line_end or line_start
+  local ok, err = validate_anchor(anchor.file_path, line_start, line_end, anchor.line_side)
   if not ok then
     return nil, err
   end
@@ -777,9 +859,9 @@ function M.new_comment(diff_id, anchor, body, opts)
     id = opts.id or M.new_id("c"),
     diff_id = diff_id,
     file_path = anchor.file_path,
-    line_number = anchor.line_number,
-    line_start = anchor.line_number,
-    line_end = anchor.line_number,
+    line_number = line_start,
+    line_start = line_start,
+    line_end = line_end,
     line_side = anchor.line_side,
     comment_type = comment_type,
     body = body,
@@ -830,6 +912,8 @@ end
 ---@field diff_id string
 ---@field file_path string
 ---@field line_number integer
+---@field line_start integer
+---@field line_end integer
 ---@field line_side '"base"'|'"head"'
 ---@field comment_ids string[]
 
@@ -841,7 +925,9 @@ function M.new_thread(diff_id, anchor, comment_ids)
   if type(diff_id) ~= "string" or diff_id == "" then
     return nil, "diff_id is required"
   end
-  local ok, err = validate_anchor(anchor.file_path, anchor.line_number, anchor.line_side)
+  local line_start = anchor.line_start or anchor.line_number
+  local line_end = anchor.line_end or line_start
+  local ok, err = validate_anchor(anchor.file_path, line_start, line_end, anchor.line_side)
   if not ok then
     return nil, err
   end
@@ -853,7 +939,9 @@ function M.new_thread(diff_id, anchor, comment_ids)
     id = id,
     diff_id = diff_id,
     file_path = anchor.file_path,
-    line_number = anchor.line_number,
+    line_number = line_start,
+    line_start = line_start,
+    line_end = line_end,
     line_side = anchor.line_side,
     comment_ids = comment_ids or {},
   },
@@ -996,6 +1084,29 @@ local function select_comment_type(diff_id, prompt, initial_type, cb)
   end)
 end
 
+---@param context table
+---@return integer, integer
+local function visual_line_range(context)
+  local start_pos = vim.fn.getpos("'<")
+  local end_pos = vim.fn.getpos("'>")
+  local start_line = tonumber(start_pos[2]) or 0
+  local end_line = tonumber(end_pos[2]) or 0
+  if start_line < 1 or end_line < 1 then
+    local line = context.line_number
+    return line, line
+  end
+  local start_buf = tonumber(start_pos[1]) or 0
+  local end_buf = tonumber(end_pos[1]) or 0
+  if (start_buf > 0 and start_buf ~= context.bufnr) or (end_buf > 0 and end_buf ~= context.bufnr) then
+    local line = context.line_number
+    return line, line
+  end
+  if start_line > end_line then
+    start_line, end_line = end_line, start_line
+  end
+  return start_line, end_line
+end
+
 function M.add_comment()
   local context, err = current_context()
   if not context then
@@ -1030,6 +1141,48 @@ function M.add_comment()
     mark_dirty(diff_id)
     render_for_context(context)
     persist_for_view(diff_id, context.view, "Failed to persist comment")
+  end)
+end
+
+function M.add_range_comment()
+  local context, err = current_context()
+  if not context then
+    Util.error(err or "No diffview context")
+    return
+  end
+
+  local line_start, line_end = visual_line_range(context)
+  local anchor, anchor_err = M.build_anchor(context.file_path, line_start, context.line_side, line_end)
+  if not anchor then
+    Util.error(anchor_err or "Invalid range anchor")
+    return
+  end
+
+  local diff_id = diff_id_for_view(context.view)
+  local active_type = selected_comment_type(diff_id)
+  local prompt = ("Add %s range comment (%d-%d): "):format(active_type, line_start, line_end)
+
+  vim.ui.input({ prompt = prompt }, function(input)
+    if not input or input == "" then
+      return
+    end
+    local comment, comment_err = M.new_comment(diff_id, anchor, input, { comment_type = active_type })
+    if not comment then
+      Util.error(comment_err or "Failed to create range comment")
+      return
+    end
+    comment.line_content = line_text_at(context.bufnr, line_start)
+    local dstate = diff_state(diff_id)
+    upsert_comment(dstate, comment)
+    local thread, thread_err = ensure_thread(diff_id, anchor)
+    if not thread then
+      Util.error(thread_err or "Failed to create thread")
+      return
+    end
+    thread.comment_ids[#thread.comment_ids + 1] = comment.id
+    mark_dirty(diff_id)
+    render_for_context(context)
+    persist_for_view(diff_id, context.view, "Failed to persist range comment")
   end)
 end
 

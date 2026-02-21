@@ -77,11 +77,38 @@ describe("commentry.diffview hover preview", function()
 
     assert.are.same(1, extmark_calls)
     assert.is_table(extmark_opts.virt_lines)
-    assert.are.same("[comment] one", extmark_opts.virt_lines[1][1][1])
-    assert.are.same("[comment] two lines", extmark_opts.virt_lines[2][1][1])
+    assert.are.same("[note] one", extmark_opts.virt_lines[1][1][1])
+    assert.are.same("[note] two lines", extmark_opts.virt_lines[2][1][1])
 
     Diffview.clear_hover_preview(1)
     assert.is_true(clear_calls >= 2)
+  end)
+
+  it("aggregates marker labels by range start and comment type counts", function()
+    local marker_calls = {}
+    vim.api.nvim_buf_is_valid = function()
+      return true
+    end
+    vim.api.nvim_buf_clear_namespace = function()
+      return
+    end
+    vim.api.nvim_buf_set_extmark = function(_, _, line, _, opts)
+      marker_calls[#marker_calls + 1] = { line = line, opts = opts }
+      return 1
+    end
+
+    package.loaded["commentry.diffview"] = nil
+    local Diffview = require("commentry.diffview")
+
+    Diffview.render_comment_markers(1, {
+      { line_start = 4, line_end = 6, comment_type = "note" },
+      { line_start = 4, line_end = 6, comment_type = "note" },
+      { line_start = 4, line_end = 6, comment_type = "issue" },
+    })
+
+    assert.are.same(1, #marker_calls)
+    assert.are.same(3, marker_calls[1].line)
+    assert.are.same("[issue,note:2]", marker_calls[1].opts.virt_text[1][1])
   end)
 
   it("shows preview only for current commented line and clears otherwise", function()
@@ -103,7 +130,10 @@ describe("commentry.diffview hover preview", function()
                 diff_id = "/tmp/project",
                 file_path = "file.lua",
                 line_number = 7,
+                line_start = 7,
+                line_end = 9,
                 line_side = "head",
+                comment_type = "issue",
                 body = "hover me",
                 line_content = "line seven",
               },
@@ -114,6 +144,8 @@ describe("commentry.diffview hover preview", function()
                 diff_id = "/tmp/project",
                 file_path = "file.lua",
                 line_number = 7,
+                line_start = 7,
+                line_end = 9,
                 line_side = "head",
                 comment_ids = { "c1" },
               },
@@ -158,6 +190,22 @@ describe("commentry.diffview hover preview", function()
       return {
         file_path = "file.lua",
         line_number = 8,
+        line_side = "head",
+        bufnr = 1,
+        view = { git_root = "/tmp/project" },
+      }
+    end
+
+    local shown_in_range = comments.refresh_hover_preview()
+    assert.is_true(shown_in_range)
+    assert.is_table(rendered)
+    assert.are.same("c1", rendered.line_comments[1].id)
+
+    rendered = nil
+    package.loaded["commentry.diffview"].current_file_context = function()
+      return {
+        file_path = "file.lua",
+        line_number = 10,
         line_side = "head",
         bufnr = 1,
         view = { git_root = "/tmp/project" },

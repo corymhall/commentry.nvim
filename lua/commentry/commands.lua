@@ -59,6 +59,11 @@ local function maybe_attach_keymaps(bufnr)
     Comments.add_comment()
   end, { buffer = bufnr, desc = "Commentry add comment" })
 
+  local add_range_key = Config.keymaps.add_range_comment or Config.keymaps.add_comment
+  vim.keymap.set("x", add_range_key, function()
+    Comments.add_range_comment()
+  end, { buffer = bufnr, desc = "Commentry add range comment" })
+
   vim.keymap.set("n", Config.keymaps.edit_comment, function()
     Comments.edit_comment()
   end, { buffer = bufnr, desc = "Commentry edit comment" })
@@ -110,6 +115,10 @@ function M.setup()
 
   M.register("list-comments", function()
     Comments.list_comments()
+  end)
+
+  M.register("add-range-comment", function()
+    Comments.add_range_comment()
   end)
 
   M.register("set-comment-type", function()

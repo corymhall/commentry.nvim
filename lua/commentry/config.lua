@@ -5,6 +5,7 @@ M.ns = vim.api.nvim_create_namespace("commentry")
 
 ---@class commentry.Keymaps
 ---@field add_comment string
+---@field add_range_comment string
 ---@field edit_comment string
 ---@field delete_comment string
 ---@field set_comment_type string
@@ -28,6 +29,7 @@ local defaults = {
   debug = false,
   keymaps = {
     add_comment = "mc",
+    add_range_comment = "mc",
     edit_comment = "me",
     delete_comment = "md",
     set_comment_type = "mt",
