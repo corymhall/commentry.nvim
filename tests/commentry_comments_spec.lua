@@ -74,6 +74,8 @@ describe("commentry.comments persistence", function()
   local original_diffview
   local original_comments
   local original_buf_line_count
+  local original_ui_input
+  local original_ui_select
 
   local function load_with_stubs(stubs)
     original_store = package.loaded["commentry.store"]
@@ -89,10 +91,14 @@ describe("commentry.comments persistence", function()
 
   before_each(function()
     original_buf_line_count = vim.api.nvim_buf_line_count
+    original_ui_input = vim.ui.input
+    original_ui_select = vim.ui.select
   end)
 
   after_each(function()
     vim.api.nvim_buf_line_count = original_buf_line_count
+    vim.ui.input = original_ui_input
+    vim.ui.select = original_ui_select
     package.loaded["commentry.store"] = original_store
     package.loaded["commentry.diffview"] = original_diffview
     package.loaded["commentry.comments"] = original_comments
@@ -228,7 +234,104 @@ describe("commentry.comments persistence", function()
     comments.render_current_buffer()
 
     assert.is_table(persisted)
-    assert.are.same(0, #persisted.comments)
+    assert.are.same(1, #persisted.comments)
+    assert.are.same("unresolved", persisted.comments[1].status)
     assert.are.same(0, #persisted.threads)
+  end)
+
+  it("resolves project root when view git_root points at .git", function()
+    local root = vim.fn.tempname()
+    vim.fn.mkdir(root .. "/.git", "p")
+    local expected_root = vim.fs.normalize(vim.uv.fs_realpath(root) or root)
+    local received_root = nil
+    local comments = load_with_stubs({
+      store = {
+        path_for_project = function(root)
+          received_root = root
+          return "/tmp/project/.commentry/commentry.json"
+        end,
+        read = function()
+          return {
+            project_root = "/tmp/project",
+            diff_id = "/tmp/project",
+            comments = {},
+            threads = {},
+          }
+        end,
+        write = function()
+          return true
+        end,
+      },
+      diffview = {
+        current_file_context = function()
+          return nil, "unused"
+        end,
+        render_comment_markers = function()
+          return
+        end,
+      },
+    })
+
+    local ok = comments.load_for_view({ git_root = root .. "/.git" })
+    assert.is_true(ok)
+    assert.are.same(expected_root, received_root)
+  end)
+
+  it("persists add/edit/delete lifecycle for a diffview context", function()
+    local writes = {}
+    local user_inputs = { "First", "Edited body" }
+    local context = {
+      file_path = "file.lua",
+      line_number = 3,
+      line_side = "head",
+      bufnr = 1,
+      view = { git_root = "/tmp/project" },
+    }
+
+    local comments = load_with_stubs({
+      store = {
+        path_for_project = function()
+          return "/tmp/project/.commentry/commentry.json"
+        end,
+        read = function()
+          return nil, "not_found"
+        end,
+        write = function(_, store)
+          writes[#writes + 1] = vim.deepcopy(store)
+          return true
+        end,
+      },
+      diffview = {
+        current_file_context = function()
+          return context
+        end,
+        render_comment_markers = function()
+          return
+        end,
+      },
+    })
+
+    vim.api.nvim_buf_line_count = function()
+      return 30
+    end
+    vim.ui.input = function(_, cb)
+      local next_value = table.remove(user_inputs, 1)
+      cb(next_value)
+    end
+    vim.ui.select = function(items, _, cb)
+      cb(items[1])
+    end
+
+    comments.add_comment()
+    comments.edit_comment()
+    comments.delete_comment()
+
+    assert.are.same(3, #writes)
+    assert.are.same(1, #writes[1].comments)
+    assert.are.same("First", writes[1].comments[1].body)
+    assert.are.same(1, #writes[2].comments)
+    assert.are.same("Edited body", writes[2].comments[1].body)
+    assert.are.same(0, #writes[3].comments)
+    assert.are.same(0, #writes[3].threads)
   end)
 end)

@@ -40,7 +40,8 @@ describe("commentry.store", function()
     local root = make_temp_dir()
     local path, err = Store.path_for_project(root)
     assert.is_nil(err)
-    local expected = vim.fs.joinpath(vim.fs.normalize(root), ".commentry", "commentry.json")
+    local resolved_root = vim.uv.fs_realpath(vim.fs.normalize(root)) or vim.fs.normalize(root)
+    local expected = vim.fs.joinpath(vim.fs.normalize(resolved_root), ".commentry", "commentry.json")
     assert.are.same(expected, path)
   end)
 
@@ -74,6 +75,24 @@ describe("commentry.store", function()
     local data, read_err = Store.read(path)
     assert.is_nil(read_err)
     assert.are.same(store, data)
+  end)
+
+  it("treats non-zero writefile return as write failure", function()
+    local root = make_temp_dir()
+    local path = Store.path_for_project(root)
+    local store = sample_store(root)
+    local original_writefile = vim.fn.writefile
+
+    vim.fn.writefile = function()
+      return 1
+    end
+
+    local ok, err = Store.write(path, store)
+
+    vim.fn.writefile = original_writefile
+
+    assert.is_false(ok)
+    assert.are.same("write_failed", err)
   end)
 
   it("returns not_found for missing store", function()

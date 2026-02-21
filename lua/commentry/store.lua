@@ -145,7 +145,9 @@ function M.path_for_project(project_root, filename)
     return nil, "project_root is required"
   end
 
-  local stat = uv.fs_stat(project_root)
+  local root = vim.fs.normalize(project_root)
+  local resolved = uv.fs_realpath(root) or root
+  local stat = uv.fs_stat(resolved)
   if not stat or stat.type ~= "directory" then
     return nil, "project_root is not a directory"
   end
@@ -155,8 +157,7 @@ function M.path_for_project(project_root, filename)
     return nil, "filename is required"
   end
 
-  local root = vim.fs.normalize(project_root)
-  local base = vim.fs.joinpath(root, ".commentry")
+  local base = vim.fs.joinpath(resolved, ".commentry")
   return vim.fs.joinpath(base, name), nil
 end
 
@@ -209,8 +210,8 @@ function M.write(path, store)
     vim.fn.mkdir(parent, "p")
   end
 
-  local wrote = pcall(vim.fn.writefile, { encoded }, path)
-  if not wrote then
+  local wrote, result = pcall(vim.fn.writefile, { encoded }, path)
+  if not wrote or result ~= 0 then
     return false, "write_failed"
   end
 

@@ -66,6 +66,19 @@ local function mark_view_buffers()
   end
 end
 
+local function sync_comments_for_view()
+  local ok, comments = pcall(require, "commentry.comments")
+  if not ok then
+    return
+  end
+  if type(comments.load_current_view) == "function" then
+    comments.load_current_view()
+  end
+  if type(comments.render_current_buffer) == "function" then
+    comments.render_current_buffer()
+  end
+end
+
 ---@return boolean
 function M.is_available()
   return pcall(require, "diffview")
@@ -97,11 +110,7 @@ function M.open(args)
   diffview.open(args or {})
   vim.schedule(function()
     mark_view_buffers()
-    local ok, comments = pcall(require, "commentry.comments")
-    if ok and type(comments.load_current_view) == "function" then
-      comments.load_current_view()
-      comments.render_current_buffer()
-    end
+    sync_comments_for_view()
   end)
   return true, nil
 end
@@ -125,6 +134,7 @@ function M.setup()
     pattern = "DiffviewViewPostLayout",
     callback = function()
       mark_view_buffers()
+      vim.schedule(sync_comments_for_view)
     end,
   })
   vim.api.nvim_create_autocmd("User", {
@@ -132,6 +142,7 @@ function M.setup()
     pattern = "DiffviewDiffBufWinEnter",
     callback = function()
       M.mark_current_buffer()
+      vim.schedule(sync_comments_for_view)
     end,
   })
 end
