@@ -67,6 +67,10 @@ local function maybe_attach_keymaps(bufnr)
     Comments.delete_comment()
   end, { buffer = bufnr, desc = "Commentry delete comment" })
 
+  vim.keymap.set("n", Config.keymaps.set_comment_type, function()
+    Comments.set_comment_type()
+  end, { buffer = bufnr, desc = "Commentry set comment type" })
+
   Comments.render_current_buffer()
 end
 
@@ -106,6 +110,10 @@ function M.setup()
 
   M.register("list-comments", function()
     Comments.list_comments()
+  end)
+
+  M.register("set-comment-type", function()
+    Comments.set_comment_type()
   end)
 
   for _, module_name in ipairs(feature_modules) do

@@ -48,14 +48,30 @@ describe("commentry.comments helpers", function()
     assert.are.same("diff-1", comment.diff_id)
     assert.are.same(anchor.file_path, comment.file_path)
     assert.are.same(anchor.line_number, comment.line_number)
+    assert.are.same(anchor.line_number, comment.line_start)
+    assert.are.same(anchor.line_number, comment.line_end)
     assert.are.same(anchor.line_side, comment.line_side)
+    assert.are.same("note", comment.comment_type)
     assert.are.same("Hello", comment.body)
     assert.is_true(type(comment.id) == "string" and comment.id ~= "")
 
     local updated, update_err = Comments.update_body(comment, "Updated")
     assert.is_nil(update_err)
     assert.are.same("Updated", updated.body)
+    assert.are.same("note", updated.comment_type)
     assert.is_true(type(updated.updated_at) == "string" and updated.updated_at ~= "")
+  end)
+
+  it("updates draft comment type and validates choices", function()
+    local anchor = make_anchor()
+    local comment = assert(Comments.new_comment("diff-1", anchor, "Hello"))
+    local updated, err = Comments.update_type(comment, "issue")
+    assert.is_nil(err)
+    assert.are.same("issue", updated.comment_type)
+
+    local invalid, invalid_err = Comments.update_type(comment, "feedback")
+    assert.is_nil(invalid)
+    assert.is_true(invalid_err:find("comment_type", 1, true) ~= nil)
   end)
 
   it("creates threads with default comment ids", function()
@@ -780,10 +796,71 @@ describe("commentry.comments persistence", function()
     assert.are.same(3, #writes)
     assert.are.same(1, #writes[1].comments)
     assert.are.same("First", writes[1].comments[1].body)
+    assert.are.same("note", writes[1].comments[1].comment_type)
     assert.are.same(1, #writes[2].comments)
     assert.are.same("Edited body", writes[2].comments[1].body)
+    assert.are.same("note", writes[2].comments[1].comment_type)
     assert.are.same(0, #writes[3].comments)
     assert.are.same(0, #writes[3].threads)
+  end)
+
+  it("sets selected comment type for a line comment and persists", function()
+    local writes = {}
+    local user_inputs = { "First" }
+    local context = {
+      file_path = "file.lua",
+      line_number = 3,
+      line_side = "head",
+      bufnr = 1,
+      view = { git_root = "/tmp/project" },
+    }
+
+    local comments = load_with_stubs({
+      store = {
+        path_for_project = function()
+          return "/tmp/project/.commentry/commentry.json"
+        end,
+        read = function()
+          return nil, "not_found"
+        end,
+        write = function(_, store)
+          writes[#writes + 1] = vim.deepcopy(store)
+          return true
+        end,
+      },
+      diffview = {
+        current_file_context = function()
+          return context
+        end,
+        render_comment_markers = function()
+          return
+        end,
+      },
+    })
+
+    vim.api.nvim_buf_line_count = function()
+      return 30
+    end
+    vim.api.nvim_buf_get_lines = function()
+      return { "line text" }
+    end
+    vim.ui.input = function(_, cb)
+      cb(table.remove(user_inputs, 1))
+    end
+    vim.ui.select = function(items, opts, cb)
+      if opts.prompt == "Set comment type" then
+        cb("issue")
+        return
+      end
+      cb(items[1])
+    end
+
+    comments.add_comment()
+    comments.set_comment_type()
+
+    assert.are.same(2, #writes)
+    assert.are.same("note", writes[1].comments[1].comment_type)
+    assert.are.same("issue", writes[2].comments[1].comment_type)
   end)
 
   it("lists draft comments and jumps to selected entry line", function()
@@ -893,6 +970,7 @@ describe("commentry.comments persistence", function()
     local label = captured_opts.format_item(captured_items[1])
     assert.is_true(label:find("file.lua:4", 1, true) ~= nil)
     assert.is_true(label:find("[head]", 1, true) ~= nil)
+    assert.is_true(label:find("[note]", 1, true) ~= nil)
     assert.is_true(label:find("first draft", 1, true) ~= nil)
     assert.are.same({ 4, 0 }, moved_cursor)
   end)

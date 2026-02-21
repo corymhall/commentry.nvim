@@ -1,4 +1,5 @@
 local Diffview = require("commentry.diffview")
+local Config = require("commentry.config")
 local Store = require("commentry.store")
 local Util = require("commentry.util")
 
@@ -13,6 +14,7 @@ local state = {
 local current_context
 
 local ROOT_CANDIDATE_KEYS = { "git_root", "toplevel", "root", "cwd", "path" }
+local DEFAULT_COMMENT_TYPES = { "note", "suggestion", "issue", "praise" }
 
 ---@param root string
 ---@return string|nil
@@ -52,6 +54,47 @@ local function timestamp()
   return os.date("!%Y-%m-%dT%H:%M:%SZ")
 end
 
+---@return string[]
+local function comment_type_choices()
+  if type(Config.comment_types) ~= "table" or #Config.comment_types == 0 then
+    return vim.deepcopy(DEFAULT_COMMENT_TYPES)
+  end
+  local seen = {}
+  local choices = {}
+  for _, item in ipairs(Config.comment_types) do
+    if type(item) == "string" and item ~= "" and not seen[item] then
+      seen[item] = true
+      choices[#choices + 1] = item
+    end
+  end
+  if #choices == 0 then
+    return vim.deepcopy(DEFAULT_COMMENT_TYPES)
+  end
+  return choices
+end
+
+---@param comment_type string
+---@return boolean
+local function is_valid_comment_type(comment_type)
+  if type(comment_type) ~= "string" or comment_type == "" then
+    return false
+  end
+  for _, candidate in ipairs(comment_type_choices()) do
+    if candidate == comment_type then
+      return true
+    end
+  end
+  return false
+end
+
+---@return string
+local function default_comment_type()
+  if is_valid_comment_type(Config.default_comment_type) then
+    return Config.default_comment_type
+  end
+  return comment_type_choices()[1]
+end
+
 ---@param diff_id string
 ---@return table
 local function diff_state(diff_id)
@@ -63,9 +106,22 @@ local function diff_state(diff_id)
       comments_by_id = {},
       threads_by_id = {},
       dirty = false,
+      selected_comment_type = nil,
     }
   end
   return state.diffs[diff_id]
+end
+
+---@param diff_id string
+---@return string
+local function selected_comment_type(diff_id)
+  local dstate = diff_state(diff_id)
+  if is_valid_comment_type(dstate.selected_comment_type) then
+    return dstate.selected_comment_type
+  end
+  local fallback = default_comment_type()
+  dstate.selected_comment_type = fallback
+  return fallback
 end
 
 ---@param diff_id string
@@ -478,7 +534,7 @@ local function select_comment(comments, prompt, cb)
       if #preview > 60 then
         preview = preview:sub(1, 57) .. "..."
       end
-      return preview
+      return ("[%s] %s"):format(item.comment_type or "note", preview)
     end,
   }, function(choice)
     if choice then
@@ -558,7 +614,8 @@ local function list_entry_label(comment)
   if #preview > 72 then
     preview = preview:sub(1, 69) .. "..."
   end
-  return ("%s:%d [%s] %s"):format(comment.file_path, comment.line_number, comment.line_side, preview)
+  local comment_type = comment.comment_type or "note"
+  return ("%s:%d [%s] [%s] %s"):format(comment.file_path, comment.line_number, comment.line_side, comment_type, preview)
 end
 
 ---@param comment commentry.DraftComment
@@ -677,7 +734,10 @@ end
 ---@field diff_id string
 ---@field file_path string
 ---@field line_number integer
+---@field line_start integer
+---@field line_end integer
 ---@field line_side '"base"'|'"head"'
+---@field comment_type string
 ---@field body string
 ---@field created_at string
 ---@field updated_at string
@@ -688,6 +748,7 @@ end
 ---@field created_at? string
 ---@field updated_at? string
 ---@field status? string
+---@field comment_type? string
 
 ---@param diff_id string
 ---@param anchor commentry.Anchor
@@ -706,6 +767,10 @@ function M.new_comment(diff_id, anchor, body, opts)
   if not ok then
     return nil, err
   end
+  local comment_type = opts.comment_type or default_comment_type()
+  if not is_valid_comment_type(comment_type) then
+    return nil, ("comment_type must be one of: %s"):format(table.concat(comment_type_choices(), ", "))
+  end
   local created_at = opts.created_at or timestamp()
   local updated_at = opts.updated_at or created_at
   return {
@@ -713,7 +778,10 @@ function M.new_comment(diff_id, anchor, body, opts)
     diff_id = diff_id,
     file_path = anchor.file_path,
     line_number = anchor.line_number,
+    line_start = anchor.line_number,
+    line_end = anchor.line_number,
     line_side = anchor.line_side,
+    comment_type = comment_type,
     body = body,
     created_at = created_at,
     updated_at = updated_at,
@@ -732,8 +800,27 @@ function M.update_body(comment, body)
   if type(body) ~= "string" or body == "" then
     return nil, "body is required"
   end
+  if not is_valid_comment_type(comment.comment_type) then
+    return nil, ("comment_type must be one of: %s"):format(table.concat(comment_type_choices(), ", "))
+  end
   local updated = vim.deepcopy(comment)
   updated.body = body
+  updated.updated_at = timestamp()
+  return updated, nil
+end
+
+---@param comment commentry.DraftComment
+---@param comment_type string
+---@return commentry.DraftComment|nil, string|nil
+function M.update_type(comment, comment_type)
+  if type(comment) ~= "table" then
+    return nil, "comment is required"
+  end
+  if not is_valid_comment_type(comment_type) then
+    return nil, ("comment_type must be one of: %s"):format(table.concat(comment_type_choices(), ", "))
+  end
+  local updated = vim.deepcopy(comment)
+  updated.comment_type = comment_type
   updated.updated_at = timestamp()
   return updated, nil
 end
@@ -874,6 +961,41 @@ function M.load_current_view()
   return M.load_for_view(view)
 end
 
+---@param diff_id string
+---@param prompt string
+---@param initial_type? string
+---@param cb fun(comment_type: string)
+local function select_comment_type(diff_id, prompt, initial_type, cb)
+  local choices = comment_type_choices()
+  local selected = initial_type
+  if not is_valid_comment_type(selected) then
+    selected = selected_comment_type(diff_id)
+  end
+  table.sort(choices, function(a, b)
+    if a == selected then
+      return true
+    end
+    if b == selected then
+      return false
+    end
+    return a < b
+  end)
+
+  vim.ui.select(choices, {
+    prompt = prompt,
+    format_item = function(item)
+      if item == selected then
+        return item .. " (default)"
+      end
+      return item
+    end,
+  }, function(choice)
+    if type(choice) == "string" and choice ~= "" then
+      cb(choice)
+    end
+  end)
+end
+
 function M.add_comment()
   local context, err = current_context()
   if not context then
@@ -885,12 +1007,13 @@ function M.add_comment()
     Util.error(anchor_err or "Invalid line anchor")
     return
   end
-  vim.ui.input({ prompt = "Add comment: " }, function(input)
+  local diff_id = diff_id_for_view(context.view)
+  local active_type = selected_comment_type(diff_id)
+  vim.ui.input({ prompt = ("Add %s comment: "):format(active_type) }, function(input)
     if not input or input == "" then
       return
     end
-    local diff_id = diff_id_for_view(context.view)
-    local comment, comment_err = M.new_comment(diff_id, anchor, input)
+    local comment, comment_err = M.new_comment(diff_id, anchor, input, { comment_type = active_type })
     if not comment then
       Util.error(comment_err or "Failed to create comment")
       return
@@ -990,6 +1113,54 @@ function M.delete_comment()
     mark_dirty(diff_id)
     render_for_context(context)
     persist_for_view(diff_id, context.view, "Failed to persist comment")
+  end)
+end
+
+function M.set_comment_type()
+  local context, err = current_context()
+  if not context then
+    Util.error(err or "No diffview context")
+    return
+  end
+
+  local anchor, anchor_err = anchor_from_context(context)
+  if not anchor then
+    Util.error(anchor_err or "Invalid line anchor")
+    return
+  end
+
+  local diff_id = diff_id_for_view(context.view)
+  local dstate = diff_state(diff_id)
+  local thread = find_thread(diff_id, anchor)
+
+  if not thread then
+    select_comment_type(diff_id, "Default comment type", selected_comment_type(diff_id), function(choice)
+      dstate.selected_comment_type = choice
+      Util.info(("Default comment type set to %s"):format(choice))
+    end)
+    return
+  end
+
+  local comments = comments_for_thread(dstate, thread)
+  if #comments == 0 then
+    Util.info("No draft comments for this line")
+    return
+  end
+
+  select_comment(comments, "Set comment type", function(target)
+    select_comment_type(diff_id, "Set comment type", target.comment_type, function(choice)
+      local updated, update_err = M.update_type(target, choice)
+      if not updated then
+        Util.error(update_err or "Failed to update comment type")
+        return
+      end
+      updated.status = nil
+      dstate.selected_comment_type = choice
+      upsert_comment(dstate, updated)
+      mark_dirty(diff_id)
+      render_for_context(context)
+      persist_for_view(diff_id, context.view, "Failed to persist comment")
+    end)
   end)
 end
 
