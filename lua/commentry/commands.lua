@@ -104,6 +104,10 @@ function M.setup()
     Util.error(err or "Failed to open diff view")
   end)
 
+  M.register("list-comments", function()
+    Comments.list_comments()
+  end)
+
   for _, module_name in ipairs(feature_modules) do
     local ok, mod = pcall(require, module_name)
     if ok and type(mod.register_commands) == "function" then

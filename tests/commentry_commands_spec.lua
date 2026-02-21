@@ -68,3 +68,59 @@ describe("commentry lifecycle hooks", function()
     assert.are.same(2, calls.render)
   end)
 end)
+
+describe("commentry command routing", function()
+  local original_comments
+  local original_config
+  local original_diffview
+  local original_commands
+  local original_create_autocmd
+
+  before_each(function()
+    original_comments = package.loaded["commentry.comments"]
+    original_config = package.loaded["commentry.config"]
+    original_diffview = package.loaded["commentry.diffview"]
+    original_commands = package.loaded["commentry.commands"]
+    original_create_autocmd = vim.api.nvim_create_autocmd
+  end)
+
+  after_each(function()
+    package.loaded["commentry.comments"] = original_comments
+    package.loaded["commentry.config"] = original_config
+    package.loaded["commentry.diffview"] = original_diffview
+    package.loaded["commentry.commands"] = original_commands
+    vim.api.nvim_create_autocmd = original_create_autocmd
+  end)
+
+  it("routes :Commentry list-comments to comments.list_comments", function()
+    local called = 0
+    vim.api.nvim_create_autocmd = function()
+      return 1
+    end
+
+    package.loaded["commentry.comments"] = {
+      list_comments = function()
+        called = called + 1
+      end,
+      render_current_buffer = function()
+        return
+      end,
+    }
+    package.loaded["commentry.config"] = {
+      augroup = 1,
+      diffview = { enabled = true },
+      keymaps = { add_comment = "mc", edit_comment = "me", delete_comment = "md" },
+    }
+    package.loaded["commentry.diffview"] = {
+      open = function()
+        return true
+      end,
+    }
+
+    package.loaded["commentry.commands"] = nil
+    local Commands = require("commentry.commands")
+    Commands.cmd({ args = "list-comments" })
+
+    assert.are.same(1, called)
+  end)
+end)

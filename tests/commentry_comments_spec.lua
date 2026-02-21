@@ -75,8 +75,11 @@ describe("commentry.comments persistence", function()
   local original_comments
   local original_buf_line_count
   local original_buf_get_lines
+  local original_win_set_cursor
   local original_ui_input
   local original_ui_select
+  local original_snacks
+  local original_util
 
   local function load_with_stubs(stubs)
     original_store = package.loaded["commentry.store"]
@@ -93,15 +96,21 @@ describe("commentry.comments persistence", function()
   before_each(function()
     original_buf_line_count = vim.api.nvim_buf_line_count
     original_buf_get_lines = vim.api.nvim_buf_get_lines
+    original_win_set_cursor = vim.api.nvim_win_set_cursor
     original_ui_input = vim.ui.input
     original_ui_select = vim.ui.select
+    original_snacks = package.loaded["snacks"]
+    original_util = package.loaded["commentry.util"]
   end)
 
   after_each(function()
     vim.api.nvim_buf_line_count = original_buf_line_count
     vim.api.nvim_buf_get_lines = original_buf_get_lines
+    vim.api.nvim_win_set_cursor = original_win_set_cursor
     vim.ui.input = original_ui_input
     vim.ui.select = original_ui_select
+    package.loaded["snacks"] = original_snacks
+    package.loaded["commentry.util"] = original_util
     package.loaded["commentry.store"] = original_store
     package.loaded["commentry.diffview"] = original_diffview
     package.loaded["commentry.comments"] = original_comments
@@ -546,5 +555,153 @@ describe("commentry.comments persistence", function()
     assert.are.same("Edited body", writes[2].comments[1].body)
     assert.are.same(0, #writes[3].comments)
     assert.are.same(0, #writes[3].threads)
+  end)
+
+  it("lists draft comments and jumps to selected entry line", function()
+    local moved_cursor = nil
+    local captured_items = nil
+    local captured_opts = nil
+
+    local comments = load_with_stubs({
+      store = {
+        path_for_project = function()
+          return "/tmp/project/.commentry/commentry.json"
+        end,
+        read = function()
+          return {
+            project_root = "/tmp/project",
+            diff_id = "/tmp/project",
+            comments = {
+              {
+                id = "c1",
+                diff_id = "/tmp/project",
+                file_path = "file.lua",
+                line_number = 4,
+                line_side = "head",
+                body = "first draft",
+                line_content = "line four",
+              },
+            },
+            threads = {
+              {
+                id = "t-/tmp/project-file.lua|head|4",
+                diff_id = "/tmp/project",
+                file_path = "file.lua",
+                line_number = 4,
+                line_side = "head",
+                comment_ids = { "c1" },
+              },
+            },
+          }
+        end,
+        write = function()
+          return true
+        end,
+      },
+      diffview = {
+        get_current_view = function()
+          return { git_root = "/tmp/project" }
+        end,
+        current_file_context = function()
+          return {
+            file_path = "file.lua",
+            line_number = 1,
+            line_side = "head",
+            bufnr = 1,
+            view = { git_root = "/tmp/project" },
+          }
+        end,
+        render_comment_markers = function()
+          return
+        end,
+        render_hover_preview = function()
+          return
+        end,
+        clear_hover_preview = function()
+          return
+        end,
+      },
+    })
+
+    package.loaded["snacks"] = {
+      picker = {
+        select = function(items, opts, cb)
+          captured_items = items
+          captured_opts = opts
+          cb(items[1])
+        end,
+      },
+    }
+    vim.api.nvim_win_set_cursor = function(_, pos)
+      moved_cursor = pos
+    end
+
+    comments.load_for_view({ git_root = "/tmp/project" })
+    comments.list_comments()
+
+    assert.is_table(captured_items)
+    assert.are.same(1, #captured_items)
+    assert.are.same("c1", captured_items[1].id)
+    assert.are.same("Commentry draft comments", captured_opts.prompt)
+    assert.are.same({ 4, 0 }, moved_cursor)
+  end)
+
+  it("errors when snacks dependency is unavailable for list-comments", function()
+    local errors = {}
+    package.loaded["commentry.util"] = {
+      error = function(msg)
+        errors[#errors + 1] = msg
+      end,
+      warn = function()
+        return
+      end,
+      info = function()
+        return
+      end,
+      debug = function()
+        return
+      end,
+    }
+    package.loaded["snacks"] = nil
+
+    local comments = load_with_stubs({
+      store = {
+        path_for_project = function()
+          return "/tmp/project/.commentry/commentry.json"
+        end,
+        read = function()
+          return nil, "not_found"
+        end,
+        write = function()
+          return true
+        end,
+      },
+      diffview = {
+        get_current_view = function()
+          return { git_root = "/tmp/project" }
+        end,
+        current_file_context = function()
+          return {
+            file_path = "file.lua",
+            line_number = 1,
+            line_side = "head",
+            bufnr = 1,
+            view = { git_root = "/tmp/project" },
+          }
+        end,
+        render_comment_markers = function()
+          return
+        end,
+        render_hover_preview = function()
+          return
+        end,
+        clear_hover_preview = function()
+          return
+        end,
+      },
+    })
+
+    comments.list_comments()
+    assert.are.same("snacks.nvim is required for :Commentry list-comments", errors[1])
   end)
 end)

@@ -10,6 +10,7 @@ local seeded = false
 local state = {
   diffs = {},
 }
+local current_context
 
 local ROOT_CANDIDATE_KEYS = { "git_root", "toplevel", "root", "cwd", "path" }
 
@@ -416,8 +417,73 @@ local function active_comments_for_line(context)
   return comments
 end
 
+---@param diff_id string
+---@return commentry.DraftComment[]
+local function active_comments_for_diff(diff_id)
+  local dstate = diff_state(diff_id)
+  local comments = {}
+  for _, comment in ipairs(dstate.comments) do
+    if comment.status ~= "unresolved" then
+      comments[#comments + 1] = comment
+    end
+  end
+  table.sort(comments, function(a, b)
+    if a.file_path ~= b.file_path then
+      return a.file_path < b.file_path
+    end
+    if a.line_side ~= b.line_side then
+      return a.line_side < b.line_side
+    end
+    if a.line_number ~= b.line_number then
+      return a.line_number < b.line_number
+    end
+    return (a.created_at or "") < (b.created_at or "")
+  end)
+  return comments
+end
+
+---@param comment commentry.DraftComment
+---@return string
+local function list_entry_label(comment)
+  local preview = comment.body:gsub("\n", " ")
+  if #preview > 72 then
+    preview = preview:sub(1, 69) .. "..."
+  end
+  return ("%s:%d [%s] %s"):format(comment.file_path, comment.line_number, comment.line_side, preview)
+end
+
+---@param comment commentry.DraftComment
+---@return boolean
+local function jump_to_comment(comment)
+  local context, err = current_context()
+  if not context then
+    Util.error(err or "No diffview context")
+    return false
+  end
+  if comment.file_path ~= context.file_path or comment.line_side ~= context.line_side then
+    Util.info("Select the target diff file/side before jumping to this comment")
+    return false
+  end
+  local line = math.max(comment.line_number, 1)
+  vim.api.nvim_win_set_cursor(0, { line, 0 })
+  return true
+end
+
+---@return boolean, string|nil
+local function snacks_picker_available()
+  local ok, snacks = pcall(require, "snacks")
+  if not ok then
+    return false, "snacks.nvim is required for :Commentry list-comments"
+  end
+  local picker = snacks and snacks.picker or nil
+  if type(picker) ~= "table" or type(picker.select) ~= "function" then
+    return false, "snacks.nvim picker.select is required for :Commentry list-comments"
+  end
+  return true, nil
+end
+
 ---@return table|nil, string|nil
-local function current_context()
+current_context = function()
   local context, err = Diffview.current_file_context()
   if not context then
     return nil, err
@@ -624,6 +690,39 @@ function M.refresh_hover_preview()
   end
   Diffview.render_hover_preview(context.bufnr, context.line_number, comments)
   return true
+end
+
+function M.list_comments()
+  local view, view_err = Diffview.get_current_view()
+  if not view then
+    Util.error(view_err or "No diffview view found")
+    return
+  end
+
+  local snacks_ok, snacks_err = snacks_picker_available()
+  if not snacks_ok then
+    Util.error(snacks_err)
+    return
+  end
+
+  local diff_id = diff_id_for_view(view)
+  local comments = active_comments_for_diff(diff_id)
+  if #comments == 0 then
+    Util.info("No draft comments found")
+    return
+  end
+
+  local snacks = require("snacks")
+  snacks.picker.select(comments, {
+    prompt = "Commentry draft comments",
+    format_item = list_entry_label,
+  }, function(choice)
+    if not choice then
+      return
+    end
+    jump_to_comment(choice)
+    M.refresh_hover_preview()
+  end)
 end
 
 ---@param view table
