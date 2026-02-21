@@ -102,6 +102,9 @@ Slice-specific verification:
   - Selected an entry for current diff file/side and observed cursor jump to target line.
   - Confirmed non-current-context comments are not listed (only jumpable entries shown).
   - In environment without Snacks, observed clear command error and health warning.
+- Legacy anchor hydration:
+  - Missing anchors (`line_content` nil/non-string) are hydrated once from current line text during reconcile.
+  - Empty-string anchors are treated as valid known anchors (blank-line anchors), not as missing values.
 - Regression confidence:
   - Verified no observed regressions in add/edit/delete/persist during above flow.
   - Automated verification confirmed via `./scripts/test` passing.

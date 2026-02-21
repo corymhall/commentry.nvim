@@ -325,7 +325,7 @@ local function reconcile_for_context(diff_id, context)
   for _, comment in ipairs(dstate.comments) do
     local in_target = comment.file_path == context.file_path and comment.line_side == context.line_side
     local in_range = comment.line_number >= 1 and comment.line_number <= line_count
-    local missing_line_content = in_target and in_range and (type(comment.line_content) ~= "string" or comment.line_content == "")
+    local missing_line_content = in_target and in_range and type(comment.line_content) ~= "string"
     local mismatched = false
     if missing_line_content then
       local current = line_text_at(context.bufnr, comment.line_number)
