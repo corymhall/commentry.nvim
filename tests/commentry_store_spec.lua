@@ -11,48 +11,63 @@ end
 local function sample_store(root)
   return {
     project_root = root,
-    diff_id = "diff-1",
+    context_id = "ctx-working-tree",
     comments = {
       {
         id = "c1",
-        diff_id = "diff-1",
+        context_id = "ctx-working-tree",
         file_path = "lua/commentry/store.lua",
-        line_number = 12,
+        line_start = 12,
+        line_end = 12,
         line_side = "head",
+        comment_type = "note",
         body = "Looks good.",
+        created_at = "2026-02-21T00:00:00Z",
+        updated_at = "2026-02-21T00:00:00Z",
       },
     },
     threads = {
       {
         id = "t1",
-        diff_id = "diff-1",
+        context_id = "ctx-working-tree",
         file_path = "lua/commentry/store.lua",
-        line_number = 12,
+        line_start = 12,
+        line_end = 12,
         line_side = "head",
         comment_ids = { "c1" },
       },
+    },
+    file_reviews = {
+      ["lua/commentry/store.lua"] = true,
     },
   }
 end
 
 describe("commentry.store", function()
-  it("builds path under project root", function()
+  it("builds context-scoped path under project root", function()
     local root = make_temp_dir()
-    local path, err = Store.path_for_project(root)
+    local path, err = Store.path_for_context(root, "ctx/feature:abc")
     assert.is_nil(err)
     local resolved_root = vim.uv.fs_realpath(vim.fs.normalize(root)) or vim.fs.normalize(root)
-    local expected = vim.fs.joinpath(vim.fs.normalize(resolved_root), ".commentry", "commentry.json")
+    local expected = vim.fs.joinpath(vim.fs.normalize(resolved_root), ".commentry", "contexts", "ctx_feature_abc", "commentry.json")
     assert.are.same(expected, path)
   end)
 
   it("rejects invalid project root", function()
-    local path, err = Store.path_for_project("")
+    local path, err = Store.path_for_context("", "ctx")
     assert.is_nil(path)
     assert.are.same("project_root is required", err)
   end)
 
+  it("rejects missing context id", function()
+    local root = make_temp_dir()
+    local path, err = Store.path_for_context(root, "")
+    assert.is_nil(path)
+    assert.are.same("context_id is required", err)
+  end)
+
   it("rejects missing project root directory", function()
-    local path, err = Store.path_for_project("/nonexistent/path")
+    local path, err = Store.path_for_context("/nonexistent/path", "ctx")
     assert.is_nil(path)
     assert.are.same("project_root is not a directory", err)
   end)
@@ -65,7 +80,7 @@ describe("commentry.store", function()
 
   it("persists store data", function()
     local root = make_temp_dir()
-    local path = Store.path_for_project(root)
+    local path = Store.path_for_context(root, "ctx-working-tree")
     local store = sample_store(root)
 
     local ok, err = Store.write(path, store)
@@ -79,7 +94,7 @@ describe("commentry.store", function()
 
   it("treats non-zero writefile return as write failure", function()
     local root = make_temp_dir()
-    local path = Store.path_for_project(root)
+    local path = Store.path_for_context(root, "ctx-working-tree")
     local store = sample_store(root)
     local original_writefile = vim.fn.writefile
 
@@ -97,36 +112,44 @@ describe("commentry.store", function()
 
   it("returns not_found for missing store", function()
     local root = make_temp_dir()
-    local path = Store.path_for_project(root)
+    local path = Store.path_for_context(root, "ctx-working-tree")
 
     local data, err = Store.read(path)
     assert.is_nil(data)
     assert.are.same("not_found", err)
   end)
 
-  it("rejects invalid line anchors", function()
+  it("rejects invalid v2 comment and thread fields", function()
     local store = {
       project_root = "root",
-      diff_id = "diff",
+      context_id = "ctx",
       comments = {
         {
           id = "c1",
-          diff_id = "diff",
+          context_id = "ctx",
           file_path = "lua/commentry/store.lua",
-          line_number = 0,
+          line_start = 0,
+          line_end = -1,
           line_side = "middle",
+          comment_type = "feedback",
           body = "Bad anchor",
+          created_at = "",
+          updated_at = "",
         },
       },
       threads = {
         {
           id = "t1",
-          diff_id = "diff",
+          context_id = "ctx",
           file_path = "lua/commentry/store.lua",
-          line_number = -1,
+          line_start = -1,
+          line_end = 0,
           line_side = "side",
           comment_ids = { "c1" },
         },
+      },
+      file_reviews = {
+        ["lua/commentry/store.lua"] = "yes",
       },
     }
 
@@ -135,7 +158,10 @@ describe("commentry.store", function()
     assert.is_table(errors)
 
     local combined = table.concat(errors, "\n")
-    assert.is_true(combined:find("line_number", 1, true) ~= nil)
+    assert.is_true(combined:find("line_start", 1, true) ~= nil)
+    assert.is_true(combined:find("line_end", 1, true) ~= nil)
     assert.is_true(combined:find("line_side", 1, true) ~= nil)
+    assert.is_true(combined:find("comment_type", 1, true) ~= nil)
+    assert.is_true(combined:find("file_reviews", 1, true) ~= nil)
   end)
 end)

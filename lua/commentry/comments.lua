@@ -59,6 +59,7 @@ local function diff_state(diff_id)
     state.diffs[diff_id] = {
       comments = {},
       threads = {},
+      file_reviews = {},
       comments_by_id = {},
       threads_by_id = {},
       dirty = false,
@@ -251,13 +252,36 @@ local function apply_store(diff_id, store)
   local dstate = diff_state(diff_id)
   dstate.comments = {}
   dstate.threads = {}
+  dstate.file_reviews = {}
   dstate.comments_by_id = {}
   dstate.threads_by_id = {}
+
+  if type(store.file_reviews) == "table" then
+    dstate.file_reviews = vim.deepcopy(store.file_reviews)
+  end
 
   if type(store.comments) == "table" then
     for _, comment in ipairs(store.comments) do
       if type(comment) == "table" then
-        upsert_comment(dstate, comment)
+        local line_start = comment.line_start or comment.line_number
+        local line_end = comment.line_end or line_start
+        local context_id = comment.context_id or comment.diff_id
+        local runtime_comment = {
+          id = comment.id,
+          diff_id = context_id,
+          file_path = comment.file_path,
+          line_number = line_start,
+          line_side = comment.line_side,
+          body = comment.body,
+          created_at = comment.created_at or timestamp(),
+          updated_at = comment.updated_at or comment.created_at or timestamp(),
+          status = comment.status,
+          line_content = comment.line_content,
+          comment_type = comment.comment_type or "note",
+          line_start = line_start,
+          line_end = line_end,
+        }
+        upsert_comment(dstate, runtime_comment)
       end
     end
   end
@@ -265,28 +289,100 @@ local function apply_store(diff_id, store)
   if type(store.threads) == "table" then
     for _, thread in ipairs(store.threads) do
       if type(thread) == "table" and type(thread.id) == "string" then
-        dstate.threads_by_id[thread.id] = thread
-        dstate.threads[#dstate.threads + 1] = thread
+        local line_start = thread.line_start or thread.line_number
+        local line_end = thread.line_end or line_start
+        local context_id = thread.context_id or thread.diff_id
+        local runtime_thread = {
+          id = thread.id,
+          diff_id = context_id,
+          file_path = thread.file_path,
+          line_number = line_start,
+          line_side = thread.line_side,
+          comment_ids = vim.deepcopy(thread.comment_ids or {}),
+          line_start = line_start,
+          line_end = line_end,
+        }
+        dstate.threads_by_id[thread.id] = runtime_thread
+        dstate.threads[#dstate.threads + 1] = runtime_thread
       end
     end
   end
 end
 
+---@param context_id string
+---@param comment table
+---@return table
+local function runtime_comment_to_store(context_id, comment)
+  local line_start = comment.line_start or comment.line_number
+  local line_end = comment.line_end or line_start
+  return {
+    id = comment.id,
+    context_id = context_id,
+    file_path = comment.file_path,
+    line_start = line_start,
+    line_end = line_end,
+    line_side = comment.line_side,
+    comment_type = comment.comment_type or "note",
+    body = comment.body,
+    created_at = comment.created_at,
+    updated_at = comment.updated_at,
+    status = comment.status,
+    line_content = comment.line_content,
+  }
+end
+
+---@param context_id string
+---@param thread table
+---@return table
+local function runtime_thread_to_store(context_id, thread)
+  local line_start = thread.line_start or thread.line_number
+  local line_end = thread.line_end or line_start
+  return {
+    id = thread.id,
+    context_id = context_id,
+    file_path = thread.file_path,
+    line_start = line_start,
+    line_end = line_end,
+    line_side = thread.line_side,
+    comment_ids = vim.deepcopy(thread.comment_ids or {}),
+  }
+end
+
+---@param project_root string
+---@param context_id string
+---@return string|nil, string|nil
+local function path_for_context(project_root, context_id)
+  if type(Store.path_for_context) == "function" then
+    return Store.path_for_context(project_root, context_id)
+  end
+  return Store.path_for_project(project_root)
+end
+
 ---@param diff_id string
 ---@param project_root string
+---@param context_id string
 ---@return boolean, string|string[]|nil
-local function save_store(diff_id, project_root)
-  local path, path_err = Store.path_for_project(project_root)
+local function save_store(diff_id, project_root, context_id)
+  local path, path_err = path_for_context(project_root, context_id)
   if not path then
     return false, path_err or "store_path_failed"
   end
 
   local dstate = diff_state(diff_id)
+  local comments = {}
+  for _, comment in ipairs(dstate.comments) do
+    comments[#comments + 1] = runtime_comment_to_store(context_id, comment)
+  end
+  local threads = {}
+  for _, thread in ipairs(dstate.threads) do
+    threads[#threads + 1] = runtime_thread_to_store(context_id, thread)
+  end
   local store = {
     project_root = project_root,
-    diff_id = diff_id,
-    comments = vim.deepcopy(dstate.comments),
-    threads = vim.deepcopy(dstate.threads),
+    context_id = context_id,
+    comments = comments,
+    threads = threads,
+    file_reviews = vim.deepcopy(dstate.file_reviews or {}),
   }
 
   return Store.write(path, store)
@@ -302,7 +398,8 @@ local function persist_for_view(diff_id, view, failure_msg)
     Util.warn("Unable to resolve project root for comment store")
     return false
   end
-  local ok, save_err = save_store(diff_id, root)
+  local context_id = diff_id_for_view(view)
+  local ok, save_err = save_store(diff_id, root, context_id)
   if not ok then
     Util.warn(save_err or failure_msg)
     return false
@@ -750,7 +847,7 @@ function M.load_for_view(view)
     Util.warn("Unable to resolve project root for comment store")
     return false
   end
-  local path, path_err = Store.path_for_project(root)
+  local path, path_err = path_for_context(root, diff_id)
   if not path then
     Util.warn(path_err or "Failed to resolve comment store path")
     return false
