@@ -581,6 +581,15 @@ describe("commentry.comments persistence", function()
                 body = "first draft",
                 line_content = "line four",
               },
+              {
+                id = "c2",
+                diff_id = "/tmp/project",
+                file_path = "other.lua",
+                line_number = 8,
+                line_side = "head",
+                body = "other file draft",
+                line_content = "other line",
+              },
             },
             threads = {
               {
@@ -590,6 +599,14 @@ describe("commentry.comments persistence", function()
                 line_number = 4,
                 line_side = "head",
                 comment_ids = { "c1" },
+              },
+              {
+                id = "t-/tmp/project-other.lua|head|8",
+                diff_id = "/tmp/project",
+                file_path = "other.lua",
+                line_number = 8,
+                line_side = "head",
+                comment_ids = { "c2" },
               },
             },
           }
@@ -644,6 +661,95 @@ describe("commentry.comments persistence", function()
     assert.are.same("c1", captured_items[1].id)
     assert.are.same("Commentry draft comments", captured_opts.prompt)
     assert.are.same({ 4, 0 }, moved_cursor)
+  end)
+
+  it("reports when no jumpable comments exist for current context", function()
+    local infos = {}
+    package.loaded["commentry.util"] = {
+      error = function()
+        return
+      end,
+      warn = function()
+        return
+      end,
+      info = function(msg)
+        infos[#infos + 1] = msg
+      end,
+      debug = function()
+        return
+      end,
+    }
+    package.loaded["snacks"] = {
+      picker = {
+        select = function()
+          error("picker should not be called")
+        end,
+      },
+    }
+
+    local comments = load_with_stubs({
+      store = {
+        path_for_project = function()
+          return "/tmp/project/.commentry/commentry.json"
+        end,
+        read = function()
+          return {
+            project_root = "/tmp/project",
+            diff_id = "/tmp/project",
+            comments = {
+              {
+                id = "c2",
+                diff_id = "/tmp/project",
+                file_path = "other.lua",
+                line_number = 8,
+                line_side = "head",
+                body = "other file draft",
+              },
+            },
+            threads = {
+              {
+                id = "t-/tmp/project-other.lua|head|8",
+                diff_id = "/tmp/project",
+                file_path = "other.lua",
+                line_number = 8,
+                line_side = "head",
+                comment_ids = { "c2" },
+              },
+            },
+          }
+        end,
+        write = function()
+          return true
+        end,
+      },
+      diffview = {
+        get_current_view = function()
+          return { git_root = "/tmp/project" }
+        end,
+        current_file_context = function()
+          return {
+            file_path = "file.lua",
+            line_number = 1,
+            line_side = "head",
+            bufnr = 1,
+            view = { git_root = "/tmp/project" },
+          }
+        end,
+        render_comment_markers = function()
+          return
+        end,
+        render_hover_preview = function()
+          return
+        end,
+        clear_hover_preview = function()
+          return
+        end,
+      },
+    })
+
+    comments.load_for_view({ git_root = "/tmp/project" })
+    comments.list_comments()
+    assert.are.same("No jumpable draft comments for current diff file/side", infos[1])
   end)
 
   it("errors when snacks dependency is unavailable for list-comments", function()

@@ -61,4 +61,24 @@ describe("commentry.health", function()
 
     assert.are.same("snacks.nvim not installed: :Commentry list-comments is unavailable", seen_warn)
   end)
+
+  it("warns when snacks picker.select is unavailable", function()
+    local seen_warn = nil
+    vim.health = {
+      start = function() end,
+      ok = function() end,
+      warn = function(msg)
+        seen_warn = msg
+      end,
+      error = function() end,
+    }
+
+    package.loaded["diffview"] = {}
+    package.loaded["snacks"] = { picker = {} }
+
+    local health = require("commentry.health")
+    health.check()
+
+    assert.are.same("snacks.nvim installed but picker.select is unavailable", seen_warn)
+  end)
 end)

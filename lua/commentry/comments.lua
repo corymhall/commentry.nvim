@@ -418,12 +418,15 @@ local function active_comments_for_line(context)
 end
 
 ---@param diff_id string
+---@param context table
 ---@return commentry.DraftComment[]
-local function active_comments_for_diff(diff_id)
+local function jumpable_comments_for_context(diff_id, context)
   local dstate = diff_state(diff_id)
   local comments = {}
   for _, comment in ipairs(dstate.comments) do
-    if comment.status ~= "unresolved" then
+    if comment.status ~= "unresolved"
+      and comment.file_path == context.file_path
+      and comment.line_side == context.line_side then
       comments[#comments + 1] = comment
     end
   end
@@ -693,9 +696,9 @@ function M.refresh_hover_preview()
 end
 
 function M.list_comments()
-  local view, view_err = Diffview.get_current_view()
-  if not view then
-    Util.error(view_err or "No diffview view found")
+  local context, context_err = current_context()
+  if not context then
+    Util.error(context_err or "No diffview context")
     return
   end
 
@@ -705,10 +708,10 @@ function M.list_comments()
     return
   end
 
-  local diff_id = diff_id_for_view(view)
-  local comments = active_comments_for_diff(diff_id)
+  local diff_id = diff_id_for_view(context.view)
+  local comments = jumpable_comments_for_context(diff_id, context)
   if #comments == 0 then
-    Util.info("No draft comments found")
+    Util.info("No jumpable draft comments for current diff file/side")
     return
   end
 
