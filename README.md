@@ -47,3 +47,5 @@ require("commentry").setup({
 
 - Run tests: `./scripts/test`
 - Generate docs (stub): `./scripts/docs`
+- Canonical feature/design plans: `docs/plans/`
+- Legacy Speckit archive (read-only history): `docs/archive/speckit/`
