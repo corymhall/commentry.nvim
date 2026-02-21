@@ -10,6 +10,12 @@ local function make_anchor()
   }
 end
 
+local function make_temp_dir()
+  local path = vim.fn.tempname()
+  vim.fn.mkdir(path, "p")
+  return path
+end
+
 describe("commentry.comments helpers", function()
   it("builds and validates anchors", function()
     local anchor, err = Comments.build_anchor("file.lua", 5, "head")
@@ -747,6 +753,216 @@ describe("commentry.comments persistence", function()
     local ok = comments.load_for_view({ git_root = root .. "/.git" })
     assert.is_true(ok)
     assert.are.same(expected_root, received_root)
+  end)
+
+  it("keeps working-tree and commit-range contexts isolated in memory", function()
+    local root = make_temp_dir()
+    local working_tree_root = root .. "/working-tree"
+    local commit_range_root = root .. "/commit-range"
+    vim.fn.mkdir(working_tree_root, "p")
+    vim.fn.mkdir(commit_range_root, "p")
+
+    local function path_for_context(_, context_id)
+      local safe = context_id:gsub("[^%w%._%-]", "_")
+      return "/tmp/" .. safe .. ".json"
+    end
+
+    local stores = {
+      [path_for_context("", vim.fs.normalize(vim.uv.fs_realpath(working_tree_root) or working_tree_root))] = {
+        project_root = working_tree_root,
+        context_id = "ctx-working-tree",
+        comments = {
+          {
+            id = "wt-1",
+            context_id = "ctx-working-tree",
+            file_path = "file.lua",
+            line_start = 1,
+            line_end = 1,
+            line_side = "head",
+            comment_type = "note",
+            body = "working tree comment",
+            created_at = "2026-02-21T00:00:00Z",
+            updated_at = "2026-02-21T00:00:00Z",
+          },
+        },
+        threads = {
+          {
+            id = "t-wt-1",
+            context_id = "ctx-working-tree",
+            file_path = "file.lua",
+            line_start = 1,
+            line_end = 1,
+            line_side = "head",
+            comment_ids = { "wt-1" },
+          },
+        },
+        file_reviews = {},
+      },
+      [path_for_context("", vim.fs.normalize(vim.uv.fs_realpath(commit_range_root) or commit_range_root))] = {
+        project_root = commit_range_root,
+        context_id = "ctx-commit-range",
+        comments = {
+          {
+            id = "cr-1",
+            context_id = "ctx-commit-range",
+            file_path = "file.lua",
+            line_start = 1,
+            line_end = 1,
+            line_side = "head",
+            comment_type = "issue",
+            body = "commit range comment",
+            created_at = "2026-02-21T00:00:00Z",
+            updated_at = "2026-02-21T00:00:00Z",
+          },
+        },
+        threads = {
+          {
+            id = "t-cr-1",
+            context_id = "ctx-commit-range",
+            file_path = "file.lua",
+            line_start = 1,
+            line_end = 1,
+            line_side = "head",
+            comment_ids = { "cr-1" },
+          },
+        },
+        file_reviews = {},
+      },
+    }
+
+    local captured = {}
+    local active_root = working_tree_root
+    local comments = load_with_stubs({
+      store = {
+        path_for_context = path_for_context,
+        read = function(path)
+          return stores[path], nil
+        end,
+        write = function()
+          return true
+        end,
+      },
+      diffview = {
+        current_file_context = function()
+          return {
+            file_path = "file.lua",
+            line_number = 1,
+            line_side = "head",
+            bufnr = 1,
+            view = { git_root = active_root },
+          }
+        end,
+        render_comment_markers = function(_, comments_to_render)
+          captured = comments_to_render
+        end,
+      },
+    })
+
+    vim.api.nvim_buf_line_count = function()
+      return 10
+    end
+    vim.api.nvim_buf_get_lines = function()
+      return { "line 1" }
+    end
+
+    comments.load_for_view({ git_root = working_tree_root })
+    comments.render_current_buffer()
+    assert.are.same("wt-1", captured[1].id)
+
+    active_root = commit_range_root
+    comments.load_for_view({ git_root = commit_range_root })
+    comments.render_current_buffer()
+    assert.are.same("cr-1", captured[1].id)
+
+    active_root = working_tree_root
+    comments.render_current_buffer()
+    assert.are.same("wt-1", captured[1].id)
+  end)
+
+  it("preserves typed/range metadata and file review map when reconciling mismatches", function()
+    local persisted = nil
+    local root = make_temp_dir()
+    local store_data = {
+      project_root = root,
+      context_id = "ctx-working-tree",
+      comments = {
+        {
+          id = "c1",
+          context_id = "ctx-working-tree",
+          file_path = "file.lua",
+          line_start = 2,
+          line_end = 4,
+          line_side = "head",
+          comment_type = "issue",
+          body = "Range comment",
+          created_at = "2026-02-21T00:00:00Z",
+          updated_at = "2026-02-21T00:00:00Z",
+          line_content = "before",
+        },
+      },
+      threads = {
+        {
+          id = "t-c1",
+          context_id = "ctx-working-tree",
+          file_path = "file.lua",
+          line_start = 2,
+          line_end = 4,
+          line_side = "head",
+          comment_ids = { "c1" },
+        },
+      },
+      file_reviews = {
+        ["file.lua"] = true,
+        ["other.lua"] = false,
+      },
+    }
+
+    local comments = load_with_stubs({
+      store = {
+        path_for_context = function()
+          return "/tmp/project/.commentry/context.json"
+        end,
+        read = function()
+          return store_data
+        end,
+        write = function(_, store)
+          persisted = store
+          return true
+        end,
+      },
+      diffview = {
+        current_file_context = function()
+          return {
+            file_path = "file.lua",
+            line_number = 2,
+            line_side = "head",
+            bufnr = 1,
+            view = { git_root = root },
+          }
+        end,
+        render_comment_markers = function()
+          return
+        end,
+      },
+    })
+
+    vim.api.nvim_buf_line_count = function()
+      return 10
+    end
+    vim.api.nvim_buf_get_lines = function()
+      return { "after" }
+    end
+
+    comments.load_for_view({ git_root = root })
+    comments.render_current_buffer()
+
+    assert.is_table(persisted)
+    assert.are.same(true, persisted.file_reviews["file.lua"])
+    assert.are.same(false, persisted.file_reviews["other.lua"])
+    assert.are.same(2, persisted.comments[1].line_start)
+    assert.are.same(4, persisted.comments[1].line_end)
+    assert.are.same("issue", persisted.comments[1].comment_type)
+    assert.are.same("unresolved", persisted.comments[1].status)
   end)
 
   it("persists add/edit/delete lifecycle for a diffview context", function()

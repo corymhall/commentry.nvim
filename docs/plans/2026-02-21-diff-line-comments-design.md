@@ -57,6 +57,7 @@ Affected users are plugin users doing code review before publishing feedback.
 | WP-R10 | US4 hover preview rendering and cursor wiring | `lua/commentry/{diffview.lua,comments.lua}` `tests/commentry_diffview_spec.lua` | T025,T026,T034 | Completed |
 | WP-R20 | US5 Snacks picker entries, command, health | `lua/commentry/{comments.lua,commands.lua,health.lua}` | T027,T028,T029 | Completed |
 | WP-R30 | Tests for picker/command/health + manual validation notes | `tests/commentry_{comments,commands,health}_spec.lua` `docs/plans/2026-02-21-diff-line-comments-design.md` | T035,T024 | Completed |
+| WP-V70 | Cross-context hardening + full-suite verification + rollout notes | `tests/commentry_{store,comments,commands,diffview}_spec.lua` `README.md` `docs/plans/2026-02-21-diff-line-comments-design.md` | Integration verification | Completed |
 
 ## Decomposition Constraints for Bead Planning
 
@@ -77,6 +78,20 @@ Slice-specific verification:
 - WP-R10: add/extend tests validating preview shown only on commented lines.
 - WP-R20: add/extend tests validating picker entry build and command dispatch.
 - WP-R30: add/extend tests validating health behavior and update manual notes.
+- WP-V70: add/extend cross-context regression tests covering context isolation, type/range metadata persistence, and file/side interaction boundaries.
+
+## WP-V70 Verification Evidence (2026-02-21)
+
+- Automated suite:
+  - Run: `./scripts/test`
+  - Result: pass (`43` cases, `0` failures, `0` notes).
+- Added regression coverage:
+  - `tests/commentry_store_spec.lua`: context path isolation + commit-range context-id sanitization.
+  - `tests/commentry_comments_spec.lua`: in-memory separation between working-tree and commit-range contexts; preservation of type/range metadata and `file_reviews` during reconcile persists.
+  - `tests/commentry_commands_spec.lua`: command routing remains stable with extra subcommand args.
+  - `tests/commentry_diffview_spec.lua`: hover preview remains side-scoped (`base` vs `head`) at identical line numbers.
+- Rollout notes:
+  - Updated `README.md` with context-scoped persistence and active file/side scoping guarantees.
 
 ## Acceptance Criteria (Observable)
 

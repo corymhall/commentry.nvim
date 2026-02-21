@@ -218,6 +218,89 @@ describe("commentry.diffview hover preview", function()
     assert.are.same(1, cleared)
   end)
 
+  it("does not bleed hover previews across base/head sides on the same line", function()
+    local rendered = nil
+    local comments = load_comments_with_stubs({
+      store = {
+        path_for_project = function()
+          return "/tmp/project/.commentry/commentry.json"
+        end,
+        read = function()
+          return {
+            project_root = "/tmp/project",
+            diff_id = "/tmp/project",
+            comments = {
+              {
+                id = "c-head",
+                diff_id = "/tmp/project",
+                file_path = "file.lua",
+                line_number = 7,
+                line_side = "head",
+                body = "head side",
+              },
+              {
+                id = "c-base",
+                diff_id = "/tmp/project",
+                file_path = "file.lua",
+                line_number = 7,
+                line_side = "base",
+                body = "base side",
+              },
+            },
+            threads = {
+              {
+                id = "t-head",
+                diff_id = "/tmp/project",
+                file_path = "file.lua",
+                line_number = 7,
+                line_side = "head",
+                comment_ids = { "c-head" },
+              },
+              {
+                id = "t-base",
+                diff_id = "/tmp/project",
+                file_path = "file.lua",
+                line_number = 7,
+                line_side = "base",
+                comment_ids = { "c-base" },
+              },
+            },
+          }
+        end,
+        write = function()
+          return true
+        end,
+      },
+      diffview = {
+        current_file_context = function()
+          return {
+            file_path = "file.lua",
+            line_number = 7,
+            line_side = "head",
+            bufnr = 1,
+            view = { git_root = "/tmp/project" },
+          }
+        end,
+        render_comment_markers = function()
+          return
+        end,
+        render_hover_preview = function(_, _, line_comments)
+          rendered = line_comments
+        end,
+        clear_hover_preview = function()
+          return
+        end,
+      },
+    })
+
+    comments.load_for_view({ git_root = "/tmp/project" })
+    local shown = comments.refresh_hover_preview()
+    assert.is_true(shown)
+    assert.is_table(rendered)
+    assert.are.same(1, #rendered)
+    assert.are.same("c-head", rendered[1].id)
+  end)
+
   it("wires cursor movement and hold handlers to hover refresh", function()
     local autocmds = {}
     local refresh_calls = 0

@@ -49,3 +49,9 @@ require("commentry").setup({
 - Generate docs (stub): `./scripts/docs`
 - Canonical feature/design plans: `docs/plans/`
 - Legacy Speckit archive (read-only history): `docs/archive/speckit/`
+
+## Behavior Notes
+
+- Draft comments are persisted per review context under `.commentry/contexts/<context-id>/`.
+- Context separation covers working-tree and commit-range style review sessions when Diffview provides distinct context identity.
+- Draft listing and hover previews remain scoped to the active file + side (`base`/`head`) for the current context.

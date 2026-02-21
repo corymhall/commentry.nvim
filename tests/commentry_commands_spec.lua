@@ -194,4 +194,39 @@ describe("commentry command routing", function()
 
     assert.are.same(1, called)
   end)
+
+  it("routes list-comments with extra args without affecting handler selection", function()
+    local called = 0
+    vim.api.nvim_create_autocmd = function()
+      return 1
+    end
+
+    package.loaded["commentry.comments"] = {
+      list_comments = function()
+        called = called + 1
+      end,
+      set_comment_type = function()
+        return
+      end,
+      render_current_buffer = function()
+        return
+      end,
+    }
+    package.loaded["commentry.config"] = {
+      augroup = 1,
+      diffview = { enabled = true },
+      keymaps = { add_comment = "mc", edit_comment = "me", delete_comment = "md", set_comment_type = "mt" },
+    }
+    package.loaded["commentry.diffview"] = {
+      open = function()
+        return true
+      end,
+    }
+
+    package.loaded["commentry.commands"] = nil
+    local Commands = require("commentry.commands")
+    Commands.cmd({ args = "list-comments file.lua:1-3" })
+
+    assert.are.same(1, called)
+  end)
 end)

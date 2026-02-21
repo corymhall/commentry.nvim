@@ -164,4 +164,22 @@ describe("commentry.store", function()
     assert.is_true(combined:find("comment_type", 1, true) ~= nil)
     assert.is_true(combined:find("file_reviews", 1, true) ~= nil)
   end)
+
+  it("creates distinct context paths for working tree and commit range contexts", function()
+    local root = make_temp_dir()
+    local working_tree_path, working_tree_err = Store.path_for_context(root, "ctx-working-tree")
+    local commit_range_path, commit_range_err = Store.path_for_context(root, "ctx-main...HEAD")
+
+    assert.is_nil(working_tree_err)
+    assert.is_nil(commit_range_err)
+    assert.is_true(working_tree_path ~= commit_range_path)
+  end)
+
+  it("sanitizes commit-range context ids into filesystem-safe directories", function()
+    local root = make_temp_dir()
+    local path, err = Store.path_for_context(root, "ctx/main...feature:abc")
+
+    assert.is_nil(err)
+    assert.is_true(path:find("ctx_main...feature_abc", 1, true) ~= nil)
+  end)
 end)
