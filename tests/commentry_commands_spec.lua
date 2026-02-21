@@ -123,4 +123,34 @@ describe("commentry command routing", function()
 
     assert.are.same(1, called)
   end)
+
+  it("includes list-comments in command completion", function()
+    vim.api.nvim_create_autocmd = function()
+      return 1
+    end
+    package.loaded["commentry.comments"] = {
+      list_comments = function()
+        return
+      end,
+      render_current_buffer = function()
+        return
+      end,
+    }
+    package.loaded["commentry.config"] = {
+      augroup = 1,
+      diffview = { enabled = true },
+      keymaps = { add_comment = "mc", edit_comment = "me", delete_comment = "md" },
+    }
+    package.loaded["commentry.diffview"] = {
+      open = function()
+        return true
+      end,
+    }
+
+    package.loaded["commentry.commands"] = nil
+    local Commands = require("commentry.commands")
+    local matches = Commands.complete("Commentry list")
+
+    assert.is_true(vim.tbl_contains(matches, "list-comments"))
+  end)
 end)
