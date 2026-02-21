@@ -714,9 +714,35 @@ local function jumpable_comments_for_context(diff_id, context)
     if a_start ~= b_start then
       return a_start < b_start
     end
-    return (a.created_at or "") < (b.created_at or "")
+    local a_end = a.line_end or a_start
+    local b_end = b.line_end or b_start
+    if a_end ~= b_end then
+      return a_end < b_end
+    end
+    if (a.created_at or "") ~= (b.created_at or "") then
+      return (a.created_at or "") < (b.created_at or "")
+    end
+    return (a.id or "") < (b.id or "")
   end)
   return comments
+end
+
+---@param comment commentry.DraftComment
+---@return string
+local function comment_location_label(comment)
+  local side = comment.line_side or "head"
+  local line_start = comment.line_start or comment.line_number
+  local line_end = comment.line_end or line_start
+  if not is_integer(line_start) then
+    return ("%s:file"):format(side)
+  end
+  if not is_integer(line_end) then
+    line_end = line_start
+  end
+  if line_end <= line_start then
+    return ("%s:L%d"):format(side, line_start)
+  end
+  return ("%s:L%d-L%d"):format(side, line_start, line_end)
 end
 
 ---@param comment commentry.DraftComment
@@ -727,10 +753,7 @@ local function list_entry_label(comment)
     preview = preview:sub(1, 69) .. "..."
   end
   local comment_type = comment.comment_type or "note"
-  local line_start = line_start_for(comment) or 1
-  local line_end = line_end_for(comment) or line_start
-  local line_label = line_start == line_end and tostring(line_start) or ("%d-%d"):format(line_start, line_end)
-  return ("%s:%s [%s] [%s] %s"):format(comment.file_path, line_label, comment.line_side, comment_type, preview)
+  return ("%s @ %s [%s] %s"):format(comment.file_path, comment_location_label(comment), comment_type, preview)
 end
 
 ---@param comment commentry.DraftComment
@@ -1061,6 +1084,147 @@ function M.list_comments()
     jump_to_comment(choice)
     M.refresh_hover_preview()
   end)
+end
+
+---@param diff_id string
+---@return commentry.DraftComment[]
+local function exportable_comments(diff_id)
+  local dstate = diff_state(diff_id)
+  local comments = {}
+  for _, comment in ipairs(dstate.comments) do
+    if comment.status ~= "unresolved" then
+      comments[#comments + 1] = comment
+    end
+  end
+  table.sort(comments, function(a, b)
+    if a.file_path ~= b.file_path then
+      return a.file_path < b.file_path
+    end
+    if a.line_side ~= b.line_side then
+      return a.line_side < b.line_side
+    end
+    local a_start = a.line_start or a.line_number or 1
+    local b_start = b.line_start or b.line_number or 1
+    if a_start ~= b_start then
+      return a_start < b_start
+    end
+    local a_end = a.line_end or a_start
+    local b_end = b.line_end or b_start
+    if a_end ~= b_end then
+      return a_end < b_end
+    end
+    if (a.created_at or "") ~= (b.created_at or "") then
+      return (a.created_at or "") < (b.created_at or "")
+    end
+    return (a.id or "") < (b.id or "")
+  end)
+  return comments
+end
+
+---@param context? table
+---@return string|nil, string|nil
+function M.generate_export_markdown(context)
+  local resolved_context = context
+  local context_err = nil
+  if not resolved_context then
+    resolved_context, context_err = current_context()
+  end
+  if type(resolved_context) ~= "table" then
+    return nil, context_err or "No diffview context"
+  end
+
+  local view = resolved_context.view or resolved_context
+  local diff_id = diff_id_for_view(view)
+  local comments = exportable_comments(diff_id)
+
+  local lines = {
+    "# Commentry Draft Export",
+    "",
+    ("- Context: `%s`"):format(diff_id),
+    ("- Comments: %d"):format(#comments),
+    "",
+  }
+
+  if #comments == 0 then
+    lines[#lines + 1] = "_No draft comments._"
+    return table.concat(lines, "\n"), nil
+  end
+
+  local current_file = nil
+  for _, comment in ipairs(comments) do
+    if comment.file_path ~= current_file then
+      if current_file then
+        lines[#lines + 1] = ""
+      end
+      current_file = comment.file_path
+      lines[#lines + 1] = ("## `%s`"):format(current_file)
+      lines[#lines + 1] = ""
+    end
+
+    local comment_type = comment.comment_type or "note"
+    lines[#lines + 1] = ("- [%s] `%s`"):format(comment_type, comment_location_label(comment))
+
+    local body_lines = vim.split(comment.body or "", "\n", { plain = true })
+    if #body_lines == 0 then
+      body_lines = { "" }
+    end
+    for _, body_line in ipairs(body_lines) do
+      lines[#lines + 1] = ("  %s"):format(body_line)
+    end
+    lines[#lines + 1] = ""
+  end
+
+  return table.concat(lines, "\n"), nil
+end
+
+---@param cmd_args string?
+---@return string|nil, string|nil
+local function export_register_from_args(cmd_args)
+  if type(cmd_args) ~= "string" then
+    return nil, nil
+  end
+  local args = vim.trim(cmd_args)
+  if args == "" then
+    return nil, nil
+  end
+  if args == "stdout" then
+    return nil, nil
+  end
+  if args == "register" then
+    return '"', nil
+  end
+  local prefix = "register:"
+  if args:sub(1, #prefix) == prefix then
+    local register = args:sub(#prefix + 1)
+    if #register == 1 then
+      return register, nil
+    end
+    return nil, "Register destination must be a single register name (example: register:a)"
+  end
+  return nil, "Unknown export destination. Use `stdout`, `register`, or `register:<name>`"
+end
+
+---@param cmd_args string?
+function M.export_comments(cmd_args)
+  local register, parse_err = export_register_from_args(cmd_args)
+  if parse_err then
+    Util.error(parse_err)
+    return
+  end
+
+  local markdown, export_err = M.generate_export_markdown()
+  if not markdown then
+    Util.error(export_err or "Failed to generate comment export")
+    return
+  end
+
+  if not register then
+    print(markdown)
+    return
+  end
+
+  vim.fn.setreg(register, markdown)
+  Util.info(("Exported draft comments to register `%s`"):format(register))
 end
 
 ---@param view table

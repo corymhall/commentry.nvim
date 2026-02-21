@@ -105,6 +105,9 @@ describe("commentry command routing", function()
       set_comment_type = function()
         return
       end,
+      export_comments = function()
+        return
+      end,
       render_current_buffer = function()
         return
       end,
@@ -138,6 +141,9 @@ describe("commentry command routing", function()
       set_comment_type = function()
         return
       end,
+      export_comments = function()
+        return
+      end,
       render_current_buffer = function()
         return
       end,
@@ -160,6 +166,42 @@ describe("commentry command routing", function()
     assert.is_true(vim.tbl_contains(matches, "list-comments"))
   end)
 
+  it("includes export in command completion", function()
+    vim.api.nvim_create_autocmd = function()
+      return 1
+    end
+    package.loaded["commentry.comments"] = {
+      list_comments = function()
+        return
+      end,
+      set_comment_type = function()
+        return
+      end,
+      export_comments = function()
+        return
+      end,
+      render_current_buffer = function()
+        return
+      end,
+    }
+    package.loaded["commentry.config"] = {
+      augroup = 1,
+      diffview = { enabled = true },
+      keymaps = { add_comment = "mc", edit_comment = "me", delete_comment = "md", set_comment_type = "mt" },
+    }
+    package.loaded["commentry.diffview"] = {
+      open = function()
+        return true
+      end,
+    }
+
+    package.loaded["commentry.commands"] = nil
+    local Commands = require("commentry.commands")
+    local matches = Commands.complete("Commentry ex")
+
+    assert.is_true(vim.tbl_contains(matches, "export"))
+  end)
+
   it("routes :Commentry set-comment-type to comments.set_comment_type", function()
     local called = 0
     vim.api.nvim_create_autocmd = function()
@@ -172,6 +214,9 @@ describe("commentry command routing", function()
       end,
       set_comment_type = function()
         called = called + 1
+      end,
+      export_comments = function()
+        return
       end,
       render_current_buffer = function()
         return
@@ -206,6 +251,9 @@ describe("commentry command routing", function()
         called = called + 1
       end,
       set_comment_type = function()
+        return
+      end,
+      export_comments = function()
         return
       end,
       render_current_buffer = function()
@@ -245,6 +293,9 @@ describe("commentry command routing", function()
       set_comment_type = function()
         return
       end,
+      export_comments = function(args)
+        return
+      end,
       render_current_buffer = function()
         return
       end,
@@ -279,5 +330,46 @@ describe("commentry command routing", function()
     assert.are.same({ "HEAD~1..HEAD" }, open_args)
     assert.are.same("commit_range", open_context.mode)
     assert.are.same("/tmp/project::commit_range::HEAD~1..HEAD", open_context.context_id)
+  end)
+
+  it("routes :Commentry export to comments.export_comments with args", function()
+    local called = 0
+    local captured_args = nil
+    vim.api.nvim_create_autocmd = function()
+      return 1
+    end
+
+    package.loaded["commentry.comments"] = {
+      list_comments = function()
+        return
+      end,
+      set_comment_type = function()
+        return
+      end,
+      export_comments = function(args)
+        called = called + 1
+        captured_args = args
+      end,
+      render_current_buffer = function()
+        return
+      end,
+    }
+    package.loaded["commentry.config"] = {
+      augroup = 1,
+      diffview = { enabled = true },
+      keymaps = { add_comment = "mc", edit_comment = "me", delete_comment = "md", set_comment_type = "mt" },
+    }
+    package.loaded["commentry.diffview"] = {
+      open = function()
+        return true
+      end,
+    }
+
+    package.loaded["commentry.commands"] = nil
+    local Commands = require("commentry.commands")
+    Commands.cmd({ args = "export register:a" })
+
+    assert.are.same(1, called)
+    assert.are.same("register:a", captured_args)
   end)
 end)

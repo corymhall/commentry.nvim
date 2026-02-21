@@ -108,6 +108,8 @@ describe("commentry.comments persistence", function()
   local original_getpos
   local original_snacks
   local original_util
+  local original_setreg
+  local original_print
 
   local function load_with_stubs(stubs)
     original_store = package.loaded["commentry.store"]
@@ -130,6 +132,8 @@ describe("commentry.comments persistence", function()
     original_getpos = vim.fn.getpos
     original_snacks = package.loaded["snacks"]
     original_util = package.loaded["commentry.util"]
+    original_setreg = vim.fn.setreg
+    original_print = _G.print
   end)
 
   after_each(function()
@@ -141,6 +145,8 @@ describe("commentry.comments persistence", function()
     vim.fn.getpos = original_getpos
     package.loaded["snacks"] = original_snacks
     package.loaded["commentry.util"] = original_util
+    vim.fn.setreg = original_setreg
+    _G.print = original_print
     package.loaded["commentry.store"] = original_store
     package.loaded["commentry.diffview"] = original_diffview
     package.loaded["commentry.comments"] = original_comments
@@ -1252,11 +1258,212 @@ describe("commentry.comments persistence", function()
     assert.are.same("Commentry draft comments", captured_opts.prompt)
     assert.is_true(type(captured_opts.format_item) == "function")
     local label = captured_opts.format_item(captured_items[1])
-    assert.is_true(label:find("file.lua:4", 1, true) ~= nil)
-    assert.is_true(label:find("[head]", 1, true) ~= nil)
+    assert.is_true(label:find("file.lua @ head:L4", 1, true) ~= nil)
     assert.is_true(label:find("[note]", 1, true) ~= nil)
     assert.is_true(label:find("first draft", 1, true) ~= nil)
     assert.are.same({ 4, 0 }, moved_cursor)
+  end)
+
+  it("generates deterministic export markdown with typed range labels", function()
+    local root = vim.fs.normalize(vim.fn.getcwd())
+    local comments = load_with_stubs({
+      store = {
+        path_for_context = function()
+          return "/tmp/project/.commentry/contexts/export/commentry.json"
+        end,
+        read = function()
+          return {
+            project_root = root,
+            context_id = root,
+            comments = {
+              {
+                id = "c3",
+                context_id = root,
+                file_path = "a.lua",
+                line_start = 2,
+                line_end = 4,
+                line_side = "head",
+                comment_type = "issue",
+                body = "Range issue",
+                created_at = "2026-02-21T00:00:03Z",
+                updated_at = "2026-02-21T00:00:03Z",
+              },
+              {
+                id = "c1",
+                context_id = root,
+                file_path = "a.lua",
+                line_start = 1,
+                line_end = 1,
+                line_side = "base",
+                comment_type = "note",
+                body = "Base note",
+                created_at = "2026-02-21T00:00:01Z",
+                updated_at = "2026-02-21T00:00:01Z",
+              },
+              {
+                id = "c2",
+                context_id = root,
+                file_path = "z.lua",
+                line_start = 7,
+                line_end = 7,
+                line_side = "head",
+                comment_type = "suggestion",
+                body = "First line\nSecond line",
+                created_at = "2026-02-21T00:00:02Z",
+                updated_at = "2026-02-21T00:00:02Z",
+              },
+              {
+                id = "c4",
+                context_id = root,
+                file_path = "z.lua",
+                line_start = 8,
+                line_end = 8,
+                line_side = "head",
+                comment_type = "issue",
+                body = "Hidden unresolved",
+                status = "unresolved",
+                created_at = "2026-02-21T00:00:04Z",
+                updated_at = "2026-02-21T00:00:04Z",
+              },
+            },
+            threads = {},
+          }
+        end,
+        write = function()
+          return true
+        end,
+      },
+      diffview = {
+        get_current_view = function()
+          return { git_root = root }
+        end,
+        current_file_context = function()
+          return {
+            file_path = "a.lua",
+            line_number = 1,
+            line_side = "head",
+            bufnr = 1,
+            view = { git_root = root },
+          }
+        end,
+        render_comment_markers = function()
+          return
+        end,
+        render_hover_preview = function()
+          return
+        end,
+        clear_hover_preview = function()
+          return
+        end,
+      },
+    })
+
+    local ok = comments.load_for_view({ git_root = root })
+    assert.is_true(ok)
+
+    local markdown, err = comments.generate_export_markdown()
+    assert.is_nil(err)
+    assert.is_true(type(markdown) == "string" and markdown ~= "")
+    assert.is_true(markdown:find("# Commentry Draft Export", 1, true) ~= nil)
+    assert.is_true(markdown:find("- Comments: 3", 1, true) ~= nil)
+    assert.is_true(markdown:find("## `a.lua`", 1, true) ~= nil)
+    assert.is_true(markdown:find("## `z.lua`", 1, true) ~= nil)
+    assert.is_true(markdown:find("%[note%] `base:L1`") ~= nil)
+    assert.is_true(markdown:find("%[issue%] `head:L2%-L4`") ~= nil)
+    assert.is_true(markdown:find("%[suggestion%] `head:L7`") ~= nil)
+    assert.is_true(markdown:find("Hidden unresolved", 1, true) == nil)
+
+    local first = markdown:find("%[note%] `base:L1`")
+    local second = markdown:find("%[issue%] `head:L2%-L4`")
+    local third = markdown:find("%[suggestion%] `head:L7`")
+    assert.is_true(first < second and second < third)
+  end)
+
+  it("exports markdown to register destination", function()
+    local root = vim.fs.normalize(vim.fn.getcwd())
+    local setreg_calls = {}
+    local infos = {}
+
+    package.loaded["commentry.util"] = {
+      error = function(msg)
+        error(msg)
+      end,
+      warn = function()
+        return
+      end,
+      info = function(msg)
+        infos[#infos + 1] = msg
+      end,
+      debug = function()
+        return
+      end,
+    }
+    vim.fn.setreg = function(register, value)
+      setreg_calls[#setreg_calls + 1] = { register = register, value = value }
+    end
+
+    local comments = load_with_stubs({
+      store = {
+        path_for_context = function()
+          return "/tmp/project/.commentry/contexts/export/commentry.json"
+        end,
+        read = function()
+          return {
+            project_root = root,
+            context_id = root,
+            comments = {
+              {
+                id = "c1",
+                context_id = root,
+                file_path = "file.lua",
+                line_start = 3,
+                line_end = 3,
+                line_side = "head",
+                comment_type = "note",
+                body = "Hello",
+                created_at = "2026-02-21T00:00:01Z",
+                updated_at = "2026-02-21T00:00:01Z",
+              },
+            },
+            threads = {},
+          }
+        end,
+        write = function()
+          return true
+        end,
+      },
+      diffview = {
+        get_current_view = function()
+          return { git_root = root }
+        end,
+        current_file_context = function()
+          return {
+            file_path = "file.lua",
+            line_number = 3,
+            line_side = "head",
+            bufnr = 1,
+            view = { git_root = root },
+          }
+        end,
+        render_comment_markers = function()
+          return
+        end,
+        render_hover_preview = function()
+          return
+        end,
+        clear_hover_preview = function()
+          return
+        end,
+      },
+    })
+
+    comments.load_for_view({ git_root = root })
+    comments.export_comments("register:a")
+
+    assert.are.same(1, #setreg_calls)
+    assert.are.same("a", setreg_calls[1].register)
+    assert.is_true(setreg_calls[1].value:find("# Commentry Draft Export", 1, true) ~= nil)
+    assert.are.same("Exported draft comments to register `a`", infos[1])
   end)
 
   it("reports when no jumpable comments exist for current context", function()

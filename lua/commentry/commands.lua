@@ -129,6 +129,10 @@ function M.setup()
     Comments.set_comment_type()
   end)
 
+  M.register("export", function(_, cmd_args)
+    Comments.export_comments(cmd_args)
+  end)
+
   for _, module_name in ipairs(feature_modules) do
     local ok, mod = pcall(require, module_name)
     if ok and type(mod.register_commands) == "function" then
