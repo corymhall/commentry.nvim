@@ -399,6 +399,23 @@ local function render_for_context(context)
   end
 end
 
+---@param context table
+---@return commentry.DraftComment[]
+local function active_comments_for_line(context)
+  local diff_id = diff_id_for_view(context.view)
+  local dstate = diff_state(diff_id)
+  local comments = {}
+  for _, comment in ipairs(dstate.comments) do
+    if comment.file_path == context.file_path
+      and comment.line_side == context.line_side
+      and comment.line_number == context.line_number
+      and comment.status ~= "unresolved" then
+      comments[#comments + 1] = comment
+    end
+  end
+  return comments
+end
+
 ---@return table|nil, string|nil
 local function current_context()
   local context, err = Diffview.current_file_context()
@@ -588,6 +605,25 @@ function M.render_current_buffer()
     return
   end
   render_for_context(context)
+end
+
+---@return boolean
+function M.refresh_hover_preview()
+  local context, err = current_context()
+  if not context then
+    Diffview.clear_hover_preview(vim.api.nvim_get_current_buf())
+    if err then
+      Util.debug("hover preview skipped", err)
+    end
+    return false
+  end
+  local comments = active_comments_for_line(context)
+  if #comments == 0 then
+    Diffview.clear_hover_preview(context.bufnr)
+    return false
+  end
+  Diffview.render_hover_preview(context.bufnr, context.line_number, comments)
+  return true
 end
 
 ---@param view table

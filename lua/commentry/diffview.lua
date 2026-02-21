@@ -1,6 +1,8 @@
 local M = {}
 
 local Config = require("commentry.config")
+local hover_ns = vim.api.nvim_create_namespace("commentry-hover-preview")
+local hover_attached = {}
 
 local function mark_buffer(bufnr)
   if type(bufnr) == "number" and vim.api.nvim_buf_is_valid(bufnr) then
@@ -77,6 +79,53 @@ local function sync_comments_for_view()
   if type(comments.render_current_buffer) == "function" then
     comments.render_current_buffer()
   end
+  if type(comments.refresh_hover_preview) == "function" then
+    comments.refresh_hover_preview()
+  end
+end
+
+---@param bufnr integer
+local function is_diff_buffer(bufnr)
+  if type(bufnr) ~= "number" or not vim.api.nvim_buf_is_valid(bufnr) then
+    return false
+  end
+  local is_diff = vim.b[bufnr].commentry_diffview
+  if is_diff == nil then
+    local ok, value = pcall(vim.api.nvim_buf_get_var, bufnr, "commentry_diffview")
+    if ok then
+      is_diff = value
+    end
+  end
+  return is_diff == true
+end
+
+local function refresh_hover_for_current_buffer()
+  local bufnr = vim.api.nvim_get_current_buf()
+  if not is_diff_buffer(bufnr) then
+    M.clear_hover_preview(bufnr)
+    return
+  end
+  local ok, comments = pcall(require, "commentry.comments")
+  if not ok or type(comments.refresh_hover_preview) ~= "function" then
+    M.clear_hover_preview(bufnr)
+    return
+  end
+  comments.refresh_hover_preview()
+end
+
+---@param bufnr integer
+local function ensure_hover_autocmd(bufnr)
+  if type(bufnr) ~= "number" or hover_attached[bufnr] then
+    return
+  end
+  hover_attached[bufnr] = true
+  vim.api.nvim_create_autocmd({ "CursorMoved", "CursorHold" }, {
+    group = Config.augroup,
+    buffer = bufnr,
+    callback = function()
+      refresh_hover_for_current_buffer()
+    end,
+  })
 end
 
 ---@return boolean
@@ -122,6 +171,7 @@ function M.mark_current_buffer()
     return false
   end
   mark_buffer(context.bufnr)
+  ensure_hover_autocmd(context.bufnr)
   return true
 end
 
@@ -226,6 +276,48 @@ function M.render_comment_markers(bufnr, comments)
       hl_mode = "combine",
     })
   end
+end
+
+---@param bufnr integer
+function M.clear_hover_preview(bufnr)
+  if type(bufnr) ~= "number" or not vim.api.nvim_buf_is_valid(bufnr) then
+    return
+  end
+  vim.api.nvim_buf_clear_namespace(bufnr, hover_ns, 0, -1)
+end
+
+---@param bufnr integer
+---@param line_number integer
+---@param comments commentry.DraftComment[]
+function M.render_hover_preview(bufnr, line_number, comments)
+  if type(bufnr) ~= "number" or not vim.api.nvim_buf_is_valid(bufnr) then
+    return
+  end
+  M.clear_hover_preview(bufnr)
+  if type(line_number) ~= "number" or line_number < 1 then
+    return
+  end
+  if type(comments) ~= "table" or #comments == 0 then
+    return
+  end
+
+  local virt_lines = {}
+  for _, comment in ipairs(comments) do
+    if type(comment) == "table" and type(comment.body) == "string" and comment.body ~= "" then
+      local body = comment.body:gsub("\n", " ")
+      virt_lines[#virt_lines + 1] = { { ("[comment] %s"):format(body), "Comment" } }
+    end
+  end
+  if #virt_lines == 0 then
+    return
+  end
+
+  local line = math.max(line_number - 1, 0)
+  pcall(vim.api.nvim_buf_set_extmark, bufnr, hover_ns, line, 0, {
+    virt_lines = virt_lines,
+    virt_lines_above = false,
+    hl_mode = "combine",
+  })
 end
 
 return M
