@@ -211,6 +211,20 @@ local function comments_for_thread(dstate, thread)
   return results
 end
 
+---@param bufnr integer
+---@param line_number integer
+---@return string|nil
+local function line_text_at(bufnr, line_number)
+  if type(bufnr) ~= "number" or line_number < 1 then
+    return nil
+  end
+  local lines = vim.api.nvim_buf_get_lines(bufnr, line_number - 1, line_number, false)
+  if type(lines) ~= "table" or #lines == 0 then
+    return nil
+  end
+  return lines[1]
+end
+
 ---@param diff_id string
 ---@param store table
 local function apply_store(diff_id, store)
@@ -287,9 +301,16 @@ local function reconcile_for_context(diff_id, context)
   local dstate = diff_state(diff_id)
   local unresolved = {}
   for _, comment in ipairs(dstate.comments) do
+    local in_target = comment.file_path == context.file_path and comment.line_side == context.line_side
+    local in_range = comment.line_number >= 1 and comment.line_number <= line_count
+    local mismatched = false
+    if in_target and in_range and type(comment.line_content) == "string" then
+      local current = line_text_at(context.bufnr, comment.line_number)
+      mismatched = current ~= nil and current ~= comment.line_content
+    end
     if comment.file_path == context.file_path
       and comment.line_side == context.line_side
-      and (comment.line_number < 1 or comment.line_number > line_count)
+      and (not in_range or mismatched)
       and comment.status ~= "unresolved" then
       unresolved[#unresolved + 1] = comment.id
       comment.status = "unresolved"
@@ -604,6 +625,7 @@ function M.add_comment()
       Util.error(comment_err or "Failed to create comment")
       return
     end
+    comment.line_content = line_text_at(context.bufnr, context.line_number)
     local dstate = diff_state(diff_id)
     upsert_comment(dstate, comment)
     local thread, thread_err = ensure_thread(diff_id, anchor)

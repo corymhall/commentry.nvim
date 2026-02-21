@@ -74,6 +74,7 @@ describe("commentry.comments persistence", function()
   local original_diffview
   local original_comments
   local original_buf_line_count
+  local original_buf_get_lines
   local original_ui_input
   local original_ui_select
 
@@ -91,12 +92,14 @@ describe("commentry.comments persistence", function()
 
   before_each(function()
     original_buf_line_count = vim.api.nvim_buf_line_count
+    original_buf_get_lines = vim.api.nvim_buf_get_lines
     original_ui_input = vim.ui.input
     original_ui_select = vim.ui.select
   end)
 
   after_each(function()
     vim.api.nvim_buf_line_count = original_buf_line_count
+    vim.api.nvim_buf_get_lines = original_buf_get_lines
     vim.ui.input = original_ui_input
     vim.ui.select = original_ui_select
     package.loaded["commentry.store"] = original_store
@@ -239,6 +242,79 @@ describe("commentry.comments persistence", function()
     assert.are.same(0, #persisted.threads)
   end)
 
+  it("marks in-range mismatched line content unresolved and persists", function()
+    local persisted = nil
+    local store_data = {
+      project_root = "/tmp/project",
+      diff_id = "/tmp/project",
+      comments = {
+        {
+          id = "c1",
+          diff_id = "/tmp/project",
+          file_path = "file.lua",
+          line_number = 1,
+          line_side = "head",
+          body = "Anchor changed",
+          line_content = "before",
+        },
+      },
+      threads = {
+        {
+          id = "t-/tmp/project-file.lua|head|1",
+          diff_id = "/tmp/project",
+          file_path = "file.lua",
+          line_number = 1,
+          line_side = "head",
+          comment_ids = { "c1" },
+        },
+      },
+    }
+
+    local comments = load_with_stubs({
+      store = {
+        path_for_project = function()
+          return "/tmp/project/.commentry/commentry.json"
+        end,
+        read = function()
+          return store_data
+        end,
+        write = function(_, store)
+          persisted = store
+          return true
+        end,
+      },
+      diffview = {
+        current_file_context = function()
+          return {
+            file_path = "file.lua",
+            line_number = 1,
+            line_side = "head",
+            bufnr = 1,
+            view = { git_root = "/tmp/project" },
+          }
+        end,
+        render_comment_markers = function()
+          return
+        end,
+      },
+    })
+
+    vim.api.nvim_buf_line_count = function()
+      return 2
+    end
+    vim.api.nvim_buf_get_lines = function()
+      return { "after" }
+    end
+
+    comments.load_for_view({ git_root = "/tmp/project" })
+    comments.render_current_buffer()
+
+    assert.is_table(persisted)
+    assert.are.same(1, #persisted.comments)
+    assert.are.same("unresolved", persisted.comments[1].status)
+    assert.are.same(0, #persisted.threads)
+  end)
+
   it("resolves project root when view git_root points at .git", function()
     local root = vim.fn.tempname()
     vim.fn.mkdir(root .. "/.git", "p")
@@ -313,6 +389,9 @@ describe("commentry.comments persistence", function()
 
     vim.api.nvim_buf_line_count = function()
       return 30
+    end
+    vim.api.nvim_buf_get_lines = function()
+      return { "line text" }
     end
     vim.ui.input = function(_, cb)
       local next_value = table.remove(user_inputs, 1)
