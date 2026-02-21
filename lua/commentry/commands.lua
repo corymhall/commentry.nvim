@@ -55,21 +55,36 @@ local function maybe_attach_keymaps(bufnr)
 
   Util.debug("Attaching comment keymaps", buffer_debug_info(bufnr))
 
-  vim.keymap.set("n", Config.keymaps.add_comment, function()
+  local function set_diff_keymap(lhs, rhs, desc)
+    if type(lhs) ~= "string" or lhs == "" then
+      return
+    end
+    vim.keymap.set("n", lhs, rhs, { buffer = bufnr, desc = desc })
+  end
+
+  set_diff_keymap(Config.keymaps.add_comment, function()
     Comments.add_comment()
-  end, { buffer = bufnr, desc = "Commentry add comment" })
+  end, "Commentry add comment")
 
-  vim.keymap.set("n", Config.keymaps.edit_comment, function()
+  set_diff_keymap(Config.keymaps.edit_comment, function()
     Comments.edit_comment()
-  end, { buffer = bufnr, desc = "Commentry edit comment" })
+  end, "Commentry edit comment")
 
-  vim.keymap.set("n", Config.keymaps.delete_comment, function()
+  set_diff_keymap(Config.keymaps.delete_comment, function()
     Comments.delete_comment()
-  end, { buffer = bufnr, desc = "Commentry delete comment" })
+  end, "Commentry delete comment")
 
-  vim.keymap.set("n", Config.keymaps.set_comment_type, function()
+  set_diff_keymap(Config.keymaps.set_comment_type, function()
     Comments.set_comment_type()
-  end, { buffer = bufnr, desc = "Commentry set comment type" })
+  end, "Commentry set comment type")
+
+  set_diff_keymap(Config.keymaps.toggle_file_reviewed, function()
+    Comments.toggle_file_reviewed()
+  end, "Commentry toggle file reviewed")
+
+  set_diff_keymap(Config.keymaps.next_unreviewed_file, function()
+    Comments.next_unreviewed_file()
+  end, "Commentry next unreviewed file")
 
   Comments.render_current_buffer()
 end
@@ -114,6 +129,14 @@ function M.setup()
 
   M.register("set-comment-type", function()
     Comments.set_comment_type()
+  end)
+
+  M.register("toggle-file-reviewed", function()
+    Comments.toggle_file_reviewed()
+  end)
+
+  M.register("next-unreviewed-file", function()
+    Comments.next_unreviewed_file()
   end)
 
   for _, module_name in ipairs(feature_modules) do

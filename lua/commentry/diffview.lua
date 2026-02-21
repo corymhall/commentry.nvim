@@ -2,6 +2,7 @@ local M = {}
 
 local Config = require("commentry.config")
 local hover_ns = vim.api.nvim_create_namespace("commentry-hover-preview")
+local review_ns = vim.api.nvim_create_namespace("commentry-file-review")
 local hover_attached = {}
 
 local function mark_buffer(bufnr)
@@ -276,6 +277,31 @@ function M.render_comment_markers(bufnr, comments)
       hl_mode = "combine",
     })
   end
+end
+
+---@param bufnr integer
+function M.clear_file_review_indicator(bufnr)
+  if type(bufnr) ~= "number" or not vim.api.nvim_buf_is_valid(bufnr) then
+    return
+  end
+  vim.api.nvim_buf_clear_namespace(bufnr, review_ns, 0, -1)
+end
+
+---@param bufnr integer
+---@param reviewed boolean
+function M.render_file_review_indicator(bufnr, reviewed)
+  if type(bufnr) ~= "number" or not vim.api.nvim_buf_is_valid(bufnr) then
+    return
+  end
+  M.clear_file_review_indicator(bufnr)
+  if reviewed ~= true then
+    return
+  end
+  pcall(vim.api.nvim_buf_set_extmark, bufnr, review_ns, 0, 0, {
+    virt_text = { { "[reviewed]", "Comment" } },
+    virt_text_pos = "right_align",
+    hl_mode = "combine",
+  })
 end
 
 ---@param bufnr integer

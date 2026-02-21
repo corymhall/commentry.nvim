@@ -105,6 +105,12 @@ describe("commentry command routing", function()
       set_comment_type = function()
         return
       end,
+      toggle_file_reviewed = function()
+        return
+      end,
+      next_unreviewed_file = function()
+        return
+      end,
       render_current_buffer = function()
         return
       end,
@@ -112,7 +118,14 @@ describe("commentry command routing", function()
     package.loaded["commentry.config"] = {
       augroup = 1,
       diffview = { enabled = true },
-      keymaps = { add_comment = "mc", edit_comment = "me", delete_comment = "md", set_comment_type = "mt" },
+      keymaps = {
+        add_comment = "mc",
+        edit_comment = "me",
+        delete_comment = "md",
+        set_comment_type = "mt",
+        toggle_file_reviewed = "mr",
+        next_unreviewed_file = "m]",
+      },
     }
     package.loaded["commentry.diffview"] = {
       open = function()
@@ -138,6 +151,12 @@ describe("commentry command routing", function()
       set_comment_type = function()
         return
       end,
+      toggle_file_reviewed = function()
+        return
+      end,
+      next_unreviewed_file = function()
+        return
+      end,
       render_current_buffer = function()
         return
       end,
@@ -145,7 +164,14 @@ describe("commentry command routing", function()
     package.loaded["commentry.config"] = {
       augroup = 1,
       diffview = { enabled = true },
-      keymaps = { add_comment = "mc", edit_comment = "me", delete_comment = "md", set_comment_type = "mt" },
+      keymaps = {
+        add_comment = "mc",
+        edit_comment = "me",
+        delete_comment = "md",
+        set_comment_type = "mt",
+        toggle_file_reviewed = "mr",
+        next_unreviewed_file = "m]",
+      },
     }
     package.loaded["commentry.diffview"] = {
       open = function()
@@ -173,6 +199,12 @@ describe("commentry command routing", function()
       set_comment_type = function()
         called = called + 1
       end,
+      toggle_file_reviewed = function()
+        return
+      end,
+      next_unreviewed_file = function()
+        return
+      end,
       render_current_buffer = function()
         return
       end,
@@ -180,7 +212,14 @@ describe("commentry command routing", function()
     package.loaded["commentry.config"] = {
       augroup = 1,
       diffview = { enabled = true },
-      keymaps = { add_comment = "mc", edit_comment = "me", delete_comment = "md", set_comment_type = "mt" },
+      keymaps = {
+        add_comment = "mc",
+        edit_comment = "me",
+        delete_comment = "md",
+        set_comment_type = "mt",
+        toggle_file_reviewed = "mr",
+        next_unreviewed_file = "m]",
+      },
     }
     package.loaded["commentry.diffview"] = {
       open = function()
@@ -193,5 +232,100 @@ describe("commentry command routing", function()
     Commands.cmd({ args = "set-comment-type" })
 
     assert.are.same(1, called)
+  end)
+
+  it("routes :Commentry toggle-file-reviewed to comments.toggle_file_reviewed", function()
+    local called = 0
+    vim.api.nvim_create_autocmd = function()
+      return 1
+    end
+
+    package.loaded["commentry.comments"] = {
+      list_comments = function()
+        return
+      end,
+      set_comment_type = function()
+        return
+      end,
+      toggle_file_reviewed = function()
+        called = called + 1
+      end,
+      next_unreviewed_file = function()
+        return
+      end,
+      render_current_buffer = function()
+        return
+      end,
+    }
+    package.loaded["commentry.config"] = {
+      augroup = 1,
+      diffview = { enabled = true },
+      keymaps = {
+        add_comment = "mc",
+        edit_comment = "me",
+        delete_comment = "md",
+        set_comment_type = "mt",
+        toggle_file_reviewed = "mr",
+        next_unreviewed_file = "m]",
+      },
+    }
+    package.loaded["commentry.diffview"] = {
+      open = function()
+        return true
+      end,
+    }
+
+    package.loaded["commentry.commands"] = nil
+    local Commands = require("commentry.commands")
+    Commands.cmd({ args = "toggle-file-reviewed" })
+
+    assert.are.same(1, called)
+  end)
+
+  it("includes next-unreviewed-file in command completion", function()
+    vim.api.nvim_create_autocmd = function()
+      return 1
+    end
+
+    package.loaded["commentry.comments"] = {
+      list_comments = function()
+        return
+      end,
+      set_comment_type = function()
+        return
+      end,
+      toggle_file_reviewed = function()
+        return
+      end,
+      next_unreviewed_file = function()
+        return
+      end,
+      render_current_buffer = function()
+        return
+      end,
+    }
+    package.loaded["commentry.config"] = {
+      augroup = 1,
+      diffview = { enabled = true },
+      keymaps = {
+        add_comment = "mc",
+        edit_comment = "me",
+        delete_comment = "md",
+        set_comment_type = "mt",
+        toggle_file_reviewed = "mr",
+        next_unreviewed_file = "m]",
+      },
+    }
+    package.loaded["commentry.diffview"] = {
+      open = function()
+        return true
+      end,
+    }
+
+    package.loaded["commentry.commands"] = nil
+    local Commands = require("commentry.commands")
+    local matches = Commands.complete("Commentry next")
+
+    assert.is_true(vim.tbl_contains(matches, "next-unreviewed-file"))
   end)
 end)

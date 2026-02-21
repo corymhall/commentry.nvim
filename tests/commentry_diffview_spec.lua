@@ -84,6 +84,36 @@ describe("commentry.diffview hover preview", function()
     assert.is_true(clear_calls >= 2)
   end)
 
+  it("renders and clears reviewed file indicator", function()
+    local clear_calls = 0
+    local extmark_calls = 0
+    local extmark_opts = nil
+
+    vim.api.nvim_buf_is_valid = function()
+      return true
+    end
+    vim.api.nvim_buf_clear_namespace = function()
+      clear_calls = clear_calls + 1
+    end
+    vim.api.nvim_buf_set_extmark = function(_, _, _, _, opts)
+      extmark_calls = extmark_calls + 1
+      extmark_opts = opts
+      return 1
+    end
+
+    package.loaded["commentry.diffview"] = nil
+    local Diffview = require("commentry.diffview")
+
+    Diffview.render_file_review_indicator(1, true)
+    assert.are.same(1, extmark_calls)
+    assert.are.same("right_align", extmark_opts.virt_text_pos)
+    assert.are.same("[reviewed]", extmark_opts.virt_text[1][1])
+
+    Diffview.render_file_review_indicator(1, false)
+    assert.are.same(1, extmark_calls)
+    assert.is_true(clear_calls >= 2)
+  end)
+
   it("shows preview only for current commented line and clears otherwise", function()
     local rendered = nil
     local cleared = 0

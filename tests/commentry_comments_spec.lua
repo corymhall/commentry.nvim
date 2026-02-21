@@ -94,6 +94,7 @@ describe("commentry.comments persistence", function()
   local original_win_set_cursor
   local original_ui_input
   local original_ui_select
+  local original_cmd
   local original_snacks
   local original_util
 
@@ -115,6 +116,7 @@ describe("commentry.comments persistence", function()
     original_win_set_cursor = vim.api.nvim_win_set_cursor
     original_ui_input = vim.ui.input
     original_ui_select = vim.ui.select
+    original_cmd = vim.cmd
     original_snacks = package.loaded["snacks"]
     original_util = package.loaded["commentry.util"]
   end)
@@ -125,6 +127,7 @@ describe("commentry.comments persistence", function()
     vim.api.nvim_win_set_cursor = original_win_set_cursor
     vim.ui.input = original_ui_input
     vim.ui.select = original_ui_select
+    vim.cmd = original_cmd
     package.loaded["snacks"] = original_snacks
     package.loaded["commentry.util"] = original_util
     package.loaded["commentry.store"] = original_store
@@ -861,6 +864,117 @@ describe("commentry.comments persistence", function()
     assert.are.same(2, #writes)
     assert.are.same("note", writes[1].comments[1].comment_type)
     assert.are.same("issue", writes[2].comments[1].comment_type)
+  end)
+
+  it("toggles current file review state and persists it", function()
+    local writes = {}
+    local context = {
+      file_path = "file.lua",
+      line_number = 3,
+      line_side = "head",
+      bufnr = 1,
+      view = { git_root = "/tmp/project" },
+    }
+
+    local comments = load_with_stubs({
+      store = {
+        path_for_project = function()
+          return "/tmp/project/.commentry/commentry.json"
+        end,
+        read = function()
+          return nil, "not_found"
+        end,
+        write = function(_, store)
+          writes[#writes + 1] = vim.deepcopy(store)
+          return true
+        end,
+      },
+      diffview = {
+        current_file_context = function()
+          return context
+        end,
+        render_comment_markers = function()
+          return
+        end,
+        render_file_review_indicator = function()
+          return
+        end,
+      },
+    })
+
+    comments.toggle_file_reviewed()
+    comments.toggle_file_reviewed()
+
+    assert.are.same(2, #writes)
+    assert.is_true(writes[1].file_reviews["file.lua"])
+    assert.is_false(writes[2].file_reviews["file.lua"])
+    local reviewed, review_err = comments.current_file_reviewed(context)
+    assert.is_nil(review_err)
+    assert.is_false(reviewed)
+  end)
+
+  it("jumps to next unreviewed file in deterministic order", function()
+    local current_index = 1
+    local ordered = { "file_a.lua", "file_b.lua", "file_c.lua" }
+    local calls = 0
+
+    local comments = load_with_stubs({
+      store = {
+        path_for_project = function()
+          return "/tmp/project/.commentry/commentry.json"
+        end,
+        read = function()
+          return {
+            project_root = "/tmp/project",
+            context_id = "/tmp/project",
+            comments = {},
+            threads = {},
+            file_reviews = { ["file_b.lua"] = true },
+          }
+        end,
+        write = function()
+          return true
+        end,
+      },
+      diffview = {
+        current_file_context = function()
+          return {
+            file_path = ordered[current_index],
+            line_number = 1,
+            line_side = "head",
+            bufnr = 1,
+            view = {
+              git_root = "/tmp/project",
+              files = {
+                { path = "file_a.lua" },
+                { path = "file_b.lua" },
+                { path = "file_c.lua" },
+              },
+            },
+          }
+        end,
+        render_comment_markers = function()
+          return
+        end,
+        render_file_review_indicator = function()
+          return
+        end,
+      },
+    })
+
+    vim.cmd = function(command)
+      if command ~= "silent DiffviewNextFile" then
+        return
+      end
+      calls = calls + 1
+      current_index = (current_index % #ordered) + 1
+    end
+
+    comments.load_for_view({ git_root = "/tmp/project", files = { { path = "file_a.lua" }, { path = "file_b.lua" }, { path = "file_c.lua" } } })
+    comments.next_unreviewed_file()
+
+    assert.are.same(2, calls)
+    assert.are.same("file_c.lua", ordered[current_index])
   end)
 
   it("lists draft comments and jumps to selected entry line", function()

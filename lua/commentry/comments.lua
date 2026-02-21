@@ -548,6 +548,7 @@ local function render_for_context(context)
   local diff_id = diff_id_for_view(context.view)
   local reconciled = reconcile_for_context(diff_id, context)
   local dstate = diff_state(diff_id)
+  local reviewed = dstate.file_reviews[context.file_path] == true
   local comments = {}
   for _, comment in ipairs(dstate.comments) do
     if comment.file_path == context.file_path
@@ -557,6 +558,9 @@ local function render_for_context(context)
     end
   end
   Diffview.render_comment_markers(context.bufnr, comments)
+  if type(Diffview.render_file_review_indicator) == "function" then
+    Diffview.render_file_review_indicator(context.bufnr, reviewed)
+  end
   if reconciled then
     persist_for_view(diff_id, context.view, "Failed to persist reconciled comments")
   end
@@ -633,6 +637,58 @@ local function jump_to_comment(comment)
   local line = math.max(comment.line_number, 1)
   vim.api.nvim_win_set_cursor(0, { line, 0 })
   return true
+end
+
+---@param view table
+---@return string[]
+local function ordered_paths_for_view(view)
+  local entries = {}
+  local function append_entry(value)
+    if type(value) ~= "table" then
+      return
+    end
+    local path = value.path
+    if type(path) ~= "string" or path == "" then
+      local file = value.file
+      if type(file) == "table" and type(file.path) == "string" and file.path ~= "" then
+        path = file.path
+      end
+    end
+    if type(path) ~= "string" or path == "" then
+      return
+    end
+    entries[#entries + 1] = path
+  end
+  local function append_from_list(list)
+    if type(list) ~= "table" then
+      return
+    end
+    for _, item in ipairs(list) do
+      append_entry(item)
+    end
+  end
+
+  if type(view) ~= "table" then
+    return entries
+  end
+
+  append_from_list(view.files)
+  append_from_list(view.entries)
+  append_from_list(view.file_entries)
+  if type(view.panel) == "table" then
+    append_from_list(view.panel.files)
+    append_from_list(view.panel.entries)
+  end
+
+  local seen = {}
+  local ordered = {}
+  for _, path in ipairs(entries) do
+    if not seen[path] then
+      seen[path] = true
+      ordered[#ordered + 1] = path
+    end
+  end
+  return ordered
 end
 
 ---@return boolean, string|nil
@@ -867,6 +923,107 @@ function M.render_current_buffer()
     return
   end
   render_for_context(context)
+end
+
+---@param context? table
+---@return boolean, string|nil
+function M.current_file_reviewed(context)
+  local resolved = context
+  if type(resolved) ~= "table" then
+    local ctx, err = current_context()
+    if not ctx then
+      return false, err
+    end
+    resolved = ctx
+  end
+  local diff_id = diff_id_for_view(resolved.view)
+  local dstate = diff_state(diff_id)
+  return dstate.file_reviews[resolved.file_path] == true, nil
+end
+
+function M.toggle_file_reviewed()
+  local context, err = current_context()
+  if not context then
+    Util.error(err or "No diffview context")
+    return
+  end
+
+  local diff_id = diff_id_for_view(context.view)
+  local dstate = diff_state(diff_id)
+  local reviewed = dstate.file_reviews[context.file_path] == true
+  dstate.file_reviews[context.file_path] = not reviewed
+  mark_dirty(diff_id)
+  render_for_context(context)
+  persist_for_view(diff_id, context.view, "Failed to persist file review state")
+
+  if dstate.file_reviews[context.file_path] then
+    Util.info(("Marked reviewed: %s"):format(context.file_path))
+  else
+    Util.info(("Marked unreviewed: %s"):format(context.file_path))
+  end
+end
+
+function M.next_unreviewed_file()
+  local context, err = current_context()
+  if not context then
+    Util.error(err or "No diffview context")
+    return
+  end
+
+  local ordered_paths = ordered_paths_for_view(context.view)
+  if #ordered_paths == 0 then
+    Util.warn("Unable to determine diff file order for next-unreviewed navigation")
+    return
+  end
+
+  local diff_id = diff_id_for_view(context.view)
+  local dstate = diff_state(diff_id)
+  local current_idx = nil
+  for idx, path in ipairs(ordered_paths) do
+    if path == context.file_path then
+      current_idx = idx
+      break
+    end
+  end
+  if not current_idx then
+    Util.warn("Current diff file not found in ordered diff entries")
+    return
+  end
+
+  local target_path = nil
+  for offset = 1, #ordered_paths - 1 do
+    local idx = ((current_idx + offset - 1) % #ordered_paths) + 1
+    local path = ordered_paths[idx]
+    if dstate.file_reviews[path] ~= true then
+      target_path = path
+      break
+    end
+  end
+
+  if not target_path then
+    Util.info("All diff files are marked reviewed")
+    return
+  end
+
+  local moved = false
+  for _ = 1, #ordered_paths do
+    local ok = pcall(vim.cmd, "silent DiffviewNextFile")
+    if not ok then
+      Util.error("DiffviewNextFile is unavailable for file navigation")
+      return
+    end
+    local next_context = current_context()
+    if type(next_context) == "table" and next_context.file_path == target_path then
+      moved = true
+      break
+    end
+  end
+
+  if not moved then
+    Util.warn(("Failed to navigate to unreviewed file: %s"):format(target_path))
+    return
+  end
+  M.render_current_buffer()
 end
 
 ---@return boolean
@@ -1161,6 +1318,22 @@ function M.set_comment_type()
       render_for_context(context)
       persist_for_view(diff_id, context.view, "Failed to persist comment")
     end)
+  end)
+end
+
+---@param register fun(name: string, fn: fun(args: vim.api.keyset.create_user_command.command_args, cmd_args: string))
+function M.register_commands(register)
+  register("list-comments", function()
+    M.list_comments()
+  end)
+  register("set-comment-type", function()
+    M.set_comment_type()
+  end)
+  register("toggle-file-reviewed", function()
+    M.toggle_file_reviewed()
+  end)
+  register("next-unreviewed-file", function()
+    M.next_unreviewed_file()
   end)
 end
 
