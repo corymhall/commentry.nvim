@@ -120,6 +120,7 @@ describe("commentry.comments persistence", function()
           line_number = 3,
           line_side = "head",
           body = "Persisted",
+          line_content = "persisted line",
         },
       },
       threads = {
@@ -164,6 +165,9 @@ describe("commentry.comments persistence", function()
 
     vim.api.nvim_buf_line_count = function()
       return 10
+    end
+    vim.api.nvim_buf_get_lines = function()
+      return { "persisted line" }
     end
 
     local ok = comments.load_for_view({ git_root = "/tmp/project" })
@@ -313,6 +317,136 @@ describe("commentry.comments persistence", function()
     assert.are.same(1, #persisted.comments)
     assert.are.same("unresolved", persisted.comments[1].status)
     assert.are.same(0, #persisted.threads)
+  end)
+
+  it("marks legacy in-range comments without line_content unresolved", function()
+    local persisted = nil
+    local store_data = {
+      project_root = "/tmp/project",
+      diff_id = "/tmp/project",
+      comments = {
+        {
+          id = "c1",
+          diff_id = "/tmp/project",
+          file_path = "file.lua",
+          line_number = 1,
+          line_side = "head",
+          body = "Legacy anchor",
+        },
+      },
+      threads = {
+        {
+          id = "t-/tmp/project-file.lua|head|1",
+          diff_id = "/tmp/project",
+          file_path = "file.lua",
+          line_number = 1,
+          line_side = "head",
+          comment_ids = { "c1" },
+        },
+      },
+    }
+
+    local comments = load_with_stubs({
+      store = {
+        path_for_project = function()
+          return "/tmp/project/.commentry/commentry.json"
+        end,
+        read = function()
+          return store_data
+        end,
+        write = function(_, store)
+          persisted = store
+          return true
+        end,
+      },
+      diffview = {
+        current_file_context = function()
+          return {
+            file_path = "file.lua",
+            line_number = 1,
+            line_side = "head",
+            bufnr = 1,
+            view = { git_root = "/tmp/project" },
+          }
+        end,
+        render_comment_markers = function()
+          return
+        end,
+      },
+    })
+
+    vim.api.nvim_buf_line_count = function()
+      return 2
+    end
+
+    comments.load_for_view({ git_root = "/tmp/project" })
+    comments.render_current_buffer()
+
+    assert.is_table(persisted)
+    assert.are.same(1, #persisted.comments)
+    assert.are.same("unresolved", persisted.comments[1].status)
+    assert.are.same(0, #persisted.threads)
+  end)
+
+  it("keeps dirty in-memory edits when persist fails and load is retriggered", function()
+    local captured = {}
+    local writes = 0
+    local user_inputs = { "Dirty comment" }
+    local context = {
+      file_path = "file.lua",
+      line_number = 2,
+      line_side = "head",
+      bufnr = 1,
+      view = { git_root = "/tmp/project" },
+    }
+
+    local comments = load_with_stubs({
+      store = {
+        path_for_project = function()
+          return "/tmp/project/.commentry/commentry.json"
+        end,
+        read = function()
+          return {
+            project_root = "/tmp/project",
+            diff_id = "/tmp/project",
+            comments = {},
+            threads = {},
+          }
+        end,
+        write = function()
+          writes = writes + 1
+          return false, "write_failed"
+        end,
+      },
+      diffview = {
+        current_file_context = function()
+          return context
+        end,
+        render_comment_markers = function(_, comments_to_render)
+          captured = comments_to_render
+        end,
+      },
+    })
+
+    vim.api.nvim_buf_line_count = function()
+      return 10
+    end
+    vim.api.nvim_buf_get_lines = function()
+      return { "line text" }
+    end
+    vim.ui.input = function(_, cb)
+      cb(table.remove(user_inputs, 1))
+    end
+
+    comments.add_comment()
+    assert.are.same(1, writes)
+    assert.are.same(1, #captured)
+
+    local loaded = comments.load_for_view({ git_root = "/tmp/project" })
+    assert.is_false(loaded)
+    comments.render_current_buffer()
+    assert.are.same(1, #captured)
+    assert.are.same("Dirty comment", captured[1].body)
   end)
 
   it("resolves project root when view git_root points at .git", function()

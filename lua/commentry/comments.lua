@@ -11,6 +11,8 @@ local state = {
   diffs = {},
 }
 
+local ROOT_CANDIDATE_KEYS = { "git_root", "toplevel", "root", "cwd", "path" }
+
 ---@param root string
 ---@return string|nil
 local function normalize_root_candidate(root)
@@ -58,16 +60,33 @@ local function diff_state(diff_id)
       threads = {},
       comments_by_id = {},
       threads_by_id = {},
+      dirty = false,
     }
   end
   return state.diffs[diff_id]
+end
+
+---@param diff_id string
+local function mark_dirty(diff_id)
+  diff_state(diff_id).dirty = true
+end
+
+---@param diff_id string
+local function clear_dirty(diff_id)
+  diff_state(diff_id).dirty = false
+end
+
+---@param diff_id string
+---@return boolean
+local function is_dirty(diff_id)
+  return diff_state(diff_id).dirty == true
 end
 
 ---@param view? table
 ---@return string
 local function diff_id_for_view(view)
   if type(view) == "table" then
-    for _, key in ipairs({ "git_root", "toplevel", "root", "cwd", "path" }) do
+    for _, key in ipairs(ROOT_CANDIDATE_KEYS) do
       local resolved = normalize_root_candidate(view[key])
       if resolved then
         return resolved
@@ -88,7 +107,7 @@ end
 ---@return string|nil
 local function project_root_for_view(view)
   if type(view) == "table" then
-    for _, key in ipairs({ "git_root", "toplevel", "root", "cwd", "path" }) do
+    for _, key in ipairs(ROOT_CANDIDATE_KEYS) do
       local resolved = normalize_root_candidate(view[key])
       if resolved then
         return resolved
@@ -287,6 +306,7 @@ local function persist_for_view(diff_id, view, failure_msg)
     Util.warn(save_err or failure_msg)
     return false
   end
+  clear_dirty(diff_id)
   return true
 end
 
@@ -303,14 +323,15 @@ local function reconcile_for_context(diff_id, context)
   for _, comment in ipairs(dstate.comments) do
     local in_target = comment.file_path == context.file_path and comment.line_side == context.line_side
     local in_range = comment.line_number >= 1 and comment.line_number <= line_count
+    local missing_line_content = in_target and in_range and type(comment.line_content) ~= "string"
     local mismatched = false
-    if in_target and in_range and type(comment.line_content) == "string" then
+    if in_target and in_range and not missing_line_content then
       local current = line_text_at(context.bufnr, comment.line_number)
       mismatched = current ~= nil and current ~= comment.line_content
     end
     if comment.file_path == context.file_path
       and comment.line_side == context.line_side
-      and (not in_range or mismatched)
+      and (not in_range or missing_line_content or mismatched)
       and comment.status ~= "unresolved" then
       unresolved[#unresolved + 1] = comment.id
       comment.status = "unresolved"
@@ -321,6 +342,7 @@ local function reconcile_for_context(diff_id, context)
     return false
   end
 
+  mark_dirty(diff_id)
   for _, comment_id in ipairs(unresolved) do
     for _, thread in ipairs(dstate.threads) do
       remove_from_thread(thread, comment_id)
@@ -571,6 +593,11 @@ end
 ---@param view table
 ---@return boolean
 function M.load_for_view(view)
+  local diff_id = diff_id_for_view(view)
+  if is_dirty(diff_id) then
+    Util.warn("Skipping store reload: unsaved in-memory comments exist")
+    return false
+  end
   local root = project_root_for_view(view)
   if not root then
     Util.warn("Unable to resolve project root for comment store")
@@ -589,7 +616,6 @@ function M.load_for_view(view)
     Util.warn(read_err)
     return false
   end
-  local diff_id = diff_id_for_view(view)
   apply_store(diff_id, store)
   return true
 end
@@ -634,6 +660,7 @@ function M.add_comment()
       return
     end
     thread.comment_ids[#thread.comment_ids + 1] = comment.id
+    mark_dirty(diff_id)
     render_for_context(context)
     persist_for_view(diff_id, context.view, "Failed to persist comment")
   end)
@@ -678,6 +705,7 @@ function M.edit_comment()
       end
       updated.status = nil
       upsert_comment(dstate, updated)
+      mark_dirty(diff_id)
       render_for_context(context)
       persist_for_view(diff_id, context.view, "Failed to persist comment")
     end)
@@ -715,6 +743,7 @@ function M.delete_comment()
     remove_comment(dstate, target.id)
     remove_from_thread(thread, target.id)
     maybe_drop_thread(dstate, thread)
+    mark_dirty(diff_id)
     render_for_context(context)
     persist_for_view(diff_id, context.view, "Failed to persist comment")
   end)
