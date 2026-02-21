@@ -229,4 +229,55 @@ describe("commentry command routing", function()
 
     assert.are.same(1, called)
   end)
+
+  it("passes resolved review context when opening commit range views", function()
+    local open_args = nil
+    local open_context = nil
+    local resolve_args = nil
+
+    vim.api.nvim_create_autocmd = function()
+      return 1
+    end
+    package.loaded["commentry.comments"] = {
+      list_comments = function()
+        return
+      end,
+      set_comment_type = function()
+        return
+      end,
+      render_current_buffer = function()
+        return
+      end,
+    }
+    package.loaded["commentry.config"] = {
+      augroup = 1,
+      diffview = { enabled = true },
+      keymaps = { add_comment = "mc", edit_comment = "me", delete_comment = "md", set_comment_type = "mt" },
+    }
+    package.loaded["commentry.diffview"] = {
+      resolve_review_context = function(args)
+        resolve_args = vim.deepcopy(args)
+        return {
+          mode = "commit_range",
+          root = "/tmp/project",
+          revisions = { "HEAD~1..HEAD" },
+          context_id = "/tmp/project::commit_range::HEAD~1..HEAD",
+        }
+      end,
+      open = function(args, context)
+        open_args = vim.deepcopy(args)
+        open_context = vim.deepcopy(context)
+        return true
+      end,
+    }
+
+    package.loaded["commentry.commands"] = nil
+    local Commands = require("commentry.commands")
+    Commands.cmd({ args = "open HEAD~1..HEAD" })
+
+    assert.are.same({ "HEAD~1..HEAD" }, resolve_args)
+    assert.are.same({ "HEAD~1..HEAD" }, open_args)
+    assert.are.same("commit_range", open_context.mode)
+    assert.are.same("/tmp/project::commit_range::HEAD~1..HEAD", open_context.context_id)
+  end)
 end)

@@ -94,7 +94,11 @@ function M.setup()
     if type(cmd_args) == "string" and cmd_args ~= "" then
       args = vim.split(cmd_args, "%s+", { trimempty = true })
     end
-    local ok, err = Diffview.open(args)
+    local review_context = nil
+    if type(Diffview.resolve_review_context) == "function" then
+      review_context = Diffview.resolve_review_context(args)
+    end
+    local ok, err = Diffview.open(args, review_context)
     if ok then
       return
     end

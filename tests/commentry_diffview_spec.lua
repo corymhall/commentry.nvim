@@ -371,3 +371,29 @@ describe("commentry.diffview hover preview", function()
     assert.are.same(1, refresh_calls)
   end)
 end)
+
+describe("commentry review context", function()
+  local original_diffview
+
+  before_each(function()
+    original_diffview = package.loaded["commentry.diffview"]
+  end)
+
+  after_each(function()
+    package.loaded["commentry.diffview"] = original_diffview
+  end)
+
+  it("builds distinct context identity for working tree and revision ranges", function()
+    package.loaded["commentry.diffview"] = nil
+    local Diffview = require("commentry.diffview")
+
+    local working_context = Diffview.resolve_review_context(nil, { git_root = "/tmp/commentry-project" })
+    local revision_context = Diffview.resolve_review_context({ "HEAD~1..HEAD" }, { git_root = "/tmp/commentry-project" })
+    local revision_context_again = Diffview.resolve_review_context({ "HEAD~1..HEAD" }, { git_root = "/tmp/commentry-project" })
+
+    assert.are.same("working_tree", working_context.mode)
+    assert.are.same("commit_range", revision_context.mode)
+    assert.are_not.same(working_context.context_id, revision_context.context_id)
+    assert.are.same(revision_context.context_id, revision_context_again.context_id)
+  end)
+end)

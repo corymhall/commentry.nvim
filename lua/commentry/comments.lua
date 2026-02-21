@@ -143,6 +143,12 @@ end
 ---@param view? table
 ---@return string
 local function diff_id_for_view(view)
+  if type(Diffview.resolve_review_context) == "function" then
+    local context = Diffview.resolve_review_context(nil, view)
+    if type(context) == "table" and type(context.context_id) == "string" and context.context_id ~= "" then
+      return context.context_id
+    end
+  end
   if type(view) == "table" then
     for _, key in ipairs(ROOT_CANDIDATE_KEYS) do
       local resolved = normalize_root_candidate(view[key])
@@ -164,6 +170,12 @@ end
 ---@param view? table
 ---@return string|nil
 local function project_root_for_view(view)
+  if type(Diffview.resolve_review_context) == "function" then
+    local context = Diffview.resolve_review_context(nil, view)
+    if type(context) == "table" and type(context.root) == "string" and context.root ~= "" then
+      return context.root
+    end
+  end
   if type(view) == "table" then
     for _, key in ipairs(ROOT_CANDIDATE_KEYS) do
       local resolved = normalize_root_candidate(view[key])
@@ -178,6 +190,36 @@ local function project_root_for_view(view)
   end
   local root = output[1]
   return normalize_root_candidate(root)
+end
+
+---@param view? table
+---@return string|nil, string|nil
+function M.context_id_for_view(view)
+  if type(Diffview.resolve_review_context) == "function" then
+    local context, err = Diffview.resolve_review_context(nil, view)
+    if not context then
+      return nil, err
+    end
+    if type(context.context_id) ~= "string" or context.context_id == "" then
+      return nil, "context_id_unavailable"
+    end
+    return context.context_id, nil
+  end
+  return diff_id_for_view(view), nil
+end
+
+---@param view? table
+---@param err_msg string
+---@return string|nil
+local function require_context_id(view, err_msg)
+  local context_id, context_err = M.context_id_for_view(view)
+  if context_id then
+    return context_id
+  end
+  if err_msg ~= "" then
+    Util.warn(context_err or err_msg)
+  end
+  return nil
 end
 
 ---@param context table
@@ -512,7 +554,10 @@ local function persist_for_view(diff_id, view, failure_msg)
     Util.warn("Unable to resolve project root for comment store")
     return false
   end
-  local context_id = diff_id_for_view(view)
+  local context_id = require_context_id(view, "Unable to resolve review context")
+  if not context_id then
+    return false
+  end
   local ok, save_err = save_store(diff_id, root, context_id)
   if not ok then
     Util.warn(save_err or failure_msg)
@@ -604,7 +649,10 @@ end
 
 ---@param context table
 local function render_for_context(context)
-  local diff_id = diff_id_for_view(context.view)
+  local diff_id = require_context_id(context.view, "Unable to resolve review context")
+  if not diff_id then
+    return
+  end
   local reconciled = reconcile_for_context(diff_id, context)
   local dstate = diff_state(diff_id)
   local comments = {}
@@ -624,7 +672,10 @@ end
 ---@param context table
 ---@return commentry.DraftComment[]
 local function active_comments_for_line(context)
-  local diff_id = diff_id_for_view(context.view)
+  local diff_id = require_context_id(context.view, "Unable to resolve review context")
+  if not diff_id then
+    return {}
+  end
   local dstate = diff_state(diff_id)
   local comments = {}
   for _, comment in ipairs(dstate.comments) do
@@ -989,7 +1040,10 @@ function M.list_comments()
     return
   end
 
-  local diff_id = diff_id_for_view(context.view)
+  local diff_id = require_context_id(context.view, "Unable to resolve review context")
+  if not diff_id then
+    return
+  end
   local comments = jumpable_comments_for_context(diff_id, context)
   if #comments == 0 then
     Util.info("No jumpable draft comments for current diff file/side")
@@ -1012,7 +1066,10 @@ end
 ---@param view table
 ---@return boolean
 function M.load_for_view(view)
-  local diff_id = diff_id_for_view(view)
+  local diff_id = require_context_id(view, "Unable to resolve review context")
+  if not diff_id then
+    return false
+  end
   if is_dirty(diff_id) then
     Util.warn("Skipping store reload: unsaved in-memory comments exist")
     return false
@@ -1118,7 +1175,10 @@ function M.add_comment()
     Util.error(anchor_err or "Invalid line anchor")
     return
   end
-  local diff_id = diff_id_for_view(context.view)
+  local diff_id = require_context_id(context.view, "Unable to resolve review context")
+  if not diff_id then
+    return
+  end
   local active_type = selected_comment_type(diff_id)
   vim.ui.input({ prompt = ("Add %s comment: "):format(active_type) }, function(input)
     if not input or input == "" then
@@ -1197,7 +1257,10 @@ function M.edit_comment()
     Util.error(anchor_err or "Invalid line anchor")
     return
   end
-  local diff_id = diff_id_for_view(context.view)
+  local diff_id = require_context_id(context.view, "Unable to resolve review context")
+  if not diff_id then
+    return
+  end
   local dstate = diff_state(diff_id)
   local thread, thread_err = find_thread(diff_id, anchor)
   if not thread then
@@ -1243,7 +1306,10 @@ function M.delete_comment()
     Util.error(anchor_err or "Invalid line anchor")
     return
   end
-  local diff_id = diff_id_for_view(context.view)
+  local diff_id = require_context_id(context.view, "Unable to resolve review context")
+  if not diff_id then
+    return
+  end
   local dstate = diff_state(diff_id)
   local thread, thread_err = find_thread(diff_id, anchor)
   if not thread then
