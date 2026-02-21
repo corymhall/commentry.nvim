@@ -321,25 +321,32 @@ local function reconcile_for_context(diff_id, context)
   local line_count = vim.api.nvim_buf_line_count(context.bufnr)
   local dstate = diff_state(diff_id)
   local unresolved = {}
+  local hydrated = 0
   for _, comment in ipairs(dstate.comments) do
     local in_target = comment.file_path == context.file_path and comment.line_side == context.line_side
     local in_range = comment.line_number >= 1 and comment.line_number <= line_count
-    local missing_line_content = in_target and in_range and type(comment.line_content) ~= "string"
+    local missing_line_content = in_target and in_range and (type(comment.line_content) ~= "string" or comment.line_content == "")
     local mismatched = false
-    if in_target and in_range and not missing_line_content then
+    if missing_line_content then
+      local current = line_text_at(context.bufnr, comment.line_number)
+      if type(current) == "string" and current ~= "" then
+        comment.line_content = current
+        hydrated = hydrated + 1
+      end
+    elseif in_target and in_range then
       local current = line_text_at(context.bufnr, comment.line_number)
       mismatched = current ~= nil and current ~= comment.line_content
     end
     if comment.file_path == context.file_path
       and comment.line_side == context.line_side
-      and (not in_range or missing_line_content or mismatched)
+      and (not in_range or mismatched)
       and comment.status ~= "unresolved" then
       unresolved[#unresolved + 1] = comment.id
       comment.status = "unresolved"
       comment.updated_at = timestamp()
     end
   end
-  if #unresolved == 0 then
+  if #unresolved == 0 and hydrated == 0 then
     return false
   end
 
@@ -350,7 +357,9 @@ local function reconcile_for_context(diff_id, context)
       maybe_drop_thread(dstate, thread)
     end
   end
-  Util.warn(("Marked %d comment(s) unresolved after diff changes"):format(#unresolved))
+  if #unresolved > 0 then
+    Util.warn(("Marked %d comment(s) unresolved after diff changes"):format(#unresolved))
+  end
   return true
 end
 

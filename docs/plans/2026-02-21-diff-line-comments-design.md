@@ -82,7 +82,7 @@ Slice-specific verification:
 
 - Cursor on a commented diff line shows preview text.
 - Cursor on a non-commented line shows no preview.
-- Running list-comments opens a Snacks picker of draft comments.
+- Running list-comments opens a Snacks picker of jumpable draft comments for the current diff file/side.
 - Selecting a picker item moves cursor to the target diff line.
 - Existing add/edit/delete/persist behavior remains intact.
 - Full suite passes via `./scripts/test`.

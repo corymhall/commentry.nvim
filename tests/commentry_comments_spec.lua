@@ -328,8 +328,9 @@ describe("commentry.comments persistence", function()
     assert.are.same(0, #persisted.threads)
   end)
 
-  it("marks legacy in-range comments without line_content unresolved", function()
+  it("hydrates legacy in-range comments without line_content and keeps them active", function()
     local persisted = nil
+    local captured = {}
     local store_data = {
       project_root = "/tmp/project",
       diff_id = "/tmp/project",
@@ -378,8 +379,8 @@ describe("commentry.comments persistence", function()
             view = { git_root = "/tmp/project" },
           }
         end,
-        render_comment_markers = function()
-          return
+        render_comment_markers = function(_, comments_to_render)
+          captured = comments_to_render
         end,
       },
     })
@@ -387,14 +388,20 @@ describe("commentry.comments persistence", function()
     vim.api.nvim_buf_line_count = function()
       return 2
     end
+    vim.api.nvim_buf_get_lines = function()
+      return { "hydrated line" }
+    end
 
     comments.load_for_view({ git_root = "/tmp/project" })
     comments.render_current_buffer()
 
     assert.is_table(persisted)
     assert.are.same(1, #persisted.comments)
-    assert.are.same("unresolved", persisted.comments[1].status)
-    assert.are.same(0, #persisted.threads)
+    assert.are.same("hydrated line", persisted.comments[1].line_content)
+    assert.is_nil(persisted.comments[1].status)
+    assert.are.same(1, #persisted.threads)
+    assert.are.same(1, #captured)
+    assert.are.same("c1", captured[1].id)
   end)
 
   it("keeps dirty in-memory edits when persist fails and load is retriggered", function()
