@@ -404,6 +404,82 @@ describe("commentry.comments persistence", function()
     assert.are.same("c1", captured[1].id)
   end)
 
+  it("hydrates legacy in-range blank line content and persists empty string", function()
+    local persisted = nil
+    local captured = {}
+    local store_data = {
+      project_root = "/tmp/project",
+      diff_id = "/tmp/project",
+      comments = {
+        {
+          id = "c1",
+          diff_id = "/tmp/project",
+          file_path = "file.lua",
+          line_number = 1,
+          line_side = "head",
+          body = "Legacy blank line",
+        },
+      },
+      threads = {
+        {
+          id = "t-/tmp/project-file.lua|head|1",
+          diff_id = "/tmp/project",
+          file_path = "file.lua",
+          line_number = 1,
+          line_side = "head",
+          comment_ids = { "c1" },
+        },
+      },
+    }
+
+    local comments = load_with_stubs({
+      store = {
+        path_for_project = function()
+          return "/tmp/project/.commentry/commentry.json"
+        end,
+        read = function()
+          return store_data
+        end,
+        write = function(_, store)
+          persisted = store
+          return true
+        end,
+      },
+      diffview = {
+        current_file_context = function()
+          return {
+            file_path = "file.lua",
+            line_number = 1,
+            line_side = "head",
+            bufnr = 1,
+            view = { git_root = "/tmp/project" },
+          }
+        end,
+        render_comment_markers = function(_, comments_to_render)
+          captured = comments_to_render
+        end,
+      },
+    })
+
+    vim.api.nvim_buf_line_count = function()
+      return 2
+    end
+    vim.api.nvim_buf_get_lines = function()
+      return { "" }
+    end
+
+    comments.load_for_view({ git_root = "/tmp/project" })
+    comments.render_current_buffer()
+
+    assert.is_table(persisted)
+    assert.are.same(1, #persisted.comments)
+    assert.are.same("", persisted.comments[1].line_content)
+    assert.is_nil(persisted.comments[1].status)
+    assert.are.same(1, #persisted.threads)
+    assert.are.same(1, #captured)
+    assert.are.same("c1", captured[1].id)
+  end)
+
   it("keeps dirty in-memory edits when persist fails and load is retriggered", function()
     local captured = {}
     local writes = 0

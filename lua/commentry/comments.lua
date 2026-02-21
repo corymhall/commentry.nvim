@@ -329,7 +329,7 @@ local function reconcile_for_context(diff_id, context)
     local mismatched = false
     if missing_line_content then
       local current = line_text_at(context.bufnr, comment.line_number)
-      if type(current) == "string" and current ~= "" then
+      if type(current) == "string" then
         comment.line_content = current
         hydrated = hydrated + 1
       end
