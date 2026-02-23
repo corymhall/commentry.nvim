@@ -1153,6 +1153,319 @@ describe("commentry.comments persistence", function()
     assert.are.same("issue", writes[2].comments[1].comment_type)
   end)
 
+  it("targets the selected overlapping range comment for type/edit/delete", function()
+    local writes = {}
+    local store_data = {
+      project_root = "/tmp/project",
+      context_id = "ctx-working-tree",
+      comments = {
+        {
+          id = "c1",
+          context_id = "ctx-working-tree",
+          file_path = "file.lua",
+          line_start = 4,
+          line_end = 6,
+          line_side = "head",
+          comment_type = "note",
+          body = "first range",
+          created_at = "2026-02-21T00:00:00Z",
+          updated_at = "2026-02-21T00:00:00Z",
+        },
+        {
+          id = "c2",
+          context_id = "ctx-working-tree",
+          file_path = "file.lua",
+          line_start = 5,
+          line_end = 7,
+          line_side = "head",
+          comment_type = "suggestion",
+          body = "second range",
+          created_at = "2026-02-21T00:00:01Z",
+          updated_at = "2026-02-21T00:00:01Z",
+        },
+      },
+      threads = {
+        {
+          id = "t-c1",
+          context_id = "ctx-working-tree",
+          file_path = "file.lua",
+          line_start = 4,
+          line_end = 6,
+          line_side = "head",
+          comment_ids = { "c1" },
+        },
+        {
+          id = "t-c2",
+          context_id = "ctx-working-tree",
+          file_path = "file.lua",
+          line_start = 5,
+          line_end = 7,
+          line_side = "head",
+          comment_ids = { "c2" },
+        },
+      },
+      file_reviews = {},
+    }
+
+    local context = {
+      file_path = "file.lua",
+      line_number = 5,
+      line_side = "head",
+      bufnr = 1,
+      view = { git_root = "/tmp/project" },
+    }
+
+    local comments = load_with_stubs({
+      store = {
+        path_for_project = function()
+          return "/tmp/project/.commentry/commentry.json"
+        end,
+        read = function()
+          return store_data
+        end,
+        write = function(_, store)
+          writes[#writes + 1] = vim.deepcopy(store)
+          return true
+        end,
+      },
+      diffview = {
+        current_file_context = function()
+          return context
+        end,
+        render_comment_markers = function()
+          return
+        end,
+      },
+    })
+
+    vim.api.nvim_buf_line_count = function()
+      return 50
+    end
+    vim.api.nvim_buf_get_lines = function()
+      return { "line text" }
+    end
+    vim.ui.input = function(opts, cb)
+      if opts.prompt == "Edit comment: " then
+        cb("edited second range")
+        return
+      end
+      cb(nil)
+    end
+    vim.ui.select = function(items, opts, cb)
+      if opts.prompt == "Set comment type" and type(items[1]) == "string" then
+        cb("issue")
+        return
+      end
+      cb(items[2])
+    end
+
+    comments.load_for_view(context.view)
+    comments.set_comment_type()
+    comments.edit_comment()
+    comments.delete_comment()
+
+    assert.are.same(4, #writes)
+    assert.are.same("note", writes[2].comments[1].comment_type)
+    assert.are.same("issue", writes[2].comments[2].comment_type)
+    assert.are.same("edited second range", writes[3].comments[2].body)
+    assert.are.same(1, #writes[4].comments)
+    assert.are.same("c1", writes[4].comments[1].id)
+    assert.are.same(1, #writes[4].threads)
+    assert.are.same("t-c1", writes[4].threads[1].id)
+  end)
+
+  it("requires explicit review context for range/type/export operations", function()
+    local writes = {}
+    local selects = 0
+    local context = {
+      file_path = "file.lua",
+      line_number = 4,
+      line_side = "head",
+      bufnr = 1,
+      view = { git_root = "/tmp/project" },
+    }
+
+    local comments = load_with_stubs({
+      store = {
+        path_for_project = function()
+          return "/tmp/project/.commentry/commentry.json"
+        end,
+        read = function()
+          return nil, "not_found"
+        end,
+        write = function(_, store)
+          writes[#writes + 1] = vim.deepcopy(store)
+          return true
+        end,
+      },
+      diffview = {
+        resolve_review_context = function()
+          return nil, "context_id_unavailable"
+        end,
+        current_file_context = function()
+          return context
+        end,
+        render_comment_markers = function()
+          return
+        end,
+      },
+    })
+
+    vim.api.nvim_buf_line_count = function()
+      return 10
+    end
+    vim.api.nvim_buf_get_lines = function()
+      return { "line text" }
+    end
+    vim.fn.getpos = function(mark)
+      if mark == "'<" then
+        return { 1, 4, 1, 0 }
+      end
+      return { 1, 6, 1, 0 }
+    end
+    vim.ui.input = function(_, cb)
+      cb("range note")
+    end
+    vim.ui.select = function(_, _, cb)
+      selects = selects + 1
+      cb(nil)
+    end
+
+    comments.add_range_comment()
+    comments.set_comment_type()
+    local markdown, export_err = comments.generate_export_markdown({ view = context.view })
+
+    assert.are.same(0, #writes)
+    assert.are.same(0, selects)
+    assert.is_nil(markdown)
+    assert.are.same("context_id_unavailable", export_err)
+  end)
+
+  it("toggles file reviewed state and persists indicator state", function()
+    local writes = {}
+    local indicator = {}
+    local context = {
+      file_path = "file.lua",
+      line_number = 1,
+      line_side = "head",
+      bufnr = 1,
+      view = { git_root = "/tmp/project" },
+    }
+
+    local comments = load_with_stubs({
+      store = {
+        path_for_project = function()
+          return "/tmp/project/.commentry/commentry.json"
+        end,
+        read = function()
+          return {
+            project_root = "/tmp/project",
+            context_id = "ctx-working-tree",
+            comments = {},
+            threads = {},
+            file_reviews = {
+              ["file.lua"] = false,
+              ["other.lua"] = true,
+            },
+          }
+        end,
+        write = function(_, store)
+          writes[#writes + 1] = vim.deepcopy(store)
+          return true
+        end,
+      },
+      diffview = {
+        current_file_context = function()
+          return context
+        end,
+        render_comment_markers = function()
+          return
+        end,
+        render_file_review_indicator = function(_, reviewed)
+          indicator[#indicator + 1] = reviewed
+        end,
+      },
+    })
+
+    vim.api.nvim_buf_line_count = function()
+      return 10
+    end
+
+    comments.load_for_view(context.view)
+    local initial_reviewed = comments.current_file_reviewed()
+    comments.toggle_file_reviewed()
+    local reviewed_after_toggle = comments.current_file_reviewed()
+    comments.toggle_file_reviewed()
+    local reviewed_after_second_toggle = comments.current_file_reviewed()
+
+    assert.is_false(initial_reviewed)
+    assert.is_true(reviewed_after_toggle)
+    assert.is_false(reviewed_after_second_toggle)
+    assert.are.same(2, #writes)
+    assert.are.same(true, writes[1].file_reviews["file.lua"])
+    assert.are.same(false, writes[2].file_reviews["file.lua"])
+    assert.are.same({ true, false }, indicator)
+  end)
+
+  it("jumps to next unreviewed file in diffview order", function()
+    local focused_path = nil
+    local context = {
+      file_path = "file.lua",
+      line_number = 1,
+      line_side = "head",
+      bufnr = 1,
+      view = { git_root = "/tmp/project" },
+    }
+
+    local comments = load_with_stubs({
+      store = {
+        path_for_project = function()
+          return "/tmp/project/.commentry/commentry.json"
+        end,
+        read = function()
+          return {
+            project_root = "/tmp/project",
+            context_id = "ctx-working-tree",
+            comments = {},
+            threads = {},
+            file_reviews = {
+              ["file.lua"] = true,
+              ["other.lua"] = false,
+              ["third.lua"] = true,
+            },
+          }
+        end,
+        write = function()
+          return true
+        end,
+      },
+      diffview = {
+        current_file_context = function()
+          return context
+        end,
+        list_view_files = function()
+          return { "file.lua", "other.lua", "third.lua" }
+        end,
+        focus_file = function(_, path)
+          focused_path = path
+          return true, nil
+        end,
+        render_comment_markers = function()
+          return
+        end,
+      },
+    })
+
+    vim.api.nvim_buf_line_count = function()
+      return 10
+    end
+
+    comments.load_for_view(context.view)
+    comments.next_unreviewed_file()
+
+    assert.are.same("other.lua", focused_path)
+  end)
+
   it("lists draft comments and jumps to selected entry line", function()
     local moved_cursor = nil
     local captured_items = nil

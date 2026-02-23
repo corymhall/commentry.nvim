@@ -4,12 +4,7 @@ local Util = require("commentry.util")
 local M = {}
 
 local uv = vim.uv or vim.loop
-local COMMENT_TYPES = {
-  note = true,
-  suggestion = true,
-  issue = true,
-  praise = true,
-}
+local DEFAULT_COMMENT_TYPES = { "note", "suggestion", "issue", "praise" }
 
 ---@param value any
 ---@return boolean
@@ -47,7 +42,9 @@ end
 ---@param comment table
 ---@param errors string[]
 ---@param index number
-local function validate_comment(comment, errors, index)
+---@param allowed_comment_types table<string, boolean>
+---@param allowed_comment_type_list string[]
+local function validate_comment(comment, errors, index, allowed_comment_types, allowed_comment_type_list)
   if type(comment) ~= "table" then
     push_error(errors, ("comments[%d] must be a table"):format(index))
     return
@@ -73,8 +70,11 @@ local function validate_comment(comment, errors, index)
   if comment.line_side ~= "base" and comment.line_side ~= "head" then
     push_error(errors, ("comments[%d].line_side must be 'base' or 'head'"):format(index))
   end
-  if type(comment.comment_type) ~= "string" or not COMMENT_TYPES[comment.comment_type] then
-    push_error(errors, ("comments[%d].comment_type must be one of: note, suggestion, issue, praise"):format(index))
+  if type(comment.comment_type) ~= "string" or not allowed_comment_types[comment.comment_type] then
+    push_error(
+      errors,
+      ("comments[%d].comment_type must be one of: %s"):format(index, table.concat(allowed_comment_type_list, ", "))
+    )
   end
   if type(comment.body) ~= "string" or comment.body == "" then
     push_error(errors, ("comments[%d].body must be a non-empty string"):format(index))
@@ -154,6 +154,33 @@ local function validate_file_reviews(file_reviews, errors)
   end
 end
 
+---@return table<string, boolean>, string[]
+local function allowed_comment_types()
+  local seen = {}
+  local allowed = {}
+  local list = {}
+
+  local function add_type(value)
+    if type(value) ~= "string" or value == "" or seen[value] then
+      return
+    end
+    seen[value] = true
+    allowed[value] = true
+    list[#list + 1] = value
+  end
+
+  for _, value in ipairs(DEFAULT_COMMENT_TYPES) do
+    add_type(value)
+  end
+  if type(Config.comment_types) == "table" then
+    for _, value in ipairs(Config.comment_types) do
+      add_type(value)
+    end
+  end
+
+  return allowed, list
+end
+
 ---@param store table
 ---@return boolean, string[]
 function M.validate(store)
@@ -177,9 +204,11 @@ function M.validate(store)
   end
   validate_file_reviews(store.file_reviews, errors)
 
+  local comment_type_set, comment_type_list = allowed_comment_types()
+
   if is_array(store.comments or {}) then
     for index, comment in ipairs(store.comments or {}) do
-      validate_comment(comment, errors, index)
+      validate_comment(comment, errors, index, comment_type_set, comment_type_list)
     end
   end
 

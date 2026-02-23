@@ -2,6 +2,7 @@ local M = {}
 
 local Config = require("commentry.config")
 local hover_ns = vim.api.nvim_create_namespace("commentry-hover-preview")
+local file_review_ns = vim.api.nvim_create_namespace("commentry-file-review")
 local hover_attached = {}
 local uv = vim.uv or vim.loop
 local ROOT_CANDIDATE_KEYS = { "git_root", "toplevel", "root", "cwd", "path" }
@@ -473,6 +474,96 @@ function M.current_file_context()
     nil
 end
 
+---@param view? table
+---@return string[]
+function M.list_view_files(view)
+  if type(view) ~= "table" then
+    return {}
+  end
+
+  local seen = {}
+  local files = {}
+  local function push(path)
+    if type(path) ~= "string" or path == "" or seen[path] then
+      return
+    end
+    seen[path] = true
+    files[#files + 1] = path
+  end
+
+  if type(view.files) == "table" and type(view.files.iter) == "function" then
+    for _, file in view.files:iter() do
+      if type(file) == "table" then
+        push(file.path)
+      end
+    end
+  elseif type(view.panel) == "table" and type(view.panel.ordered_file_list) == "function" then
+    local ok, ordered = pcall(view.panel.ordered_file_list, view.panel)
+    if ok and type(ordered) == "table" then
+      for _, file in ipairs(ordered) do
+        if type(file) == "table" then
+          push(file.path)
+        end
+      end
+    end
+  end
+
+  if type(view.cur_entry) == "table" then
+    push(view.cur_entry.path)
+  end
+
+  return files
+end
+
+---@param view table
+---@param path string
+---@return table|nil
+local function find_file_entry(view, path)
+  if type(path) ~= "string" or path == "" then
+    return nil
+  end
+  if type(view.files) == "table" and type(view.files.iter) == "function" then
+    for _, file in view.files:iter() do
+      if type(file) == "table" and file.path == path then
+        return file
+      end
+    end
+  end
+  return nil
+end
+
+---@param view? table
+---@param path string
+---@return boolean, string|nil
+function M.focus_file(view, path)
+  if type(view) ~= "table" then
+    return false, "view_unavailable"
+  end
+  if type(path) ~= "string" or path == "" then
+    return false, "file_path_required"
+  end
+  if type(view.cur_entry) == "table" and view.cur_entry.path == path then
+    return true, nil
+  end
+
+  if type(view.set_file_by_path) == "function" then
+    local ok = pcall(view.set_file_by_path, view, path, true, true)
+    if ok then
+      return true, nil
+    end
+  end
+
+  local entry = find_file_entry(view, path)
+  if type(view.set_file) == "function" and entry then
+    local ok = pcall(view.set_file, view, entry, true, true)
+    if ok then
+      return true, nil
+    end
+  end
+
+  return false, "unable_to_focus_file"
+end
+
 ---@param bufnr integer
 ---@param comments commentry.DraftComment[]
 function M.render_comment_markers(bufnr, comments)
@@ -529,6 +620,21 @@ function M.render_comment_markers(bufnr, comments)
       hl_mode = "combine",
     })
   end
+end
+
+---@param bufnr integer
+---@param reviewed boolean
+function M.render_file_review_indicator(bufnr, reviewed)
+  if type(bufnr) ~= "number" or not vim.api.nvim_buf_is_valid(bufnr) then
+    return
+  end
+  vim.api.nvim_buf_clear_namespace(bufnr, file_review_ns, 0, -1)
+  local label = reviewed and "[reviewed]" or "[unreviewed]"
+  pcall(vim.api.nvim_buf_set_extmark, bufnr, file_review_ns, 0, 0, {
+    virt_text = { { label, "Comment" } },
+    virt_text_pos = "right_align",
+    hl_mode = "combine",
+  })
 end
 
 ---@param bufnr integer

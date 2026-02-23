@@ -111,6 +111,66 @@ describe("commentry.diffview hover preview", function()
     assert.are.same("[issue,note:2]", marker_calls[1].opts.virt_text[1][1])
   end)
 
+  it("renders reviewed state indicator labels", function()
+    local marker_calls = {}
+    vim.api.nvim_buf_is_valid = function()
+      return true
+    end
+    vim.api.nvim_buf_clear_namespace = function()
+      return
+    end
+    vim.api.nvim_buf_set_extmark = function(_, _, line, _, opts)
+      marker_calls[#marker_calls + 1] = { line = line, opts = opts }
+      return 1
+    end
+
+    package.loaded["commentry.diffview"] = nil
+    local Diffview = require("commentry.diffview")
+
+    Diffview.render_file_review_indicator(1, true)
+    Diffview.render_file_review_indicator(1, false)
+
+    assert.are.same(2, #marker_calls)
+    assert.are.same(0, marker_calls[1].line)
+    assert.are.same("[reviewed]", marker_calls[1].opts.virt_text[1][1])
+    assert.are.same("[unreviewed]", marker_calls[2].opts.virt_text[1][1])
+  end)
+
+  it("lists files from view and focuses target path", function()
+    local focused = nil
+    package.loaded["commentry.diffview"] = nil
+    local Diffview = require("commentry.diffview")
+
+    local files = {
+      { path = "a.lua" },
+      { path = "b.lua" },
+    }
+    local view = {
+      files = {
+        iter = function()
+          local i = 0
+          return function()
+            i = i + 1
+            if i <= #files then
+              return i, files[i]
+            end
+          end
+        end,
+      },
+      set_file_by_path = function(_, path)
+        focused = path
+      end,
+    }
+
+    local paths = Diffview.list_view_files(view)
+    local ok, err = Diffview.focus_file(view, "b.lua")
+
+    assert.are.same({ "a.lua", "b.lua" }, paths)
+    assert.is_true(ok)
+    assert.is_nil(err)
+    assert.are.same("b.lua", focused)
+  end)
+
   it("shows preview only for current commented line and clears otherwise", function()
     local rendered = nil
     local cleared = 0

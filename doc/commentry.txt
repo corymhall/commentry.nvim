@@ -30,6 +30,12 @@ COMMANDS                                          *commentry.commands*
 :Commentry set-comment-type
   Set default or per-comment type.
 
+:Commentry toggle-file-reviewed
+  Toggle reviewed status for the current diff file.
+
+:Commentry next-unreviewed
+  Jump to the next unreviewed file in the active diffview file list.
+
 :Commentry export [stdout|register|register:{name}]
   Export active draft comments as deterministic markdown.
   `stdout` (default): print markdown.

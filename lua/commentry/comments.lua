@@ -293,30 +293,6 @@ local function ensure_thread(diff_id, anchor)
   return created, nil
 end
 
----@param diff_id string
----@param anchor commentry.Anchor
----@return commentry.CommentThread|nil, string|nil
-local function find_thread(diff_id, anchor)
-  local thread_id, err = M.thread_id(diff_id, anchor)
-  if not thread_id then
-    return nil, err
-  end
-  local dstate = diff_state(diff_id)
-  local exact = dstate.threads_by_id[thread_id]
-  if exact then
-    return exact, nil
-  end
-
-  for _, thread in ipairs(dstate.threads) do
-    if thread.file_path == anchor.file_path
-      and thread.line_side == anchor.line_side
-      and contains_line(thread, anchor.line_start or anchor.line_number) then
-      return thread, nil
-    end
-  end
-  return nil, nil
-end
-
 ---@param dstate table
 ---@param comment commentry.DraftComment
 local function upsert_comment(dstate, comment)
@@ -369,17 +345,12 @@ local function maybe_drop_thread(dstate, thread)
 end
 
 ---@param dstate table
----@param thread commentry.CommentThread
----@return commentry.DraftComment[]
-local function comments_for_thread(dstate, thread)
-  local results = {}
-  for _, comment_id in ipairs(thread.comment_ids) do
-    local comment = dstate.comments_by_id[comment_id]
-    if comment then
-      results[#results + 1] = comment
-    end
+---@param comment_id string
+local function remove_comment_from_threads(dstate, comment_id)
+  for _, thread in ipairs(dstate.threads) do
+    remove_from_thread(thread, comment_id)
+    maybe_drop_thread(dstate, thread)
   end
-  return results
 end
 
 ---@param bufnr integer
@@ -664,6 +635,10 @@ local function render_for_context(context)
     end
   end
   Diffview.render_comment_markers(context.bufnr, comments)
+  if type(Diffview.render_file_review_indicator) == "function" then
+    local reviewed = dstate.file_reviews[context.file_path] == true
+    Diffview.render_file_review_indicator(context.bufnr, reviewed)
+  end
   if reconciled then
     persist_for_view(diff_id, context.view, "Failed to persist reconciled comments")
   end
@@ -1087,6 +1062,141 @@ function M.list_comments()
 end
 
 ---@param diff_id string
+---@param current_path string
+---@return string[]
+local function ordered_review_files(diff_id, current_path)
+  local files = {}
+  local seen = {}
+
+  local function push(path)
+    if type(path) ~= "string" or path == "" or seen[path] then
+      return
+    end
+    seen[path] = true
+    files[#files + 1] = path
+  end
+
+  local view = nil
+  local context, _ = current_context()
+  if type(context) == "table" then
+    view = context.view
+  end
+
+  if type(Diffview.list_view_files) == "function" and type(view) == "table" then
+    for _, path in ipairs(Diffview.list_view_files(view)) do
+      push(path)
+    end
+  end
+
+  if #files == 0 then
+    local dstate = diff_state(diff_id)
+    for _, comment in ipairs(dstate.comments) do
+      push(comment.file_path)
+    end
+    for path in pairs(dstate.file_reviews or {}) do
+      push(path)
+    end
+    table.sort(files)
+  end
+
+  push(current_path)
+  return files
+end
+
+---@return boolean|nil, string|nil
+function M.current_file_reviewed()
+  local context, err = current_context()
+  if not context then
+    return nil, err or "No diffview context"
+  end
+  local diff_id = M.context_id_for_view(context.view)
+  if not diff_id then
+    return nil, "context_id_unavailable"
+  end
+  return diff_state(diff_id).file_reviews[context.file_path] == true, nil
+end
+
+function M.toggle_file_reviewed()
+  local context, err = current_context()
+  if not context then
+    Util.error(err or "No diffview context")
+    return
+  end
+  local diff_id = require_context_id(context.view, "Unable to resolve review context")
+  if not diff_id then
+    return
+  end
+
+  local dstate = diff_state(diff_id)
+  local reviewed = dstate.file_reviews[context.file_path] == true
+  dstate.file_reviews[context.file_path] = not reviewed
+
+  mark_dirty(diff_id)
+  render_for_context(context)
+  persist_for_view(diff_id, context.view, "Failed to persist file review state")
+  if dstate.file_reviews[context.file_path] then
+    Util.info(("Marked `%s` reviewed"):format(context.file_path))
+  else
+    Util.info(("Marked `%s` unreviewed"):format(context.file_path))
+  end
+end
+
+function M.next_unreviewed_file()
+  local context, err = current_context()
+  if not context then
+    Util.error(err or "No diffview context")
+    return
+  end
+  local diff_id = require_context_id(context.view, "Unable to resolve review context")
+  if not diff_id then
+    return
+  end
+
+  local dstate = diff_state(diff_id)
+  local files = ordered_review_files(diff_id, context.file_path)
+  if #files == 0 then
+    Util.info("No files available for review navigation")
+    return
+  end
+
+  local start_index = 1
+  for index, path in ipairs(files) do
+    if path == context.file_path then
+      start_index = index
+      break
+    end
+  end
+
+  local next_path = nil
+  for offset = 1, #files - 1 do
+    local idx = ((start_index + offset - 1) % #files) + 1
+    local path = files[idx]
+    if dstate.file_reviews[path] ~= true then
+      next_path = path
+      break
+    end
+  end
+
+  if not next_path then
+    Util.info("No other unreviewed files")
+    return
+  end
+
+  if type(Diffview.focus_file) == "function" then
+    local ok, focus_err = Diffview.focus_file(context.view, next_path)
+    if not ok then
+      Util.warn(focus_err or "Unable to focus target file in diffview")
+      return
+    end
+  else
+    Util.warn("Diffview navigation helpers are unavailable")
+    return
+  end
+
+  Util.info(("Jumped to next unreviewed file: %s"):format(next_path))
+end
+
+---@param diff_id string
 ---@return commentry.DraftComment[]
 local function exportable_comments(diff_id)
   local dstate = diff_state(diff_id)
@@ -1134,7 +1244,10 @@ function M.generate_export_markdown(context)
   end
 
   local view = resolved_context.view or resolved_context
-  local diff_id = diff_id_for_view(view)
+  local diff_id, diff_err = M.context_id_for_view(view)
+  if not diff_id then
+    return nil, diff_err or "Unable to resolve review context"
+  end
   local comments = exportable_comments(diff_id)
 
   local lines = {
@@ -1382,7 +1495,10 @@ function M.add_range_comment()
     return
   end
 
-  local diff_id = diff_id_for_view(context.view)
+  local diff_id = require_context_id(context.view, "Unable to resolve review context")
+  if not diff_id then
+    return
+  end
   local active_type = selected_comment_type(diff_id)
   local prompt = ("Add %s range comment (%d-%d): "):format(active_type, line_start, line_end)
 
@@ -1416,26 +1532,12 @@ function M.edit_comment()
     Util.error(err or "No diffview context")
     return
   end
-  local anchor, anchor_err = anchor_from_context(context)
-  if not anchor then
-    Util.error(anchor_err or "Invalid line anchor")
-    return
-  end
   local diff_id = require_context_id(context.view, "Unable to resolve review context")
   if not diff_id then
     return
   end
   local dstate = diff_state(diff_id)
-  local thread, thread_err = find_thread(diff_id, anchor)
-  if not thread then
-    if thread_err then
-      Util.error(thread_err)
-    else
-      Util.info("No draft comments for this line")
-    end
-    return
-  end
-  local comments = comments_for_thread(dstate, thread)
+  local comments = active_comments_for_line(context)
   if #comments == 0 then
     Util.info("No draft comments for this line")
     return
@@ -1465,34 +1567,19 @@ function M.delete_comment()
     Util.error(err or "No diffview context")
     return
   end
-  local anchor, anchor_err = anchor_from_context(context)
-  if not anchor then
-    Util.error(anchor_err or "Invalid line anchor")
-    return
-  end
   local diff_id = require_context_id(context.view, "Unable to resolve review context")
   if not diff_id then
     return
   end
   local dstate = diff_state(diff_id)
-  local thread, thread_err = find_thread(diff_id, anchor)
-  if not thread then
-    if thread_err then
-      Util.error(thread_err)
-    else
-      Util.info("No draft comments for this line")
-    end
-    return
-  end
-  local comments = comments_for_thread(dstate, thread)
+  local comments = active_comments_for_line(context)
   if #comments == 0 then
     Util.info("No draft comments for this line")
     return
   end
   select_comment(comments, "Delete comment", function(target)
     remove_comment(dstate, target.id)
-    remove_from_thread(thread, target.id)
-    maybe_drop_thread(dstate, thread)
+    remove_comment_from_threads(dstate, target.id)
     mark_dirty(diff_id)
     render_for_context(context)
     persist_for_view(diff_id, context.view, "Failed to persist comment")
@@ -1506,27 +1593,18 @@ function M.set_comment_type()
     return
   end
 
-  local anchor, anchor_err = anchor_from_context(context)
-  if not anchor then
-    Util.error(anchor_err or "Invalid line anchor")
+  local diff_id = require_context_id(context.view, "Unable to resolve review context")
+  if not diff_id then
     return
   end
-
-  local diff_id = diff_id_for_view(context.view)
   local dstate = diff_state(diff_id)
-  local thread = find_thread(diff_id, anchor)
+  local comments = active_comments_for_line(context)
 
-  if not thread then
+  if #comments == 0 then
     select_comment_type(diff_id, "Default comment type", selected_comment_type(diff_id), function(choice)
       dstate.selected_comment_type = choice
       Util.info(("Default comment type set to %s"):format(choice))
     end)
-    return
-  end
-
-  local comments = comments_for_thread(dstate, thread)
-  if #comments == 0 then
-    Util.info("No draft comments for this line")
     return
   end
 

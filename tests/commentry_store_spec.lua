@@ -165,6 +165,22 @@ describe("commentry.store", function()
     assert.is_true(combined:find("file_reviews", 1, true) ~= nil)
   end)
 
+  it("accepts configured custom comment types", function()
+    local Config = require("commentry.config")
+    local original_comment_types = Config.comment_types
+
+    Config.comment_types = { "note", "question" }
+
+    local store = sample_store("/tmp/project")
+    store.comments[1].comment_type = "question"
+    local ok, errors = Store.validate(store)
+
+    Config.comment_types = original_comment_types
+
+    assert.is_true(ok)
+    assert.are.same({}, errors)
+  end)
+
   it("creates distinct context paths for working tree and commit range contexts", function()
     local root = make_temp_dir()
     local working_tree_path, working_tree_err = Store.path_for_context(root, "ctx-working-tree")

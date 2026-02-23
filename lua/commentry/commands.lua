@@ -76,6 +76,18 @@ local function maybe_attach_keymaps(bufnr)
     Comments.set_comment_type()
   end, { buffer = bufnr, desc = "Commentry set comment type" })
 
+  if type(Config.keymaps.toggle_file_reviewed) == "string" and Config.keymaps.toggle_file_reviewed ~= "" then
+    vim.keymap.set("n", Config.keymaps.toggle_file_reviewed, function()
+      Comments.toggle_file_reviewed()
+    end, { buffer = bufnr, desc = "Commentry toggle file reviewed" })
+  end
+
+  if type(Config.keymaps.next_unreviewed_file) == "string" and Config.keymaps.next_unreviewed_file ~= "" then
+    vim.keymap.set("n", Config.keymaps.next_unreviewed_file, function()
+      Comments.next_unreviewed_file()
+    end, { buffer = bufnr, desc = "Commentry jump next unreviewed file" })
+  end
+
   Comments.render_current_buffer()
 end
 
@@ -127,6 +139,14 @@ function M.setup()
 
   M.register("set-comment-type", function()
     Comments.set_comment_type()
+  end)
+
+  M.register("toggle-file-reviewed", function()
+    Comments.toggle_file_reviewed()
+  end)
+
+  M.register("next-unreviewed", function()
+    Comments.next_unreviewed_file()
   end)
 
   M.register("export", function(_, cmd_args)

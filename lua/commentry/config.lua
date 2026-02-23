@@ -9,6 +9,8 @@ M.ns = vim.api.nvim_create_namespace("commentry")
 ---@field edit_comment string
 ---@field delete_comment string
 ---@field set_comment_type string
+---@field toggle_file_reviewed string
+---@field next_unreviewed_file string
 
 ---@class commentry.StoreConfig
 ---@field filename string
@@ -33,6 +35,8 @@ local defaults = {
     edit_comment = "me",
     delete_comment = "md",
     set_comment_type = "mt",
+    toggle_file_reviewed = "mr",
+    next_unreviewed_file = "]r",
   },
   comment_types = { "note", "suggestion", "issue", "praise" },
   default_comment_type = "note",
