@@ -1,4 +1,5 @@
 local Diffview = require("commentry.diffview")
+local Config = require("commentry.config")
 local Store = require("commentry.store")
 local Util = require("commentry.util")
 
@@ -13,6 +14,7 @@ local state = {
 local current_context
 
 local ROOT_CANDIDATE_KEYS = { "git_root", "toplevel", "root", "cwd", "path" }
+local DEFAULT_COMMENT_TYPES = { "note", "suggestion", "issue", "praise" }
 
 ---@param root string
 ---@return string|nil
@@ -52,6 +54,47 @@ local function timestamp()
   return os.date("!%Y-%m-%dT%H:%M:%SZ")
 end
 
+---@return string[]
+local function comment_type_choices()
+  if type(Config.comment_types) ~= "table" or #Config.comment_types == 0 then
+    return vim.deepcopy(DEFAULT_COMMENT_TYPES)
+  end
+  local seen = {}
+  local choices = {}
+  for _, item in ipairs(Config.comment_types) do
+    if type(item) == "string" and item ~= "" and not seen[item] then
+      seen[item] = true
+      choices[#choices + 1] = item
+    end
+  end
+  if #choices == 0 then
+    return vim.deepcopy(DEFAULT_COMMENT_TYPES)
+  end
+  return choices
+end
+
+---@param comment_type string
+---@return boolean
+local function is_valid_comment_type(comment_type)
+  if type(comment_type) ~= "string" or comment_type == "" then
+    return false
+  end
+  for _, candidate in ipairs(comment_type_choices()) do
+    if candidate == comment_type then
+      return true
+    end
+  end
+  return false
+end
+
+---@return string
+local function default_comment_type()
+  if is_valid_comment_type(Config.default_comment_type) then
+    return Config.default_comment_type
+  end
+  return comment_type_choices()[1]
+end
+
 ---@param diff_id string
 ---@return table
 local function diff_state(diff_id)
@@ -59,12 +102,26 @@ local function diff_state(diff_id)
     state.diffs[diff_id] = {
       comments = {},
       threads = {},
+      file_reviews = {},
       comments_by_id = {},
       threads_by_id = {},
       dirty = false,
+      selected_comment_type = nil,
     }
   end
   return state.diffs[diff_id]
+end
+
+---@param diff_id string
+---@return string
+local function selected_comment_type(diff_id)
+  local dstate = diff_state(diff_id)
+  if is_valid_comment_type(dstate.selected_comment_type) then
+    return dstate.selected_comment_type
+  end
+  local fallback = default_comment_type()
+  dstate.selected_comment_type = fallback
+  return fallback
 end
 
 ---@param diff_id string
@@ -86,6 +143,12 @@ end
 ---@param view? table
 ---@return string
 local function diff_id_for_view(view)
+  if type(Diffview.resolve_review_context) == "function" then
+    local context = Diffview.resolve_review_context(nil, view)
+    if type(context) == "table" and type(context.context_id) == "string" and context.context_id ~= "" then
+      return context.context_id
+    end
+  end
   if type(view) == "table" then
     for _, key in ipairs(ROOT_CANDIDATE_KEYS) do
       local resolved = normalize_root_candidate(view[key])
@@ -107,6 +170,12 @@ end
 ---@param view? table
 ---@return string|nil
 local function project_root_for_view(view)
+  if type(Diffview.resolve_review_context) == "function" then
+    local context = Diffview.resolve_review_context(nil, view)
+    if type(context) == "table" and type(context.root) == "string" and context.root ~= "" then
+      return context.root
+    end
+  end
   if type(view) == "table" then
     for _, key in ipairs(ROOT_CANDIDATE_KEYS) do
       local resolved = normalize_root_candidate(view[key])
@@ -123,13 +192,83 @@ local function project_root_for_view(view)
   return normalize_root_candidate(root)
 end
 
+---@param view? table
+---@return string|nil, string|nil
+function M.context_id_for_view(view)
+  if type(Diffview.resolve_review_context) == "function" then
+    local context, err = Diffview.resolve_review_context(nil, view)
+    if not context then
+      return nil, err
+    end
+    if type(context.context_id) ~= "string" or context.context_id == "" then
+      return nil, "context_id_unavailable"
+    end
+    return context.context_id, nil
+  end
+  return diff_id_for_view(view), nil
+end
+
+---@param view? table
+---@param err_msg string
+---@return string|nil
+local function require_context_id(view, err_msg)
+  local context_id, context_err = M.context_id_for_view(view)
+  if context_id then
+    return context_id
+  end
+  if err_msg ~= "" then
+    Util.warn(context_err or err_msg)
+  end
+  return nil
+end
+
 ---@param context table
 ---@return commentry.Anchor|nil, string|nil
 local function anchor_from_context(context)
   if type(context) ~= "table" then
     return nil, "diffview context is required"
   end
-  return M.build_anchor(context.file_path, context.line_number, context.line_side)
+  return M.build_anchor(context.file_path, context.line_number, context.line_side, context.line_end)
+end
+
+---@param item table
+---@return integer|nil
+local function line_start_for(item)
+  if type(item) ~= "table" then
+    return nil
+  end
+  local line_start = item.line_start or item.line_number
+  if type(line_start) ~= "number" then
+    return nil
+  end
+  return line_start
+end
+
+---@param item table
+---@return integer|nil
+local function line_end_for(item)
+  if type(item) ~= "table" then
+    return nil
+  end
+  local line_start = line_start_for(item)
+  local line_end = item.line_end or line_start
+  if type(line_end) ~= "number" then
+    return nil
+  end
+  return line_end
+end
+
+---@param item table
+---@param line_number integer
+---@return boolean
+local function contains_line(item, line_number)
+  local line_start = line_start_for(item)
+  local line_end = line_end_for(item)
+  return type(line_start) == "number"
+    and type(line_end) == "number"
+    and type(line_number) == "number"
+    and line_number >= line_start
+    and line_number <= line_end
 end
 
 ---@param diff_id string
@@ -163,7 +302,19 @@ local function find_thread(diff_id, anchor)
     return nil, err
   end
   local dstate = diff_state(diff_id)
-  return dstate.threads_by_id[thread_id], nil
+  local exact = dstate.threads_by_id[thread_id]
+  if exact then
+    return exact, nil
+  end
+
+  for _, thread in ipairs(dstate.threads) do
+    if thread.file_path == anchor.file_path
+      and thread.line_side == anchor.line_side
+      and contains_line(thread, anchor.line_start or anchor.line_number) then
+      return thread, nil
+    end
+  end
+  return nil, nil
 end
 
 ---@param dstate table
@@ -251,13 +402,36 @@ local function apply_store(diff_id, store)
   local dstate = diff_state(diff_id)
   dstate.comments = {}
   dstate.threads = {}
+  dstate.file_reviews = {}
   dstate.comments_by_id = {}
   dstate.threads_by_id = {}
+
+  if type(store.file_reviews) == "table" then
+    dstate.file_reviews = vim.deepcopy(store.file_reviews)
+  end
 
   if type(store.comments) == "table" then
     for _, comment in ipairs(store.comments) do
       if type(comment) == "table" then
-        upsert_comment(dstate, comment)
+        local line_start = comment.line_start or comment.line_number
+        local line_end = comment.line_end or line_start
+        local context_id = comment.context_id or comment.diff_id
+        local runtime_comment = {
+          id = comment.id,
+          diff_id = context_id,
+          file_path = comment.file_path,
+          line_number = line_start,
+          line_side = comment.line_side,
+          body = comment.body,
+          created_at = comment.created_at or timestamp(),
+          updated_at = comment.updated_at or comment.created_at or timestamp(),
+          status = comment.status,
+          line_content = comment.line_content,
+          comment_type = comment.comment_type or "note",
+          line_start = line_start,
+          line_end = line_end,
+        }
+        upsert_comment(dstate, runtime_comment)
       end
     end
   end
@@ -265,28 +439,106 @@ local function apply_store(diff_id, store)
   if type(store.threads) == "table" then
     for _, thread in ipairs(store.threads) do
       if type(thread) == "table" and type(thread.id) == "string" then
-        dstate.threads_by_id[thread.id] = thread
-        dstate.threads[#dstate.threads + 1] = thread
+        local line_start = thread.line_start or thread.line_number
+        local line_end = thread.line_end or line_start
+        local context_id = thread.context_id or thread.diff_id
+        local runtime_thread = {
+          id = thread.id,
+          diff_id = context_id,
+          file_path = thread.file_path,
+          line_number = line_start,
+          line_side = thread.line_side,
+          comment_ids = vim.deepcopy(thread.comment_ids or {}),
+          line_start = line_start,
+          line_end = line_end,
+        }
+        dstate.threads_by_id[thread.id] = runtime_thread
+        dstate.threads[#dstate.threads + 1] = runtime_thread
+        local canonical_id, canonical_err = M.thread_id(context_id, runtime_thread)
+        if canonical_id then
+          dstate.threads_by_id[canonical_id] = runtime_thread
+        elseif canonical_err then
+          Util.debug("Unable to build canonical thread id while loading", canonical_err)
+        end
       end
     end
   end
 end
 
+---@param context_id string
+---@param comment table
+---@return table
+local function runtime_comment_to_store(context_id, comment)
+  local line_start = comment.line_start or comment.line_number
+  local line_end = comment.line_end or line_start
+  return {
+    id = comment.id,
+    context_id = context_id,
+    file_path = comment.file_path,
+    line_start = line_start,
+    line_end = line_end,
+    line_side = comment.line_side,
+    comment_type = comment.comment_type or "note",
+    body = comment.body,
+    created_at = comment.created_at,
+    updated_at = comment.updated_at,
+    status = comment.status,
+    line_content = comment.line_content,
+  }
+end
+
+---@param context_id string
+---@param thread table
+---@return table
+local function runtime_thread_to_store(context_id, thread)
+  local line_start = thread.line_start or thread.line_number
+  local line_end = thread.line_end or line_start
+  return {
+    id = thread.id,
+    context_id = context_id,
+    file_path = thread.file_path,
+    line_start = line_start,
+    line_end = line_end,
+    line_side = thread.line_side,
+    comment_ids = vim.deepcopy(thread.comment_ids or {}),
+  }
+end
+
+---@param project_root string
+---@param context_id string
+---@return string|nil, string|nil
+local function path_for_context(project_root, context_id)
+  if type(Store.path_for_context) == "function" then
+    return Store.path_for_context(project_root, context_id)
+  end
+  return Store.path_for_project(project_root)
+end
+
 ---@param diff_id string
 ---@param project_root string
+---@param context_id string
 ---@return boolean, string|string[]|nil
-local function save_store(diff_id, project_root)
-  local path, path_err = Store.path_for_project(project_root)
+local function save_store(diff_id, project_root, context_id)
+  local path, path_err = path_for_context(project_root, context_id)
   if not path then
     return false, path_err or "store_path_failed"
   end
 
   local dstate = diff_state(diff_id)
+  local comments = {}
+  for _, comment in ipairs(dstate.comments) do
+    comments[#comments + 1] = runtime_comment_to_store(context_id, comment)
+  end
+  local threads = {}
+  for _, thread in ipairs(dstate.threads) do
+    threads[#threads + 1] = runtime_thread_to_store(context_id, thread)
+  end
   local store = {
     project_root = project_root,
-    diff_id = diff_id,
-    comments = vim.deepcopy(dstate.comments),
-    threads = vim.deepcopy(dstate.threads),
+    context_id = context_id,
+    comments = comments,
+    threads = threads,
+    file_reviews = vim.deepcopy(dstate.file_reviews or {}),
   }
 
   return Store.write(path, store)
@@ -302,7 +554,11 @@ local function persist_for_view(diff_id, view, failure_msg)
     Util.warn("Unable to resolve project root for comment store")
     return false
   end
-  local ok, save_err = save_store(diff_id, root)
+  local context_id = require_context_id(view, "Unable to resolve review context")
+  if not context_id then
+    return false
+  end
+  local ok, save_err = save_store(diff_id, root, context_id)
   if not ok then
     Util.warn(save_err or failure_msg)
     return false
@@ -324,17 +580,18 @@ local function reconcile_for_context(diff_id, context)
   local hydrated = 0
   for _, comment in ipairs(dstate.comments) do
     local in_target = comment.file_path == context.file_path and comment.line_side == context.line_side
-    local in_range = comment.line_number >= 1 and comment.line_number <= line_count
+    local anchor_line = line_start_for(comment)
+    local in_range = type(anchor_line) == "number" and anchor_line >= 1 and anchor_line <= line_count
     local missing_line_content = in_target and in_range and type(comment.line_content) ~= "string"
     local mismatched = false
     if missing_line_content then
-      local current = line_text_at(context.bufnr, comment.line_number)
+      local current = line_text_at(context.bufnr, anchor_line)
       if type(current) == "string" then
         comment.line_content = current
         hydrated = hydrated + 1
       end
     elseif in_target and in_range then
-      local current = line_text_at(context.bufnr, comment.line_number)
+      local current = line_text_at(context.bufnr, anchor_line)
       mismatched = current ~= nil and current ~= comment.line_content
     end
     if comment.file_path == context.file_path
@@ -381,7 +638,7 @@ local function select_comment(comments, prompt, cb)
       if #preview > 60 then
         preview = preview:sub(1, 57) .. "..."
       end
-      return preview
+      return ("[%s] %s"):format(item.comment_type or "note", preview)
     end,
   }, function(choice)
     if choice then
@@ -392,7 +649,10 @@ end
 
 ---@param context table
 local function render_for_context(context)
-  local diff_id = diff_id_for_view(context.view)
+  local diff_id = require_context_id(context.view, "Unable to resolve review context")
+  if not diff_id then
+    return
+  end
   local reconciled = reconcile_for_context(diff_id, context)
   local dstate = diff_state(diff_id)
   local comments = {}
@@ -412,13 +672,16 @@ end
 ---@param context table
 ---@return commentry.DraftComment[]
 local function active_comments_for_line(context)
-  local diff_id = diff_id_for_view(context.view)
+  local diff_id = require_context_id(context.view, "Unable to resolve review context")
+  if not diff_id then
+    return {}
+  end
   local dstate = diff_state(diff_id)
   local comments = {}
   for _, comment in ipairs(dstate.comments) do
     if comment.file_path == context.file_path
       and comment.line_side == context.line_side
-      and comment.line_number == context.line_number
+      and contains_line(comment, context.line_number)
       and comment.status ~= "unresolved" then
       comments[#comments + 1] = comment
     end
@@ -446,12 +709,40 @@ local function jumpable_comments_for_context(diff_id, context)
     if a.line_side ~= b.line_side then
       return a.line_side < b.line_side
     end
-    if a.line_number ~= b.line_number then
-      return a.line_number < b.line_number
+    local a_start = line_start_for(a) or 1
+    local b_start = line_start_for(b) or 1
+    if a_start ~= b_start then
+      return a_start < b_start
     end
-    return (a.created_at or "") < (b.created_at or "")
+    local a_end = a.line_end or a_start
+    local b_end = b.line_end or b_start
+    if a_end ~= b_end then
+      return a_end < b_end
+    end
+    if (a.created_at or "") ~= (b.created_at or "") then
+      return (a.created_at or "") < (b.created_at or "")
+    end
+    return (a.id or "") < (b.id or "")
   end)
   return comments
+end
+
+---@param comment commentry.DraftComment
+---@return string
+local function comment_location_label(comment)
+  local side = comment.line_side or "head"
+  local line_start = comment.line_start or comment.line_number
+  local line_end = comment.line_end or line_start
+  if not is_integer(line_start) then
+    return ("%s:file"):format(side)
+  end
+  if not is_integer(line_end) then
+    line_end = line_start
+  end
+  if line_end <= line_start then
+    return ("%s:L%d"):format(side, line_start)
+  end
+  return ("%s:L%d-L%d"):format(side, line_start, line_end)
 end
 
 ---@param comment commentry.DraftComment
@@ -461,7 +752,8 @@ local function list_entry_label(comment)
   if #preview > 72 then
     preview = preview:sub(1, 69) .. "..."
   end
-  return ("%s:%d [%s] %s"):format(comment.file_path, comment.line_number, comment.line_side, preview)
+  local comment_type = comment.comment_type or "note"
+  return ("%s @ %s [%s] %s"):format(comment.file_path, comment_location_label(comment), comment_type, preview)
 end
 
 ---@param comment commentry.DraftComment
@@ -477,6 +769,7 @@ local function jump_to_comment(comment)
     return false
   end
   local line = math.max(comment.line_number, 1)
+  line = math.max(line_start_for(comment) or line, 1)
   vim.api.nvim_win_set_cursor(0, { line, 0 })
   return true
 end
@@ -504,15 +797,22 @@ current_context = function()
 end
 
 ---@param file_path string
----@param line_number integer
+---@param line_start integer
+---@param line_end integer
 ---@param line_side string
 ---@return boolean, string|nil
-local function validate_anchor(file_path, line_number, line_side)
+local function validate_anchor(file_path, line_start, line_end, line_side)
   if type(file_path) ~= "string" or file_path == "" then
     return false, "file_path is required"
   end
-  if not is_integer(line_number) then
-    return false, "line_number must be a positive integer"
+  if not is_integer(line_start) then
+    return false, "line_start must be a positive integer"
+  end
+  if not is_integer(line_end) then
+    return false, "line_end must be a positive integer"
+  end
+  if line_end < line_start then
+    return false, "line_end must be >= line_start"
   end
   if line_side ~= "base" and line_side ~= "head" then
     return false, "line_side must be 'base' or 'head'"
@@ -530,20 +830,26 @@ end
 ---@class commentry.Anchor
 ---@field file_path string
 ---@field line_number integer
+---@field line_start integer
+---@field line_end integer
 ---@field line_side '"base"'|'"head"'
 
 ---@param file_path string
----@param line_number integer
+---@param line_start integer
 ---@param line_side '"base"'|'"head"'
+---@param line_end? integer
 ---@return commentry.Anchor|nil, string|nil
-function M.build_anchor(file_path, line_number, line_side)
-  local ok, err = validate_anchor(file_path, line_number, line_side)
+function M.build_anchor(file_path, line_start, line_side, line_end)
+  line_end = line_end or line_start
+  local ok, err = validate_anchor(file_path, line_start, line_end, line_side)
   if not ok then
     return nil, err
   end
   return {
     file_path = file_path,
-    line_number = line_number,
+    line_number = line_start,
+    line_start = line_start,
+    line_end = line_end,
     line_side = line_side,
   }, nil
 end
@@ -554,11 +860,13 @@ function M.anchor_key(anchor)
   if type(anchor) ~= "table" then
     return nil, "anchor is required"
   end
-  local ok, err = validate_anchor(anchor.file_path, anchor.line_number, anchor.line_side)
+  local line_start = anchor.line_start or anchor.line_number
+  local line_end = anchor.line_end or line_start
+  local ok, err = validate_anchor(anchor.file_path, line_start, line_end, anchor.line_side)
   if not ok then
     return nil, err
   end
-  return ("%s|%s|%d"):format(anchor.file_path, anchor.line_side, anchor.line_number), nil
+  return ("%s|%s|%d-%d"):format(anchor.file_path, anchor.line_side, line_start, line_end), nil
 end
 
 ---@param diff_id string
@@ -580,7 +888,10 @@ end
 ---@field diff_id string
 ---@field file_path string
 ---@field line_number integer
+---@field line_start integer
+---@field line_end integer
 ---@field line_side '"base"'|'"head"'
+---@field comment_type string
 ---@field body string
 ---@field created_at string
 ---@field updated_at string
@@ -591,6 +902,7 @@ end
 ---@field created_at? string
 ---@field updated_at? string
 ---@field status? string
+---@field comment_type? string
 
 ---@param diff_id string
 ---@param anchor commentry.Anchor
@@ -605,9 +917,15 @@ function M.new_comment(diff_id, anchor, body, opts)
   if type(body) ~= "string" or body == "" then
     return nil, "body is required"
   end
-  local ok, err = validate_anchor(anchor.file_path, anchor.line_number, anchor.line_side)
+  local line_start = anchor.line_start or anchor.line_number
+  local line_end = anchor.line_end or line_start
+  local ok, err = validate_anchor(anchor.file_path, line_start, line_end, anchor.line_side)
   if not ok then
     return nil, err
+  end
+  local comment_type = opts.comment_type or default_comment_type()
+  if not is_valid_comment_type(comment_type) then
+    return nil, ("comment_type must be one of: %s"):format(table.concat(comment_type_choices(), ", "))
   end
   local created_at = opts.created_at or timestamp()
   local updated_at = opts.updated_at or created_at
@@ -615,8 +933,11 @@ function M.new_comment(diff_id, anchor, body, opts)
     id = opts.id or M.new_id("c"),
     diff_id = diff_id,
     file_path = anchor.file_path,
-    line_number = anchor.line_number,
+    line_number = line_start,
+    line_start = line_start,
+    line_end = line_end,
     line_side = anchor.line_side,
+    comment_type = comment_type,
     body = body,
     created_at = created_at,
     updated_at = updated_at,
@@ -635,8 +956,27 @@ function M.update_body(comment, body)
   if type(body) ~= "string" or body == "" then
     return nil, "body is required"
   end
+  if not is_valid_comment_type(comment.comment_type) then
+    return nil, ("comment_type must be one of: %s"):format(table.concat(comment_type_choices(), ", "))
+  end
   local updated = vim.deepcopy(comment)
   updated.body = body
+  updated.updated_at = timestamp()
+  return updated, nil
+end
+
+---@param comment commentry.DraftComment
+---@param comment_type string
+---@return commentry.DraftComment|nil, string|nil
+function M.update_type(comment, comment_type)
+  if type(comment) ~= "table" then
+    return nil, "comment is required"
+  end
+  if not is_valid_comment_type(comment_type) then
+    return nil, ("comment_type must be one of: %s"):format(table.concat(comment_type_choices(), ", "))
+  end
+  local updated = vim.deepcopy(comment)
+  updated.comment_type = comment_type
   updated.updated_at = timestamp()
   return updated, nil
 end
@@ -646,6 +986,8 @@ end
 ---@field diff_id string
 ---@field file_path string
 ---@field line_number integer
+---@field line_start integer
+---@field line_end integer
 ---@field line_side '"base"'|'"head"'
 ---@field comment_ids string[]
 
@@ -657,7 +999,9 @@ function M.new_thread(diff_id, anchor, comment_ids)
   if type(diff_id) ~= "string" or diff_id == "" then
     return nil, "diff_id is required"
   end
-  local ok, err = validate_anchor(anchor.file_path, anchor.line_number, anchor.line_side)
+  local line_start = anchor.line_start or anchor.line_number
+  local line_end = anchor.line_end or line_start
+  local ok, err = validate_anchor(anchor.file_path, line_start, line_end, anchor.line_side)
   if not ok then
     return nil, err
   end
@@ -669,7 +1013,9 @@ function M.new_thread(diff_id, anchor, comment_ids)
     id = id,
     diff_id = diff_id,
     file_path = anchor.file_path,
-    line_number = anchor.line_number,
+    line_number = line_start,
+    line_start = line_start,
+    line_end = line_end,
     line_side = anchor.line_side,
     comment_ids = comment_ids or {},
   },
@@ -717,7 +1063,10 @@ function M.list_comments()
     return
   end
 
-  local diff_id = diff_id_for_view(context.view)
+  local diff_id = require_context_id(context.view, "Unable to resolve review context")
+  if not diff_id then
+    return
+  end
   local comments = jumpable_comments_for_context(diff_id, context)
   if #comments == 0 then
     Util.info("No jumpable draft comments for current diff file/side")
@@ -737,10 +1086,154 @@ function M.list_comments()
   end)
 end
 
+---@param diff_id string
+---@return commentry.DraftComment[]
+local function exportable_comments(diff_id)
+  local dstate = diff_state(diff_id)
+  local comments = {}
+  for _, comment in ipairs(dstate.comments) do
+    if comment.status ~= "unresolved" then
+      comments[#comments + 1] = comment
+    end
+  end
+  table.sort(comments, function(a, b)
+    if a.file_path ~= b.file_path then
+      return a.file_path < b.file_path
+    end
+    if a.line_side ~= b.line_side then
+      return a.line_side < b.line_side
+    end
+    local a_start = a.line_start or a.line_number or 1
+    local b_start = b.line_start or b.line_number or 1
+    if a_start ~= b_start then
+      return a_start < b_start
+    end
+    local a_end = a.line_end or a_start
+    local b_end = b.line_end or b_start
+    if a_end ~= b_end then
+      return a_end < b_end
+    end
+    if (a.created_at or "") ~= (b.created_at or "") then
+      return (a.created_at or "") < (b.created_at or "")
+    end
+    return (a.id or "") < (b.id or "")
+  end)
+  return comments
+end
+
+---@param context? table
+---@return string|nil, string|nil
+function M.generate_export_markdown(context)
+  local resolved_context = context
+  local context_err = nil
+  if not resolved_context then
+    resolved_context, context_err = current_context()
+  end
+  if type(resolved_context) ~= "table" then
+    return nil, context_err or "No diffview context"
+  end
+
+  local view = resolved_context.view or resolved_context
+  local diff_id = diff_id_for_view(view)
+  local comments = exportable_comments(diff_id)
+
+  local lines = {
+    "# Commentry Draft Export",
+    "",
+    ("- Context: `%s`"):format(diff_id),
+    ("- Comments: %d"):format(#comments),
+    "",
+  }
+
+  if #comments == 0 then
+    lines[#lines + 1] = "_No draft comments._"
+    return table.concat(lines, "\n"), nil
+  end
+
+  local current_file = nil
+  for _, comment in ipairs(comments) do
+    if comment.file_path ~= current_file then
+      if current_file then
+        lines[#lines + 1] = ""
+      end
+      current_file = comment.file_path
+      lines[#lines + 1] = ("## `%s`"):format(current_file)
+      lines[#lines + 1] = ""
+    end
+
+    local comment_type = comment.comment_type or "note"
+    lines[#lines + 1] = ("- [%s] `%s`"):format(comment_type, comment_location_label(comment))
+
+    local body_lines = vim.split(comment.body or "", "\n", { plain = true })
+    if #body_lines == 0 then
+      body_lines = { "" }
+    end
+    for _, body_line in ipairs(body_lines) do
+      lines[#lines + 1] = ("  %s"):format(body_line)
+    end
+    lines[#lines + 1] = ""
+  end
+
+  return table.concat(lines, "\n"), nil
+end
+
+---@param cmd_args string?
+---@return string|nil, string|nil
+local function export_register_from_args(cmd_args)
+  if type(cmd_args) ~= "string" then
+    return nil, nil
+  end
+  local args = vim.trim(cmd_args)
+  if args == "" then
+    return nil, nil
+  end
+  if args == "stdout" then
+    return nil, nil
+  end
+  if args == "register" then
+    return '"', nil
+  end
+  local prefix = "register:"
+  if args:sub(1, #prefix) == prefix then
+    local register = args:sub(#prefix + 1)
+    if #register == 1 then
+      return register, nil
+    end
+    return nil, "Register destination must be a single register name (example: register:a)"
+  end
+  return nil, "Unknown export destination. Use `stdout`, `register`, or `register:<name>`"
+end
+
+---@param cmd_args string?
+function M.export_comments(cmd_args)
+  local register, parse_err = export_register_from_args(cmd_args)
+  if parse_err then
+    Util.error(parse_err)
+    return
+  end
+
+  local markdown, export_err = M.generate_export_markdown()
+  if not markdown then
+    Util.error(export_err or "Failed to generate comment export")
+    return
+  end
+
+  if not register then
+    print(markdown)
+    return
+  end
+
+  vim.fn.setreg(register, markdown)
+  Util.info(("Exported draft comments to register `%s`"):format(register))
+end
+
 ---@param view table
 ---@return boolean
 function M.load_for_view(view)
-  local diff_id = diff_id_for_view(view)
+  local diff_id = require_context_id(view, "Unable to resolve review context")
+  if not diff_id then
+    return false
+  end
   if is_dirty(diff_id) then
     Util.warn("Skipping store reload: unsaved in-memory comments exist")
     return false
@@ -750,7 +1243,7 @@ function M.load_for_view(view)
     Util.warn("Unable to resolve project root for comment store")
     return false
   end
-  local path, path_err = Store.path_for_project(root)
+  local path, path_err = path_for_context(root, diff_id)
   if not path then
     Util.warn(path_err or "Failed to resolve comment store path")
     return false
@@ -777,6 +1270,64 @@ function M.load_current_view()
   return M.load_for_view(view)
 end
 
+---@param diff_id string
+---@param prompt string
+---@param initial_type? string
+---@param cb fun(comment_type: string)
+local function select_comment_type(diff_id, prompt, initial_type, cb)
+  local choices = comment_type_choices()
+  local selected = initial_type
+  if not is_valid_comment_type(selected) then
+    selected = selected_comment_type(diff_id)
+  end
+  table.sort(choices, function(a, b)
+    if a == selected then
+      return true
+    end
+    if b == selected then
+      return false
+    end
+    return a < b
+  end)
+
+  vim.ui.select(choices, {
+    prompt = prompt,
+    format_item = function(item)
+      if item == selected then
+        return item .. " (default)"
+      end
+      return item
+    end,
+  }, function(choice)
+    if type(choice) == "string" and choice ~= "" then
+      cb(choice)
+    end
+  end)
+end
+
+---@param context table
+---@return integer, integer
+local function visual_line_range(context)
+  local start_pos = vim.fn.getpos("'<")
+  local end_pos = vim.fn.getpos("'>")
+  local start_line = tonumber(start_pos[2]) or 0
+  local end_line = tonumber(end_pos[2]) or 0
+  if start_line < 1 or end_line < 1 then
+    local line = context.line_number
+    return line, line
+  end
+  local start_buf = tonumber(start_pos[1]) or 0
+  local end_buf = tonumber(end_pos[1]) or 0
+  if (start_buf > 0 and start_buf ~= context.bufnr) or (end_buf > 0 and end_buf ~= context.bufnr) then
+    local line = context.line_number
+    return line, line
+  end
+  if start_line > end_line then
+    start_line, end_line = end_line, start_line
+  end
+  return start_line, end_line
+end
+
 function M.add_comment()
   local context, err = current_context()
   if not context then
@@ -788,12 +1339,16 @@ function M.add_comment()
     Util.error(anchor_err or "Invalid line anchor")
     return
   end
-  vim.ui.input({ prompt = "Add comment: " }, function(input)
+  local diff_id = require_context_id(context.view, "Unable to resolve review context")
+  if not diff_id then
+    return
+  end
+  local active_type = selected_comment_type(diff_id)
+  vim.ui.input({ prompt = ("Add %s comment: "):format(active_type) }, function(input)
     if not input or input == "" then
       return
     end
-    local diff_id = diff_id_for_view(context.view)
-    local comment, comment_err = M.new_comment(diff_id, anchor, input)
+    local comment, comment_err = M.new_comment(diff_id, anchor, input, { comment_type = active_type })
     if not comment then
       Util.error(comment_err or "Failed to create comment")
       return
@@ -813,6 +1368,48 @@ function M.add_comment()
   end)
 end
 
+function M.add_range_comment()
+  local context, err = current_context()
+  if not context then
+    Util.error(err or "No diffview context")
+    return
+  end
+
+  local line_start, line_end = visual_line_range(context)
+  local anchor, anchor_err = M.build_anchor(context.file_path, line_start, context.line_side, line_end)
+  if not anchor then
+    Util.error(anchor_err or "Invalid range anchor")
+    return
+  end
+
+  local diff_id = diff_id_for_view(context.view)
+  local active_type = selected_comment_type(diff_id)
+  local prompt = ("Add %s range comment (%d-%d): "):format(active_type, line_start, line_end)
+
+  vim.ui.input({ prompt = prompt }, function(input)
+    if not input or input == "" then
+      return
+    end
+    local comment, comment_err = M.new_comment(diff_id, anchor, input, { comment_type = active_type })
+    if not comment then
+      Util.error(comment_err or "Failed to create range comment")
+      return
+    end
+    comment.line_content = line_text_at(context.bufnr, line_start)
+    local dstate = diff_state(diff_id)
+    upsert_comment(dstate, comment)
+    local thread, thread_err = ensure_thread(diff_id, anchor)
+    if not thread then
+      Util.error(thread_err or "Failed to create thread")
+      return
+    end
+    thread.comment_ids[#thread.comment_ids + 1] = comment.id
+    mark_dirty(diff_id)
+    render_for_context(context)
+    persist_for_view(diff_id, context.view, "Failed to persist range comment")
+  end)
+end
+
 function M.edit_comment()
   local context, err = current_context()
   if not context then
@@ -824,7 +1421,10 @@ function M.edit_comment()
     Util.error(anchor_err or "Invalid line anchor")
     return
   end
-  local diff_id = diff_id_for_view(context.view)
+  local diff_id = require_context_id(context.view, "Unable to resolve review context")
+  if not diff_id then
+    return
+  end
   local dstate = diff_state(diff_id)
   local thread, thread_err = find_thread(diff_id, anchor)
   if not thread then
@@ -870,7 +1470,10 @@ function M.delete_comment()
     Util.error(anchor_err or "Invalid line anchor")
     return
   end
-  local diff_id = diff_id_for_view(context.view)
+  local diff_id = require_context_id(context.view, "Unable to resolve review context")
+  if not diff_id then
+    return
+  end
   local dstate = diff_state(diff_id)
   local thread, thread_err = find_thread(diff_id, anchor)
   if not thread then
@@ -893,6 +1496,54 @@ function M.delete_comment()
     mark_dirty(diff_id)
     render_for_context(context)
     persist_for_view(diff_id, context.view, "Failed to persist comment")
+  end)
+end
+
+function M.set_comment_type()
+  local context, err = current_context()
+  if not context then
+    Util.error(err or "No diffview context")
+    return
+  end
+
+  local anchor, anchor_err = anchor_from_context(context)
+  if not anchor then
+    Util.error(anchor_err or "Invalid line anchor")
+    return
+  end
+
+  local diff_id = diff_id_for_view(context.view)
+  local dstate = diff_state(diff_id)
+  local thread = find_thread(diff_id, anchor)
+
+  if not thread then
+    select_comment_type(diff_id, "Default comment type", selected_comment_type(diff_id), function(choice)
+      dstate.selected_comment_type = choice
+      Util.info(("Default comment type set to %s"):format(choice))
+    end)
+    return
+  end
+
+  local comments = comments_for_thread(dstate, thread)
+  if #comments == 0 then
+    Util.info("No draft comments for this line")
+    return
+  end
+
+  select_comment(comments, "Set comment type", function(target)
+    select_comment_type(diff_id, "Set comment type", target.comment_type, function(choice)
+      local updated, update_err = M.update_type(target, choice)
+      if not updated then
+        Util.error(update_err or "Failed to update comment type")
+        return
+      end
+      updated.status = nil
+      dstate.selected_comment_type = choice
+      upsert_comment(dstate, updated)
+      mark_dirty(diff_id)
+      render_for_context(context)
+      persist_for_view(diff_id, context.view, "Failed to persist comment")
+    end)
   end)
 end
 

@@ -59,6 +59,11 @@ local function maybe_attach_keymaps(bufnr)
     Comments.add_comment()
   end, { buffer = bufnr, desc = "Commentry add comment" })
 
+  local add_range_key = Config.keymaps.add_range_comment or Config.keymaps.add_comment
+  vim.keymap.set("x", add_range_key, function()
+    Comments.add_range_comment()
+  end, { buffer = bufnr, desc = "Commentry add range comment" })
+
   vim.keymap.set("n", Config.keymaps.edit_comment, function()
     Comments.edit_comment()
   end, { buffer = bufnr, desc = "Commentry edit comment" })
@@ -66,6 +71,10 @@ local function maybe_attach_keymaps(bufnr)
   vim.keymap.set("n", Config.keymaps.delete_comment, function()
     Comments.delete_comment()
   end, { buffer = bufnr, desc = "Commentry delete comment" })
+
+  vim.keymap.set("n", Config.keymaps.set_comment_type, function()
+    Comments.set_comment_type()
+  end, { buffer = bufnr, desc = "Commentry set comment type" })
 
   Comments.render_current_buffer()
 end
@@ -85,7 +94,11 @@ function M.setup()
     if type(cmd_args) == "string" and cmd_args ~= "" then
       args = vim.split(cmd_args, "%s+", { trimempty = true })
     end
-    local ok, err = Diffview.open(args)
+    local review_context = nil
+    if type(Diffview.resolve_review_context) == "function" then
+      review_context = Diffview.resolve_review_context(args)
+    end
+    local ok, err = Diffview.open(args, review_context)
     if ok then
       return
     end
@@ -106,6 +119,18 @@ function M.setup()
 
   M.register("list-comments", function()
     Comments.list_comments()
+  end)
+
+  M.register("add-range-comment", function()
+    Comments.add_range_comment()
+  end)
+
+  M.register("set-comment-type", function()
+    Comments.set_comment_type()
+  end)
+
+  M.register("export", function(_, cmd_args)
+    Comments.export_comments(cmd_args)
   end)
 
   for _, module_name in ipairs(feature_modules) do

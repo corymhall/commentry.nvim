@@ -77,11 +77,38 @@ describe("commentry.diffview hover preview", function()
 
     assert.are.same(1, extmark_calls)
     assert.is_table(extmark_opts.virt_lines)
-    assert.are.same("[comment] one", extmark_opts.virt_lines[1][1][1])
-    assert.are.same("[comment] two lines", extmark_opts.virt_lines[2][1][1])
+    assert.are.same("[note] one", extmark_opts.virt_lines[1][1][1])
+    assert.are.same("[note] two lines", extmark_opts.virt_lines[2][1][1])
 
     Diffview.clear_hover_preview(1)
     assert.is_true(clear_calls >= 2)
+  end)
+
+  it("aggregates marker labels by range start and comment type counts", function()
+    local marker_calls = {}
+    vim.api.nvim_buf_is_valid = function()
+      return true
+    end
+    vim.api.nvim_buf_clear_namespace = function()
+      return
+    end
+    vim.api.nvim_buf_set_extmark = function(_, _, line, _, opts)
+      marker_calls[#marker_calls + 1] = { line = line, opts = opts }
+      return 1
+    end
+
+    package.loaded["commentry.diffview"] = nil
+    local Diffview = require("commentry.diffview")
+
+    Diffview.render_comment_markers(1, {
+      { line_start = 4, line_end = 6, comment_type = "note" },
+      { line_start = 4, line_end = 6, comment_type = "note" },
+      { line_start = 4, line_end = 6, comment_type = "issue" },
+    })
+
+    assert.are.same(1, #marker_calls)
+    assert.are.same(3, marker_calls[1].line)
+    assert.are.same("[issue,note:2]", marker_calls[1].opts.virt_text[1][1])
   end)
 
   it("shows preview only for current commented line and clears otherwise", function()
@@ -103,7 +130,10 @@ describe("commentry.diffview hover preview", function()
                 diff_id = "/tmp/project",
                 file_path = "file.lua",
                 line_number = 7,
+                line_start = 7,
+                line_end = 9,
                 line_side = "head",
+                comment_type = "issue",
                 body = "hover me",
                 line_content = "line seven",
               },
@@ -114,6 +144,8 @@ describe("commentry.diffview hover preview", function()
                 diff_id = "/tmp/project",
                 file_path = "file.lua",
                 line_number = 7,
+                line_start = 7,
+                line_end = 9,
                 line_side = "head",
                 comment_ids = { "c1" },
               },
@@ -164,10 +196,109 @@ describe("commentry.diffview hover preview", function()
       }
     end
 
+    local shown_in_range = comments.refresh_hover_preview()
+    assert.is_true(shown_in_range)
+    assert.is_table(rendered)
+    assert.are.same("c1", rendered.line_comments[1].id)
+
+    rendered = nil
+    package.loaded["commentry.diffview"].current_file_context = function()
+      return {
+        file_path = "file.lua",
+        line_number = 10,
+        line_side = "head",
+        bufnr = 1,
+        view = { git_root = "/tmp/project" },
+      }
+    end
+
     local shown_none = comments.refresh_hover_preview()
     assert.is_false(shown_none)
     assert.is_nil(rendered)
     assert.are.same(1, cleared)
+  end)
+
+  it("does not bleed hover previews across base/head sides on the same line", function()
+    local rendered = nil
+    local comments = load_comments_with_stubs({
+      store = {
+        path_for_project = function()
+          return "/tmp/project/.commentry/commentry.json"
+        end,
+        read = function()
+          return {
+            project_root = "/tmp/project",
+            diff_id = "/tmp/project",
+            comments = {
+              {
+                id = "c-head",
+                diff_id = "/tmp/project",
+                file_path = "file.lua",
+                line_number = 7,
+                line_side = "head",
+                body = "head side",
+              },
+              {
+                id = "c-base",
+                diff_id = "/tmp/project",
+                file_path = "file.lua",
+                line_number = 7,
+                line_side = "base",
+                body = "base side",
+              },
+            },
+            threads = {
+              {
+                id = "t-head",
+                diff_id = "/tmp/project",
+                file_path = "file.lua",
+                line_number = 7,
+                line_side = "head",
+                comment_ids = { "c-head" },
+              },
+              {
+                id = "t-base",
+                diff_id = "/tmp/project",
+                file_path = "file.lua",
+                line_number = 7,
+                line_side = "base",
+                comment_ids = { "c-base" },
+              },
+            },
+          }
+        end,
+        write = function()
+          return true
+        end,
+      },
+      diffview = {
+        current_file_context = function()
+          return {
+            file_path = "file.lua",
+            line_number = 7,
+            line_side = "head",
+            bufnr = 1,
+            view = { git_root = "/tmp/project" },
+          }
+        end,
+        render_comment_markers = function()
+          return
+        end,
+        render_hover_preview = function(_, _, line_comments)
+          rendered = line_comments
+        end,
+        clear_hover_preview = function()
+          return
+        end,
+      },
+    })
+
+    comments.load_for_view({ git_root = "/tmp/project" })
+    local shown = comments.refresh_hover_preview()
+    assert.is_true(shown)
+    assert.is_table(rendered)
+    assert.are.same(1, #rendered)
+    assert.are.same("c-head", rendered[1].id)
   end)
 
   it("wires cursor movement and hold handlers to hover refresh", function()
@@ -238,5 +369,31 @@ describe("commentry.diffview hover preview", function()
     assert.is_not_nil(cursor_handler)
     cursor_handler()
     assert.are.same(1, refresh_calls)
+  end)
+end)
+
+describe("commentry review context", function()
+  local original_diffview
+
+  before_each(function()
+    original_diffview = package.loaded["commentry.diffview"]
+  end)
+
+  after_each(function()
+    package.loaded["commentry.diffview"] = original_diffview
+  end)
+
+  it("builds distinct context identity for working tree and revision ranges", function()
+    package.loaded["commentry.diffview"] = nil
+    local Diffview = require("commentry.diffview")
+
+    local working_context = Diffview.resolve_review_context(nil, { git_root = "/tmp/commentry-project" })
+    local revision_context = Diffview.resolve_review_context({ "HEAD~1..HEAD" }, { git_root = "/tmp/commentry-project" })
+    local revision_context_again = Diffview.resolve_review_context({ "HEAD~1..HEAD" }, { git_root = "/tmp/commentry-project" })
+
+    assert.are.same("working_tree", working_context.mode)
+    assert.are.same("commit_range", revision_context.mode)
+    assert.are_not.same(working_context.context_id, revision_context.context_id)
+    assert.are.same(revision_context.context_id, revision_context_again.context_id)
   end)
 end)

@@ -21,5 +21,20 @@ COMMANDS                                          *commentry.commands*
   Base command entry point for commentry. Subcommands will be added as
   the plugin evolves.
 
+:Commentry open
+  Open diffview for local changes.
+
+:Commentry list-comments
+  List jumpable active draft comments for the current diff file/side.
+
+:Commentry set-comment-type
+  Set default or per-comment type.
+
+:Commentry export [stdout|register|register:{name}]
+  Export active draft comments as deterministic markdown.
+  `stdout` (default): print markdown.
+  `register`: write markdown to unnamed register.
+  `register:{name}`: write markdown to register {name} (example: `register:a`).
+
 =============================================================================
 vim:tw=78:ts=2:sw=2:et:ft=help

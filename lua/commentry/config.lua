@@ -5,8 +5,10 @@ M.ns = vim.api.nvim_create_namespace("commentry")
 
 ---@class commentry.Keymaps
 ---@field add_comment string
+---@field add_range_comment string
 ---@field edit_comment string
 ---@field delete_comment string
+---@field set_comment_type string
 
 ---@class commentry.StoreConfig
 ---@field filename string
@@ -19,15 +21,21 @@ M.ns = vim.api.nvim_create_namespace("commentry")
 ---@class commentry.Config
 ---@field debug boolean
 ---@field keymaps commentry.Keymaps
+---@field comment_types string[]
+---@field default_comment_type string
 ---@field store commentry.StoreConfig
 ---@field diffview commentry.DiffviewConfig
 local defaults = {
   debug = false,
   keymaps = {
     add_comment = "mc",
+    add_range_comment = "mc",
     edit_comment = "me",
     delete_comment = "md",
+    set_comment_type = "mt",
   },
+  comment_types = { "note", "suggestion", "issue", "praise" },
+  default_comment_type = "note",
   store = {
     filename = "commentry.json",
   },

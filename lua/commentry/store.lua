@@ -4,6 +4,12 @@ local Util = require("commentry.util")
 local M = {}
 
 local uv = vim.uv or vim.loop
+local COMMENT_TYPES = {
+  note = true,
+  suggestion = true,
+  issue = true,
+  praise = true,
+}
 
 ---@param value any
 ---@return boolean
@@ -49,20 +55,41 @@ local function validate_comment(comment, errors, index)
   if type(comment.id) ~= "string" or comment.id == "" then
     push_error(errors, ("comments[%d].id must be a non-empty string"):format(index))
   end
-  if type(comment.diff_id) ~= "string" or comment.diff_id == "" then
-    push_error(errors, ("comments[%d].diff_id must be a non-empty string"):format(index))
+  if type(comment.context_id) ~= "string" or comment.context_id == "" then
+    push_error(errors, ("comments[%d].context_id must be a non-empty string"):format(index))
   end
   if type(comment.file_path) ~= "string" or comment.file_path == "" then
     push_error(errors, ("comments[%d].file_path must be a non-empty string"):format(index))
   end
-  if not is_integer(comment.line_number) then
-    push_error(errors, ("comments[%d].line_number must be a positive integer"):format(index))
+  if not is_integer(comment.line_start) then
+    push_error(errors, ("comments[%d].line_start must be a positive integer"):format(index))
+  end
+  if not is_integer(comment.line_end) then
+    push_error(errors, ("comments[%d].line_end must be a positive integer"):format(index))
+  end
+  if is_integer(comment.line_start) and is_integer(comment.line_end) and comment.line_end < comment.line_start then
+    push_error(errors, ("comments[%d].line_end must be >= line_start"):format(index))
   end
   if comment.line_side ~= "base" and comment.line_side ~= "head" then
     push_error(errors, ("comments[%d].line_side must be 'base' or 'head'"):format(index))
   end
+  if type(comment.comment_type) ~= "string" or not COMMENT_TYPES[comment.comment_type] then
+    push_error(errors, ("comments[%d].comment_type must be one of: note, suggestion, issue, praise"):format(index))
+  end
   if type(comment.body) ~= "string" or comment.body == "" then
     push_error(errors, ("comments[%d].body must be a non-empty string"):format(index))
+  end
+  if type(comment.created_at) ~= "string" or comment.created_at == "" then
+    push_error(errors, ("comments[%d].created_at must be a non-empty string"):format(index))
+  end
+  if type(comment.updated_at) ~= "string" or comment.updated_at == "" then
+    push_error(errors, ("comments[%d].updated_at must be a non-empty string"):format(index))
+  end
+  if comment.status ~= nil and type(comment.status) ~= "string" then
+    push_error(errors, ("comments[%d].status must be a string when provided"):format(index))
+  end
+  if comment.line_content ~= nil and type(comment.line_content) ~= "string" then
+    push_error(errors, ("comments[%d].line_content must be a string when provided"):format(index))
   end
 end
 
@@ -77,14 +104,20 @@ local function validate_thread(thread, errors, index)
   if type(thread.id) ~= "string" or thread.id == "" then
     push_error(errors, ("threads[%d].id must be a non-empty string"):format(index))
   end
-  if type(thread.diff_id) ~= "string" or thread.diff_id == "" then
-    push_error(errors, ("threads[%d].diff_id must be a non-empty string"):format(index))
+  if type(thread.context_id) ~= "string" or thread.context_id == "" then
+    push_error(errors, ("threads[%d].context_id must be a non-empty string"):format(index))
   end
   if type(thread.file_path) ~= "string" or thread.file_path == "" then
     push_error(errors, ("threads[%d].file_path must be a non-empty string"):format(index))
   end
-  if not is_integer(thread.line_number) then
-    push_error(errors, ("threads[%d].line_number must be a positive integer"):format(index))
+  if not is_integer(thread.line_start) then
+    push_error(errors, ("threads[%d].line_start must be a positive integer"):format(index))
+  end
+  if not is_integer(thread.line_end) then
+    push_error(errors, ("threads[%d].line_end must be a positive integer"):format(index))
+  end
+  if is_integer(thread.line_start) and is_integer(thread.line_end) and thread.line_end < thread.line_start then
+    push_error(errors, ("threads[%d].line_end must be >= line_start"):format(index))
   end
   if thread.line_side ~= "base" and thread.line_side ~= "head" then
     push_error(errors, ("threads[%d].line_side must be 'base' or 'head'"):format(index))
@@ -96,6 +129,27 @@ local function validate_thread(thread, errors, index)
       if type(comment_id) ~= "string" or comment_id == "" then
         push_error(errors, ("threads[%d].comment_ids[%d] must be a non-empty string"):format(index, comment_index))
       end
+    end
+  end
+end
+
+---@param file_reviews table|nil
+---@param errors string[]
+local function validate_file_reviews(file_reviews, errors)
+  if type(file_reviews) ~= "table" then
+    push_error(errors, "store.file_reviews must be a table")
+    return
+  end
+  if is_array(file_reviews) then
+    push_error(errors, "store.file_reviews must be a map of file path to boolean")
+    return
+  end
+  for file_path, reviewed in pairs(file_reviews) do
+    if type(file_path) ~= "string" or file_path == "" then
+      push_error(errors, "store.file_reviews keys must be non-empty strings")
+    end
+    if type(reviewed) ~= "boolean" then
+      push_error(errors, ("store.file_reviews[%s] must be a boolean"):format(tostring(file_path)))
     end
   end
 end
@@ -112,8 +166,8 @@ function M.validate(store)
   if type(store.project_root) ~= "string" or store.project_root == "" then
     push_error(errors, "store.project_root must be a non-empty string")
   end
-  if type(store.diff_id) ~= "string" or store.diff_id == "" then
-    push_error(errors, "store.diff_id must be a non-empty string")
+  if type(store.context_id) ~= "string" or store.context_id == "" then
+    push_error(errors, "store.context_id must be a non-empty string")
   end
   if not is_array(store.comments or {}) then
     push_error(errors, "store.comments must be an array")
@@ -121,6 +175,7 @@ function M.validate(store)
   if not is_array(store.threads or {}) then
     push_error(errors, "store.threads must be an array")
   end
+  validate_file_reviews(store.file_reviews, errors)
 
   if is_array(store.comments or {}) then
     for index, comment in ipairs(store.comments or {}) do
@@ -137,12 +192,22 @@ function M.validate(store)
   return #errors == 0, errors
 end
 
+---@param context_id string
+---@return string
+local function normalize_context_id(context_id)
+  return context_id:gsub("[^%w%._%-]", "_")
+end
+
 ---@param project_root string
+---@param context_id string
 ---@param filename? string
 ---@return string|nil, string|nil
-function M.path_for_project(project_root, filename)
+function M.path_for_context(project_root, context_id, filename)
   if type(project_root) ~= "string" or project_root == "" then
     return nil, "project_root is required"
+  end
+  if type(context_id) ~= "string" or context_id == "" then
+    return nil, "context_id is required"
   end
 
   local root = vim.fs.normalize(project_root)
@@ -157,7 +222,8 @@ function M.path_for_project(project_root, filename)
     return nil, "filename is required"
   end
 
-  local base = vim.fs.joinpath(resolved, ".commentry")
+  local context_dir = normalize_context_id(context_id)
+  local base = vim.fs.joinpath(resolved, ".commentry", "contexts", context_dir)
   return vim.fs.joinpath(base, name), nil
 end
 
