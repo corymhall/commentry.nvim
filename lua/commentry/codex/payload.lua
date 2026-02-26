@@ -1,4 +1,5 @@
 local M = {}
+local uv = vim.uv or vim.loop
 
 ---@param value any
 ---@return boolean
@@ -33,6 +34,114 @@ local function deep_copy(value)
     return value
   end
   return vim.deepcopy(value)
+end
+
+---@param root any
+---@return string|nil
+local function normalize_root(root)
+  if type(root) ~= "string" or root == "" then
+    return nil
+  end
+  local normalized = vim.fs.normalize(root)
+  if normalized:sub(-5) == "/.git" then
+    normalized = normalized:sub(1, -6)
+  end
+  if normalized == "" then
+    return nil
+  end
+  local resolved = uv and uv.fs_realpath(normalized) or nil
+  return vim.fs.normalize(resolved or normalized)
+end
+
+---@param path string
+---@return boolean
+local function is_absolute_path(path)
+  if path == "" then
+    return false
+  end
+  if path:sub(1, 1) == "/" then
+    return true
+  end
+  if path:match("^%a:[/\\]") then
+    return true
+  end
+  return false
+end
+
+---@param path any
+---@param root string|nil
+---@return string|nil
+local function normalize_path(path, root)
+  if type(path) ~= "string" or path == "" then
+    return nil
+  end
+  local normalized = vim.fs.normalize(path)
+  if not is_absolute_path(normalized) then
+    return normalized
+  end
+  if not root then
+    return nil
+  end
+  local rel = vim.fs.relpath(root, normalized)
+  if type(rel) ~= "string" or rel == "" or rel:sub(1, 3) == "../" or rel == ".." then
+    return nil
+  end
+  return rel
+end
+
+---@param provenance table
+---@param context table
+---@return table
+local function normalize_provenance(provenance, context)
+  local root = normalize_root(provenance.repo_root or provenance.root or provenance.project_root or context.root or context.git_root)
+  local normalized = {}
+
+  local function copy_value(key, value)
+    if key == "root" or key == "repo_root" or key == "project_root" then
+      return root and "."
+    end
+    if type(value) == "string" then
+      if key == "file" or key == "path" or key == "file_path" then
+        return normalize_path(value, root)
+      end
+      return value
+    end
+    if type(value) ~= "table" then
+      return value
+    end
+    if is_array(value) then
+      local out = {}
+      local path_list = key == "files" or key == "paths"
+      for _, entry in ipairs(value) do
+        if path_list and type(entry) == "string" then
+          local normalized_entry = normalize_path(entry, root)
+          if normalized_entry then
+            out[#out + 1] = normalized_entry
+          end
+        else
+          out[#out + 1] = deep_copy(entry)
+        end
+      end
+      return out
+    end
+    local out = {}
+    for child_key, child_value in pairs(value) do
+      local next_value = copy_value(child_key, child_value)
+      if next_value ~= nil then
+        out[child_key] = next_value
+      end
+    end
+    return out
+  end
+
+  for key, value in pairs(provenance) do
+    local next_value = copy_value(key, value)
+    if next_value ~= nil then
+      normalized[key] = next_value
+    end
+  end
+
+  return normalized
 end
 
 ---@param item table
@@ -220,15 +329,16 @@ end
 ---@return table
 function M.build_payload(context, opts)
   opts = opts or {}
+  context = context or {}
   local items = M.extract_active_items(opts.items or {}, {
     threads = opts.threads,
   })
 
   return {
-    context = deep_copy(context or {}),
+    context = deep_copy(context),
     review_meta = deep_copy(opts.review_meta or {}),
     items = deep_copy(items),
-    provenance = deep_copy(opts.provenance or {}),
+    provenance = normalize_provenance(deep_copy(opts.provenance or {}), context),
   }
 end
 

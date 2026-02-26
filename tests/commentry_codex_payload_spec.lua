@@ -37,7 +37,7 @@ describe("commentry.codex.payload", function()
     assert.are.same("ctx-1", payload.context.context_id)
     assert.are.same("working_tree", payload.review_meta.mode)
     assert.are.same("c1", payload.items[1].id)
-    assert.are.same("/tmp/project", payload.provenance.root)
+    assert.are.same(".", payload.provenance.root)
   end)
 
   it("serializes byte-identically for identical inputs", function()
@@ -55,6 +55,47 @@ describe("commentry.codex.payload", function()
     local payload_b = Payload.build_payload(context, opts)
 
     assert.are.same(Payload.serialize(payload_a), Payload.serialize(payload_b))
+  end)
+
+  it("normalizes in-repo absolute provenance file paths to repo-relative paths", function()
+    local payload = Payload.build_payload({ context_id = "ctx-1" }, {
+      provenance = {
+        root = "/Users/chall/gt/commentry/crew/fiddler",
+        files = {
+          "/Users/chall/gt/commentry/crew/fiddler/lua/commentry/commands.lua",
+        },
+      },
+    })
+
+    assert.are.same(".", payload.provenance.root)
+    assert.are.same({ "lua/commentry/commands.lua" }, payload.provenance.files)
+  end)
+
+  it("excludes absolute provenance paths outside repo root", function()
+    local payload = Payload.build_payload({ context_id = "ctx-1" }, {
+      provenance = {
+        root = "/Users/chall/gt/commentry/crew/fiddler",
+        files = {
+          "/tmp/external.lua",
+          "/Users/chall/gt/commentry/crew/fiddler/lua/commentry/commands.lua",
+        },
+      },
+    })
+
+    assert.are.same({ "lua/commentry/commands.lua" }, payload.provenance.files)
+  end)
+
+  it("drops absolute provenance paths when root is missing or unknown", function()
+    local payload = Payload.build_payload({ context_id = "ctx-1" }, {
+      provenance = {
+        files = {
+          "/tmp/external.lua",
+          "lua/commentry/commands.lua",
+        },
+      },
+    })
+
+    assert.are.same({ "lua/commentry/commands.lua" }, payload.provenance.files)
   end)
 
   it("does not perform store or filesystem writes while building payload", function()
