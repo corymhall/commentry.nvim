@@ -40,13 +40,97 @@ describe("commentry.codex.payload", function()
     assert.are.same(".", payload.provenance.root)
   end)
 
-  it("serializes byte-identically for identical inputs", function()
+  it("normalizes provenance safely with table-driven cases", function()
+    local cases = {
+      {
+        name = "normalizes in-repo absolute paths",
+        context = { context_id = "ctx-1" },
+        provenance = {
+          root = "/Users/chall/gt/commentry/crew/fiddler",
+          files = {
+            "/Users/chall/gt/commentry/crew/fiddler/lua/commentry/commands.lua",
+          },
+        },
+        expected_root = ".",
+        expected_files = { "lua/commentry/commands.lua" },
+      },
+      {
+        name = "drops absolute paths outside repo root",
+        context = { context_id = "ctx-1" },
+        provenance = {
+          root = "/Users/chall/gt/commentry/crew/fiddler",
+          files = {
+            "/tmp/external.lua",
+            "/Users/chall/gt/commentry/crew/fiddler/lua/commentry/commands.lua",
+          },
+        },
+        expected_root = ".",
+        expected_files = { "lua/commentry/commands.lua" },
+      },
+      {
+        name = "drops absolute paths when root is unknown",
+        context = { context_id = "ctx-1" },
+        provenance = {
+          files = {
+            "/tmp/external.lua",
+            "lua/commentry/commands.lua",
+          },
+        },
+        expected_root = nil,
+        expected_files = { "lua/commentry/commands.lua" },
+      },
+    }
+
+    for _, case in ipairs(cases) do
+      local payload = Payload.build_payload(case.context, {
+        provenance = case.provenance,
+      })
+      assert.are.same(case.expected_root, payload.provenance.root, case.name)
+      assert.are.same(case.expected_files, payload.provenance.files, case.name)
+    end
+  end)
+
+  it("filters and projects active items with table-driven cases", function()
+    local cases = {
+      {
+        name = "filters unresolved, stale and invalid comments",
+        items = {
+          { id = "inactive-unresolved", status = "unresolved", body = "a" },
+          { id = "inactive-stale", stale = true, body = "b" },
+          { id = "inactive-invalid", invalid = true, body = "c" },
+          { id = "active-1", body = "kept one", comment_type = "suggestion" },
+          { id = "active-2", body = "kept two" },
+        },
+        expected_ids = { "active-1", "active-2" },
+      },
+      {
+        name = "orders deterministically by path and line metadata",
+        items = {
+          { id = "z-last", file_path = "z.lua", line_number = 1, body = "z" },
+          { id = "a-second", file_path = "a.lua", line_number = 2, body = "a2" },
+          { id = "a-first", file_path = "a.lua", line_number = 1, body = "a1" },
+        },
+        expected_ids = { "a-first", "a-second", "z-last" },
+      },
+    }
+
+    for _, case in ipairs(cases) do
+      local projected = Payload.extract_active_items(case.items)
+      local ids = {}
+      for _, item in ipairs(projected) do
+        ids[#ids + 1] = item.id
+      end
+      assert.are.same(case.expected_ids, ids, case.name)
+    end
+  end)
+
+  it("serializes deterministically with stable ordering", function()
     local context = { context_id = "ctx-1", revisions = { "HEAD~1..HEAD" } }
     local opts = {
-      review_meta = { mode = "commit_range" },
+      review_meta = { mode = "commit_range", why = "determinism" },
       items = {
-        { id = "c2", body = "second" },
-        { id = "c1", body = "first" },
+        { id = "c2", file_path = "b.lua", line_number = 2, body = "second", created_at = "2026-01-02" },
+        { id = "c1", file_path = "a.lua", line_number = 1, body = "first", created_at = "2026-01-01" },
       },
       provenance = { root = "/tmp/project", files = { "b.lua", "a.lua" } },
     }
@@ -54,51 +138,11 @@ describe("commentry.codex.payload", function()
     local payload_a = Payload.build_payload(context, opts)
     local payload_b = Payload.build_payload(context, opts)
 
+    assert.are.same({ "c1", "c2" }, { payload_a.items[1].id, payload_a.items[2].id })
     assert.are.same(Payload.serialize(payload_a), Payload.serialize(payload_b))
   end)
 
-  it("normalizes in-repo absolute provenance file paths to repo-relative paths", function()
-    local payload = Payload.build_payload({ context_id = "ctx-1" }, {
-      provenance = {
-        root = "/Users/chall/gt/commentry/crew/fiddler",
-        files = {
-          "/Users/chall/gt/commentry/crew/fiddler/lua/commentry/commands.lua",
-        },
-      },
-    })
-
-    assert.are.same(".", payload.provenance.root)
-    assert.are.same({ "lua/commentry/commands.lua" }, payload.provenance.files)
-  end)
-
-  it("excludes absolute provenance paths outside repo root", function()
-    local payload = Payload.build_payload({ context_id = "ctx-1" }, {
-      provenance = {
-        root = "/Users/chall/gt/commentry/crew/fiddler",
-        files = {
-          "/tmp/external.lua",
-          "/Users/chall/gt/commentry/crew/fiddler/lua/commentry/commands.lua",
-        },
-      },
-    })
-
-    assert.are.same({ "lua/commentry/commands.lua" }, payload.provenance.files)
-  end)
-
-  it("drops absolute provenance paths when root is missing or unknown", function()
-    local payload = Payload.build_payload({ context_id = "ctx-1" }, {
-      provenance = {
-        files = {
-          "/tmp/external.lua",
-          "lua/commentry/commands.lua",
-        },
-      },
-    })
-
-    assert.are.same({ "lua/commentry/commands.lua" }, payload.provenance.files)
-  end)
-
-  it("does not perform store or filesystem writes while building payload", function()
+  it("has no filesystem or store side effects while building/serializing", function()
     local Store = require("commentry.store")
     local original_store_write = Store.write
     local original_writefile = vim.fn.writefile
@@ -114,10 +158,24 @@ describe("commentry.codex.payload", function()
       return original_writefile(...)
     end
 
-    local payload = Payload.build_payload({ context_id = "ctx-1" }, {
-      items = { { id = "c1", body = "draft" } },
-    })
-    Payload.serialize(payload)
+    local scenarios = {
+      {
+        context = { context_id = "ctx-1" },
+        opts = { items = { { id = "c1", body = "draft" } } },
+      },
+      {
+        context = { context_id = "ctx-2" },
+        opts = {
+          items = { { id = "c2", body = "draft2" } },
+          provenance = { root = "/tmp/project", files = { "lua/commentry/init.lua" } },
+        },
+      },
+    }
+
+    for _, scenario in ipairs(scenarios) do
+      local payload = Payload.build_payload(scenario.context, scenario.opts)
+      Payload.serialize(payload)
+    end
 
     Store.write = original_store_write
     vim.fn.writefile = original_writefile
