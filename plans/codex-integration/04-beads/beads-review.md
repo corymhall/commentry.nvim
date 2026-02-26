@@ -26,7 +26,7 @@
 - **Evidence:** Forward flagged phase-2 dependency fidelity gap; reverse/deps both identified explicit missing edge.
 - **Fix command(s):**
   ```bash
-  bd dep add com-ousm.1.3 com-ousm.2.1
+  bd dep add com-ousm.2.1 com-ousm.1.3
   ```
 
 ### 2. Missing blocker: `com-ousm.3.1 -> com-ousm.3.4` [CORROBORATED]
@@ -36,7 +36,7 @@
 - **Evidence:** Reverse/deps both reported premature health-work execution risk before orchestrator stabilization.
 - **Fix command(s):**
   ```bash
-  bd dep add com-ousm.3.1 com-ousm.3.4
+  bd dep add com-ousm.3.4 com-ousm.3.1
   ```
 
 ---
