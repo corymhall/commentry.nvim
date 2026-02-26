@@ -42,6 +42,14 @@ COMMANDS                                          *commentry.commands*
   `register`: write markdown to unnamed register.
   `register:{name}`: write markdown to register {name} (example: `register:a`).
 
+:Commentry debug-store
+  Print current review context + on-disk store details:
+  - context id/mode/revisions
+  - project root
+  - store path
+  - whether the store file exists
+  Useful when troubleshooting persistence across sessions/contexts.
+
 :Commentry send-to-codex
   Send current review payload to Codex.
   Requires:
@@ -59,6 +67,14 @@ V1 BOUNDARIES                                     *commentry.v1-boundaries*
 - No background retry queue or delivery reconciliation
 - No receipt tracking inside commentry state
 - No multi-adapter orchestration in v1
+
+PERSISTENCE NOTES                                 *commentry.persistence*
+
+- Store path is context-scoped:
+  `.commentry/contexts/<context-id>/commentry.json`
+- The store file is created lazily on first successful write in that context.
+- Working-tree and commit-range contexts are isolated.
+- Use `:Commentry debug-store` to verify the active context/path when comments seem missing.
 
 =============================================================================
 vim:tw=78:ts=2:sw=2:et:ft=help

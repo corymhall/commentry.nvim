@@ -1391,6 +1391,8 @@ end
 
 ---@return table|nil, string|nil
 function M.debug_store_context()
+  -- Debug helper intentionally mirrors the exact resolution flow used by
+  -- persistence read/write paths so troubleshooting output matches runtime.
   local view, view_err = Diffview.get_current_view()
   if not view then
     return nil, view_err or "No diffview view found"

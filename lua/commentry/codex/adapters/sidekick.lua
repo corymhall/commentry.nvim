@@ -2,6 +2,10 @@ local Adapter = require("commentry.codex.adapter")
 
 local M = {}
 
+-- Compatibility strategy:
+-- 1) Prefer explicit codex-oriented entrypoints when available.
+-- 2) Fallback to sidekick CLI state/session APIs used by current upstream sidekick.nvim.
+-- This keeps send semantics stable across sidekick runtime variants.
 local ENTRYPOINT_MODULES = {
   "sidekick.codex",
   "sidekick.integration.codex",
@@ -74,6 +78,9 @@ local function resolve_sender()
     end
   end
 
+  -- sidekick.nvim mainline fallback:
+  -- send directly to the attached session object, bypassing sidekick.cli.send
+  -- templating/rendering so JSON payloads are delivered verbatim.
   local ok_state, state = pcall(require, "sidekick.cli.state")
   if ok_state and type(state) == "table" and type(state.get) == "function" then
     return function(payload, target)
@@ -99,6 +106,7 @@ local function resolve_sender()
         return false, Adapter.error("ADAPTER_UNAVAILABLE")
       end
 
+      -- Session send writes directly to the tool terminal/mux session.
       local wrote = pcall(function()
         session:send(encoded .. "\n")
       end)
@@ -132,6 +140,7 @@ local function resolve_current_target()
     end
   end
 
+  -- sidekick.nvim mainline fallback target discovery.
   local ok_state, state = pcall(require, "sidekick.cli.state")
   if ok_state and type(state) == "table" and type(state.get) == "function" then
     local attached = state.get({ attached = true, name = "codex" })

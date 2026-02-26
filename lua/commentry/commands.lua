@@ -188,6 +188,8 @@ function M.setup()
   end)
 
   M.register("debug-store", function()
+    -- Keep this as a user-visible command so persistence/debug context can be
+    -- inspected without requiring `debug = true` or custom instrumentation.
     if type(Comments.debug_store_context) ~= "function" then
       Util.error("Store debug helper unavailable.")
       return

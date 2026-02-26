@@ -140,6 +140,8 @@ local function validate_file_reviews(file_reviews, errors)
     push_error(errors, "store.file_reviews must be a table")
     return
   end
+  -- file_reviews is a map (file_path -> boolean). An empty table is valid and
+  -- expected on first write before any file-reviewed toggles are performed.
   for file_path, reviewed in pairs(file_reviews) do
     if type(file_path) ~= "string" or file_path == "" then
       push_error(errors, "store.file_reviews keys must be non-empty strings")

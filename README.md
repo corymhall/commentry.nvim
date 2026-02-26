@@ -36,6 +36,7 @@ require("commentry").setup({
 - `:Commentry export` prints deterministic markdown for active draft comments.
 - `:Commentry export register` writes markdown to the unnamed register.
 - `:Commentry export register:<name>` writes markdown to a specific register (for example `register:a`).
+- `:Commentry debug-store` prints the active review context and the exact on-disk store path.
 - `:Commentry send-to-codex` sends the current review payload to Codex using the attached Sidekick session target.
 
 If you open diffview directly (for example `:DiffviewOpen main`), Commentry will
@@ -71,3 +72,13 @@ require("commentry").setup({
 - `send-to-codex` requires an attached active review context. Running it outside an attached review buffer/context fails.
 - Send is send-and-forget in v1: Commentry dispatches the payload once and reports success/failure in Neovim messages.
 - v1 does not persist send history, delivery receipts, retries, or any outbound queue state.
+
+## Troubleshooting
+
+- Draft store file does not exist yet:
+  Commentry creates `.commentry/contexts/<context-id>/commentry.json` lazily on first successful write
+  (add/edit/delete comment, set type, toggle reviewed). If no writes happened in that context yet, the file is absent.
+- Wrong context:
+  `working_tree` and `commit_range` contexts are stored separately. Use `:Commentry debug-store` to confirm the active context id/path.
+- Sidekick attached but send fails:
+  ensure a Codex Sidekick session is attached and run `:Commentry send-to-codex` from an attached review buffer/context.
