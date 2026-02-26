@@ -20,6 +20,18 @@ M.ns = vim.api.nvim_create_namespace("commentry")
 ---@field prefer string
 ---@field auto_attach boolean
 
+---@class commentry.CodexAdapterConfig
+---@field select string
+---@field fallback string|nil
+
+---@class commentry.CodexBehaviorConfig
+---@field open string
+
+---@class commentry.CodexConfig
+---@field enabled boolean
+---@field adapter commentry.CodexAdapterConfig
+---@field behavior commentry.CodexBehaviorConfig
+
 ---@class commentry.Config
 ---@field debug boolean
 ---@field keymaps commentry.Keymaps
@@ -27,6 +39,7 @@ M.ns = vim.api.nvim_create_namespace("commentry")
 ---@field default_comment_type string
 ---@field store commentry.StoreConfig
 ---@field diffview commentry.DiffviewConfig
+---@field codex commentry.CodexConfig
 local defaults = {
   debug = false,
   keymaps = {
@@ -47,6 +60,16 @@ local defaults = {
     enabled = true,
     prefer = "diffview.nvim",
     auto_attach = true,
+  },
+  codex = {
+    enabled = false,
+    adapter = {
+      select = "auto",
+      fallback = nil,
+    },
+    behavior = {
+      open = "reuse",
+    },
   },
 }
 
