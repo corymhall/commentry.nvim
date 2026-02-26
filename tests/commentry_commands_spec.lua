@@ -75,6 +75,7 @@ describe("commentry command routing", function()
   local original_diffview
   local original_commands
   local original_create_autocmd
+  local original_codex_preload
 
   before_each(function()
     original_comments = package.loaded["commentry.comments"]
@@ -82,6 +83,7 @@ describe("commentry command routing", function()
     original_diffview = package.loaded["commentry.diffview"]
     original_commands = package.loaded["commentry.commands"]
     original_create_autocmd = vim.api.nvim_create_autocmd
+    original_codex_preload = package.preload["commentry.codex"]
   end)
 
   after_each(function()
@@ -90,6 +92,7 @@ describe("commentry command routing", function()
     package.loaded["commentry.diffview"] = original_diffview
     package.loaded["commentry.commands"] = original_commands
     vim.api.nvim_create_autocmd = original_create_autocmd
+    package.preload["commentry.codex"] = original_codex_preload
   end)
 
   it("routes :Commentry list-comments to comments.list_comments", function()
@@ -199,6 +202,47 @@ describe("commentry command routing", function()
     local Commands = require("commentry.commands")
     local matches = Commands.complete("Commentry ex")
 
+    assert.is_true(vim.tbl_contains(matches, "export"))
+  end)
+
+  it("keeps existing command completion unaffected when codex is disabled", function()
+    vim.api.nvim_create_autocmd = function()
+      return 1
+    end
+    package.preload["commentry.codex"] = function()
+      error("codex namespace should not load from command setup when disabled")
+    end
+    package.loaded["commentry.comments"] = {
+      list_comments = function()
+        return
+      end,
+      set_comment_type = function()
+        return
+      end,
+      export_comments = function()
+        return
+      end,
+      render_current_buffer = function()
+        return
+      end,
+    }
+    package.loaded["commentry.config"] = {
+      augroup = 1,
+      codex = { enabled = false },
+      diffview = { enabled = true },
+      keymaps = { add_comment = "mc", edit_comment = "me", delete_comment = "md", set_comment_type = "mt" },
+    }
+    package.loaded["commentry.diffview"] = {
+      open = function()
+        return true
+      end,
+    }
+
+    package.loaded["commentry.commands"] = nil
+    local Commands = require("commentry.commands")
+    local matches = Commands.complete("Commentry ")
+
+    assert.is_true(vim.tbl_contains(matches, "list-comments"))
     assert.is_true(vim.tbl_contains(matches, "export"))
   end)
 
