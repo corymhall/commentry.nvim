@@ -327,7 +327,27 @@ The plan aligns with v1 constraints from the spec: send-and-forget semantics, ac
 - Required pre-merge gate: tests must cover no-target, success, transport failure, resend determinism, active-item scope, and provenance safety.
 
 ### Migration
-No migration needed in v1. Existing `.commentry/contexts/...` storage model remains unchanged. v2 can revisit persistence or Beads-related continuity if requirements expand.
+No migration needed in v1.
+
+v1 keeps the existing `.commentry/contexts/...` storage model unchanged and does not introduce:
+- persisted send-history records,
+- send snapshot/disposition fields, or
+- any send-path write-back into Commentry review state.
+
+This preserves spec constraints around send-and-forget semantics, store compatibility, and no persistence migration in the first implementation phase.
+
+### Deferred Scope (v2+)
+The following scope remains explicitly deferred and is not implemented by this plan's phases:
+- Q98: Review-to-Beads conversion flow (defer to v2 Beads exploration).
+- Q103: Multi-person collaboration workflow (out-of-scope while product boundary is solo-only).
+- Q122: Beads continuity proof artifact (depends on Beads integration strategy in v2).
+- Cross-repo or multi-workspace routing.
+- Hard blocking/governance mode and summarize-only product mode.
+
+Deferral guardrails for v1:
+- Keep integration boundaries narrow (Commentry state remains source of truth; adapter handles transport only).
+- Preserve active-only payload scope and repo-relative provenance constraints.
+- Avoid introducing any persistence model that implies closed-loop workflow automation.
 
 ---
 
