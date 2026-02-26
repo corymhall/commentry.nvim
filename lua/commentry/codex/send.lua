@@ -47,46 +47,29 @@ local function resolve_target(opts)
     return input_target, input_target.adapter or "custom"
   end
 
-  if type(opts.session_id) == "string" and opts.session_id ~= "" and input_target.session_id == nil then
-    input_target.session_id = opts.session_id
-  end
-  if type(opts.workspace) == "string" and opts.workspace ~= "" and input_target.workspace == nil then
-    input_target.workspace = opts.workspace
-  end
-
   local configured = Config.codex and Config.codex.adapter or {}
-  local selected = opts.adapter or configured.select or "auto"
-  local fallback = opts.fallback or configured.fallback
-
-  local candidates = {}
-  if selected == "auto" then
-    candidates[#candidates + 1] = "sidekick"
-    if type(fallback) == "string" and fallback ~= "" and fallback ~= "auto" and fallback ~= "sidekick" then
-      candidates[#candidates + 1] = fallback
-    end
-  elseif type(selected) == "string" and selected ~= "" then
-    candidates[#candidates + 1] = selected
-    if type(fallback) == "string" and fallback ~= "" and fallback ~= selected then
-      candidates[#candidates + 1] = fallback
-    end
+  local selected = configured.select or "auto"
+  if selected ~= "auto" and selected ~= "sidekick" then
+    return nil, nil
   end
 
-  for _, candidate in ipairs(candidates) do
-    if candidate == "sidekick" then
-      if type(input_target.session_id) ~= "string" or input_target.session_id == "" then
-        return nil, nil
-      end
-      local adapter_mod = load_adapter("sidekick")
-      local target = {
-        session_id = input_target.session_id,
-        workspace = input_target.workspace,
-        send = adapter_mod and adapter_mod.send or nil,
-      }
-      return target, "sidekick"
-    end
+  local adapter_mod = load_adapter("sidekick")
+  if type(adapter_mod) ~= "table" then
+    return nil, nil
   end
 
-  return nil, nil
+  local attached = type(adapter_mod.current_target) == "function" and adapter_mod.current_target() or nil
+  local target = {
+    session_id = input_target.session_id or (type(attached) == "table" and attached.session_id or nil),
+    workspace = input_target.workspace or (type(attached) == "table" and attached.workspace or nil),
+    send = adapter_mod.send,
+  }
+
+  if type(target.session_id) ~= "string" or target.session_id == "" then
+    return nil, nil
+  end
+
+  return target, "sidekick"
 end
 
 ---@param opts? table
@@ -96,11 +79,17 @@ function M.send_current_review(opts)
 
   local file_context = opts.file_context
   local file_err = nil
-  if type(file_context) ~= "table" and type(Diffview.current_file_context) == "function" then
+  if type(Diffview.current_file_context) ~= "function" then
+    return fail("INTERNAL_ERROR", "No active review context available.")
+  end
+  if type(file_context) ~= "table" then
     file_context, file_err = Diffview.current_file_context()
   end
+  if type(file_context) ~= "table" or type(file_context.view) ~= "table" then
+    return fail("INTERNAL_ERROR", file_err or "No active review context available.")
+  end
 
-  local view = opts.view or (type(file_context) == "table" and file_context.view or nil)
+  local view = opts.view or file_context.view
 
   local review_context = opts.context
   local context_err = nil
@@ -146,7 +135,7 @@ function M.send_current_review(opts)
 
   local target, adapter_name = resolve_target(opts)
   if target == nil then
-    return fail("NO_TARGET", "No target adapter configured. Provide target.session_id or target.send.")
+    return fail("NO_TARGET", "No attached Codex session target available. Attach a Sidekick session and retry.")
   end
 
   local ok, err, details = Adapter.send(payload, target)

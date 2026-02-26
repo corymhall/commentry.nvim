@@ -197,15 +197,15 @@ describe("commentry.health", function()
       send = function()
         return true, nil, {}
       end,
-      available = function(target)
-        return type(target) == "table" and type(target.session_id) == "string" and target.session_id ~= ""
+      available = function()
+        return true
       end,
     }
 
     local health = require("commentry.health")
     health.check()
 
-    assert.is_true(vim.tbl_contains(seen.ok, "codex adapter ready (sidekick transport available); :Commentry send-to-codex still requires a target.session_id"))
+    assert.is_true(vim.tbl_contains(seen.ok, "codex adapter ready (sidekick transport available); :Commentry send-to-codex uses attached session target"))
     assert.are.same(0, #seen.warn)
   end)
 end)

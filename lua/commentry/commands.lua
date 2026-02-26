@@ -16,24 +16,6 @@ local feature_modules = {
 ---@type table<string, commentry.command.Fn>
 M.commands = {}
 
----@param cmd_args string
----@return table
-local function parse_send_options(cmd_args)
-  local opts = {}
-  if type(cmd_args) ~= "string" or cmd_args == "" then
-    return opts
-  end
-  for _, token in ipairs(vim.split(cmd_args, "%s+", { trimempty = true })) do
-    local key, value = token:match("^([%w_%-]+)=(.+)$")
-    if key and value and value ~= "" then
-      if key == "session_id" or key == "workspace" or key == "adapter" or key == "fallback" then
-        opts[key] = value
-      end
-    end
-  end
-  return opts
-end
-
 ---@param result table
 local function report_send_failure(result)
   local code = type(result.code) == "string" and result.code or "UNKNOWN"
@@ -42,7 +24,7 @@ local function report_send_failure(result)
   if code == "NO_TARGET" then
     Util.error({
       base,
-      "Provide a target session: :Commentry send-to-codex session_id=<session-id> [workspace=<path>].",
+      "Attach a Sidekick session, then retry: :Commentry send-to-codex",
     })
     return
   end
@@ -205,11 +187,11 @@ function M.setup()
     Comments.export_comments(cmd_args)
   end)
 
-  M.register("send-to-codex", function(_, cmd_args)
+  M.register("send-to-codex", function(_, _cmd_args)
     if not (Config.codex and Config.codex.enabled) then
       Util.error({
         "Codex integration is disabled.",
-        "Enable `codex.enabled = true` and retry :Commentry send-to-codex session_id=<session-id>.",
+        "Enable `codex.enabled = true` and retry :Commentry send-to-codex.",
       })
       return
     end
@@ -223,7 +205,7 @@ function M.setup()
       return
     end
 
-    local result = orchestrator.send_current_review(parse_send_options(cmd_args))
+    local result = orchestrator.send_current_review({})
     if type(result) ~= "table" then
       Util.error("Codex send failed: invalid orchestrator response.")
       return

@@ -592,7 +592,7 @@ describe("commentry command routing", function()
     assert.are.same("register:a", captured_args)
   end)
 
-  it("routes :Commentry send-to-codex to orchestrator once with parsed opts", function()
+  it("routes :Commentry send-to-codex to orchestrator once with implicit target resolution", function()
     local orchestrator_calls = 0
     local seen_opts = nil
     local info_messages = {}
@@ -655,17 +655,10 @@ describe("commentry command routing", function()
 
     package.loaded["commentry.commands"] = nil
     local Commands = require("commentry.commands")
-    Commands.cmd({
-      args = "send-to-codex session_id=session-42 workspace=/tmp/repo adapter=sidekick fallback=none",
-    })
+    Commands.cmd({ args = "send-to-codex" })
 
     assert.are.same(1, orchestrator_calls)
-    assert.are.same({
-      session_id = "session-42",
-      workspace = "/tmp/repo",
-      adapter = "sidekick",
-      fallback = "none",
-    }, seen_opts)
+    assert.are.same({}, seen_opts)
     assert.are.same(0, #error_messages)
     assert.are.same("Sent 3 review item(s) to Codex via sidekick.", info_messages[1])
   end)
@@ -695,7 +688,7 @@ describe("commentry command routing", function()
         return {
           ok = false,
           code = "NO_TARGET",
-          message = "No target adapter configured. Provide target.session_id or target.send.",
+          message = "No attached Codex session target available. Attach a Sidekick session and retry.",
           retryable = false,
         }
       end,
@@ -734,7 +727,7 @@ describe("commentry command routing", function()
     assert.are.same("table", type(error_messages[1]))
     local joined = table.concat(error_messages[1], "\n")
     assert.is_truthy(joined:find("Codex send failed %(NO_TARGET%)", 1, false))
-    assert.is_truthy(joined:find("Provide a target session", 1, true))
+    assert.is_truthy(joined:find("Attach a Sidekick session", 1, true))
   end)
 
   it("shows retry-ready failure when send-to-codex transport fails", function()
@@ -795,7 +788,7 @@ describe("commentry command routing", function()
 
     package.loaded["commentry.commands"] = nil
     local Commands = require("commentry.commands")
-    Commands.cmd({ args = "send-to-codex session_id=session-5" })
+    Commands.cmd({ args = "send-to-codex" })
 
     assert.are.same(1, #error_messages)
     assert.are.same("table", type(error_messages[1]))

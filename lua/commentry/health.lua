@@ -36,7 +36,7 @@ local function codex_health(codex)
 
   local available = true
   if type(sidekick.available) == "function" then
-    available = sidekick.available({ session_id = "__commentry_health__" }) == true
+    available = sidekick.available() == true
   end
 
   if not available then
@@ -44,7 +44,7 @@ local function codex_health(codex)
     return
   end
 
-  ok("codex adapter ready (sidekick transport available); :Commentry send-to-codex still requires a target.session_id")
+  ok("codex adapter ready (sidekick transport available); :Commentry send-to-codex uses attached session target")
 end
 
 function M.check()
@@ -58,10 +58,7 @@ function M.check()
   local snacks_ok, snacks = pcall(require, "snacks")
   if not snacks_ok then
     warn("snacks.nvim not installed: :Commentry list-comments is unavailable")
-    return
-  end
-
-  if type(snacks.picker) ~= "table" or type(snacks.picker.select) ~= "function" then
+  elseif type(snacks.picker) ~= "table" or type(snacks.picker.select) ~= "function" then
     warn("snacks.nvim installed but picker.select is unavailable")
   else
     ok("snacks.nvim picker.select is available for :Commentry list-comments")

@@ -42,15 +42,13 @@ COMMANDS                                          *commentry.commands*
   `register`: write markdown to unnamed register.
   `register:{name}`: write markdown to register {name} (example: `register:a`).
 
-:Commentry send-to-codex session_id={id} [workspace={path}] [adapter=auto|sidekick] [fallback={name}]
+:Commentry send-to-codex
   Send current review payload to Codex.
   Requires:
   - codex integration enabled in setup (`codex.enabled = true`)
   - active attached review context (for example via `:Commentry open` or diffview auto-attach)
-  - target `session_id`
   Adapter behavior:
-  - `adapter=auto` (default) resolves to sidekick in v1
-  - `adapter=sidekick` forces sidekick resolution
+  - v1 adapter selection is global/implicit from config and attached runtime target
   Semantics:
   - send-and-forget: one dispatch attempt, immediate success/failure feedback
   - no persisted send history/receipts/retry queue in v1
@@ -60,7 +58,7 @@ V1 BOUNDARIES                                     *commentry.v1-boundaries*
 - No persisted outbound send log/history
 - No background retry queue or delivery reconciliation
 - No receipt tracking inside commentry state
-- No multi-adapter orchestration beyond current adapter selection/fallback inputs
+- No multi-adapter orchestration in v1
 
 =============================================================================
 vim:tw=78:ts=2:sw=2:et:ft=help

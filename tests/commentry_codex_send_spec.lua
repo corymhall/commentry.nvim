@@ -178,10 +178,72 @@ describe("commentry.codex.send", function()
     assert.are.same({
       ok = false,
       code = "NO_TARGET",
-      message = "No target adapter configured. Provide target.session_id or target.send.",
+      message = "No attached Codex session target available. Attach a Sidekick session and retry.",
       retryable = false,
     }, result)
     assert.are.same(0, adapter_send_calls)
+  end)
+
+  it("fails when current buffer is not an attached active review context", function()
+    local send = load_send_with_stubs({
+      config = {
+        codex = {
+          adapter = {
+            select = "sidekick",
+            fallback = nil,
+          },
+        },
+      },
+      diffview = {
+        current_file_context = function()
+          return nil, "current buffer is not a diffview file buffer"
+        end,
+        resolve_review_context = function()
+          return {
+            context_id = "ctx-fallback",
+            mode = "working_tree",
+            root = "/tmp/project",
+          }, nil
+        end,
+      },
+      comments = {
+        context_id_for_view = function()
+          return "ctx-fallback", nil
+        end,
+        exportable_comments = function()
+          return {}
+        end,
+      },
+      payload = {
+        build_payload = function(context, opts)
+          return { context = context, items = opts.items }
+        end,
+      },
+      adapter = {
+        error = function(code)
+          if code == "INTERNAL_ERROR" then
+            return { code = "INTERNAL_ERROR", message = "Internal adapter error.", retryable = false }
+          end
+          return { code = code, message = code, retryable = false }
+        end,
+        send = function()
+          return true, nil, {}
+        end,
+      },
+      sidekick = {
+        send = function()
+          return true, nil, {}
+        end,
+      },
+    })
+
+    local result = send.send_current_review({})
+    assert.are.same({
+      ok = false,
+      code = "INTERNAL_ERROR",
+      message = "current buffer is not a diffview file buffer",
+      retryable = false,
+    }, result)
   end)
 
   it("returns success contract with target adapter and dispatched_items", function()
