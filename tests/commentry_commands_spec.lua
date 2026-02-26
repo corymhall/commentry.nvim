@@ -736,4 +736,72 @@ describe("commentry command routing", function()
     assert.is_truthy(joined:find("Codex send failed %(NO_TARGET%)", 1, false))
     assert.is_truthy(joined:find("Provide a target session", 1, true))
   end)
+
+  it("shows retry-ready failure when send-to-codex transport fails", function()
+    local error_messages = {}
+
+    vim.api.nvim_create_autocmd = function()
+      return 1
+    end
+    package.loaded["commentry.util"] = {
+      info = function()
+        return
+      end,
+      error = function(msg)
+        error_messages[#error_messages + 1] = msg
+      end,
+      warn = function()
+        return
+      end,
+      debug = function()
+        return
+      end,
+    }
+    package.loaded["commentry.codex.orchestrator"] = {
+      send_current_review = function()
+        return {
+          ok = false,
+          code = "TRANSPORT_FAILED",
+          message = "Codex transport failed. Retry.",
+          retryable = true,
+        }
+      end,
+    }
+    package.loaded["commentry.comments"] = {
+      list_comments = function()
+        return
+      end,
+      set_comment_type = function()
+        return
+      end,
+      export_comments = function()
+        return
+      end,
+      render_current_buffer = function()
+        return
+      end,
+    }
+    package.loaded["commentry.config"] = {
+      augroup = 1,
+      codex = { enabled = true },
+      diffview = { enabled = true },
+      keymaps = { add_comment = "mc", edit_comment = "me", delete_comment = "md", set_comment_type = "mt" },
+    }
+    package.loaded["commentry.diffview"] = {
+      open = function()
+        return true
+      end,
+    }
+
+    package.loaded["commentry.commands"] = nil
+    local Commands = require("commentry.commands")
+    Commands.cmd({ args = "send-to-codex session_id=session-5" })
+
+    assert.are.same(1, #error_messages)
+    assert.are.same("table", type(error_messages[1]))
+    local joined = table.concat(error_messages[1], "\n")
+    assert.is_truthy(joined:find("Codex send failed %(TRANSPORT_FAILED%)", 1, false))
+    assert.is_truthy(joined:find("Codex transport failed%. Retry%.", 1, false))
+    assert.is_truthy(joined:find("retryable", 1, true))
+  end)
 end)

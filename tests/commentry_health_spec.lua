@@ -136,6 +136,42 @@ describe("commentry.health", function()
     assert.is_true(vim.tbl_contains(seen.warn, "codex enabled but sidekick adapter is unavailable; install sidekick integration or set codex.enabled=false"))
   end)
 
+  it("warns when codex is enabled but sidekick runtime is unavailable", function()
+    local seen = { ok = {}, warn = {} }
+    vim.health = {
+      start = function() end,
+      ok = function(msg)
+        seen.ok[#seen.ok + 1] = msg
+      end,
+      warn = function(msg)
+        seen.warn[#seen.warn + 1] = msg
+      end,
+      error = function() end,
+    }
+
+    package.loaded["diffview"] = {}
+    package.loaded["snacks"] = { picker = { select = function() end } }
+    package.loaded["commentry.config"] = {
+      codex = {
+        enabled = true,
+        adapter = { select = "sidekick" },
+      },
+    }
+    package.loaded["commentry.codex.adapters.sidekick"] = {
+      send = function()
+        return true, nil, { dispatched_items = 1 }
+      end,
+      available = function()
+        return false
+      end,
+    }
+
+    local health = require("commentry.health")
+    health.check()
+
+    assert.is_true(vim.tbl_contains(seen.warn, "codex enabled but sidekick adapter runtime is unavailable; check sidekick install and active target session"))
+  end)
+
   it("reports codex adapter readiness when enabled and available", function()
     local seen = { ok = {}, warn = {} }
     vim.health = {

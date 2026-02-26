@@ -267,7 +267,7 @@ describe("commentry.codex.send", function()
     assert.is_function(seen_target.send)
   end)
 
-  it("passes through canonical adapter failure codes", function()
+  it("returns retryable transport failure contract for adapter failures", function()
     local send = load_send_with_stubs({
       config = {
         codex = {
@@ -335,11 +335,9 @@ describe("commentry.codex.send", function()
       },
     })
 
-    assert.are.same({
-      ok = false,
-      code = "TRANSPORT_FAILED",
-      message = "Adapter transport failed.",
-      retryable = true,
-    }, result)
+    assert.is_false(result.ok)
+    assert.are.same("TRANSPORT_FAILED", result.code)
+    assert.are.same("Adapter transport failed.", result.message)
+    assert.is_true(result.retryable)
   end)
 end)
