@@ -59,6 +59,8 @@ COMMANDS                                          *commentry.commands*
   - v1 adapter selection is global/implicit from config and attached runtime target
   Semantics:
   - send-and-forget: one dispatch attempt, immediate success/failure feedback
+  - payload format is compact text (`COMMENTRY_REVIEW_V1`), optimized for
+    human readability and low token overhead
   - no persisted send history/receipts/retry queue in v1
 
 V1 BOUNDARIES                                     *commentry.v1-boundaries*
@@ -71,9 +73,12 @@ V1 BOUNDARIES                                     *commentry.v1-boundaries*
 PERSISTENCE NOTES                                 *commentry.persistence*
 
 - Store path is context-scoped:
-  `.commentry/contexts/<context-id>/commentry.json`
+  `~/.commentry/repos/<repo>/contexts/<context-id>/commentry.json`
 - The store file is created lazily on first successful write in that context.
-- Working-tree and commit-range contexts are isolated.
+- Review context is repository-scoped (`<root>::review`) across Diffview range
+  lenses (`:DiffviewOpen`, `:DiffviewOpen main`, `:DiffviewOpen HEAD~3`, etc).
+- Comments remain in the same context until anchor reconciliation marks them
+  stale/outdated after code changes.
 - Use `:Commentry debug-store` to verify the active context/path when comments seem missing.
 
 =============================================================================

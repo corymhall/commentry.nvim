@@ -33,6 +33,7 @@ local function load_send_with_stubs(stubs)
   local original_payload = package.loaded["commentry.codex.payload"]
   local original_adapter = package.loaded["commentry.codex.adapter"]
   local original_sidekick = package.loaded["commentry.codex.adapters.sidekick"]
+  local original_sidekick_preload = package.preload["commentry.codex.adapters.sidekick"]
   local original_send = package.loaded["commentry.codex.send"]
 
   package.loaded["commentry.config"] = stubs.config
@@ -41,6 +42,9 @@ local function load_send_with_stubs(stubs)
   package.loaded["commentry.codex.payload"] = stubs.payload
   package.loaded["commentry.codex.adapter"] = stubs.adapter
   package.loaded["commentry.codex.adapters.sidekick"] = stubs.sidekick
+  package.preload["commentry.codex.adapters.sidekick"] = function()
+    return stubs.sidekick
+  end
   package.loaded["commentry.codex.send"] = nil
 
   local send = require("commentry.codex.send")
@@ -50,7 +54,7 @@ local function load_send_with_stubs(stubs)
   package.loaded["commentry.comments"] = original_comments
   package.loaded["commentry.codex.payload"] = original_payload
   package.loaded["commentry.codex.adapter"] = original_adapter
-  package.loaded["commentry.codex.adapters.sidekick"] = original_sidekick
+  package.preload["commentry.codex.adapters.sidekick"] = original_sidekick_preload
   package.loaded["commentry.codex.send"] = original_send
 
   return send
@@ -69,16 +73,26 @@ local function is_absolute_path(value)
   return false
 end
 
-local function assert_no_absolute_paths(value)
+local ROOT_KEYS = {
+  root = true,
+  repo_root = true,
+  project_root = true,
+  git_root = true,
+}
+
+local function assert_no_absolute_paths(value, key)
   if type(value) == "string" then
+    if ROOT_KEYS[key] then
+      return
+    end
     assert.is_false(is_absolute_path(value))
     return
   end
   if type(value) ~= "table" then
     return
   end
-  for _, entry in pairs(value) do
-    assert_no_absolute_paths(entry)
+  for child_key, entry in pairs(value) do
+    assert_no_absolute_paths(entry, child_key)
   end
 end
 
@@ -93,7 +107,7 @@ describe("commentry.codex.payload", function()
     assert.are.same("ctx-1", payload.context.context_id)
     assert.are.same("working_tree", payload.review_meta.mode)
     assert.are.same("c1", payload.items[1].id)
-    assert.are.same(".", payload.provenance.root)
+    assert.are.same("/tmp/project", payload.provenance.root)
   end)
 
   it("normalizes provenance safely with table-driven cases", function()
@@ -107,7 +121,7 @@ describe("commentry.codex.payload", function()
             "/Users/chall/gt/commentry/crew/fiddler/lua/commentry/commands.lua",
           },
         },
-        expected_root = ".",
+        expected_root = "/Users/chall/gt/commentry/crew/fiddler",
         expected_files = { "lua/commentry/commands.lua" },
       },
       {
@@ -120,7 +134,7 @@ describe("commentry.codex.payload", function()
             "/Users/chall/gt/commentry/crew/fiddler/lua/commentry/commands.lua",
           },
         },
-        expected_root = ".",
+        expected_root = "/Users/chall/gt/commentry/crew/fiddler",
         expected_files = { "lua/commentry/commands.lua" },
       },
       {
@@ -196,6 +210,43 @@ describe("commentry.codex.payload", function()
 
     assert.are.same({ "c1", "c2" }, { payload_a.items[1].id, payload_a.items[2].id })
     assert.are.same(Payload.serialize(payload_a), Payload.serialize(payload_b))
+  end)
+
+  it("renders compact human-readable wire format", function()
+    local payload = Payload.build_payload({
+      mode = "commit_range",
+      context_id = "/tmp/project::review",
+      root = "/tmp/project",
+      revisions = { "main" },
+      revision_anchors = {
+        { token = "main", commit = "5ffe8dc945e7f3d37fa56a9931cebb718834050e" },
+      },
+    }, {
+      review_meta = {
+        mode = "commit_range",
+        revisions = { "main" },
+      },
+      items = {
+        {
+          id = "c-1",
+          file_path = "doc/commentry.txt",
+          line_start = 45,
+          line_end = 48,
+          line_side = "head",
+          comment_type = "note",
+          body = "Adding a comment",
+        },
+      },
+      provenance = { root = "/tmp/project" },
+    })
+
+    local rendered = Payload.render_compact(payload)
+    assert.is_truthy(rendered:find("COMMENTRY_REVIEW_V1", 1, true))
+    assert.is_truthy(rendered:find("mode: commit_range", 1, true))
+    assert.is_truthy(rendered:find("context: /tmp/project::review", 1, true))
+    assert.is_truthy(rendered:find("anchors: main=5ffe8dc945e7", 1, true))
+    assert.is_truthy(rendered:find("1. doc/commentry.txt:45-48 [head/note] id=c-1", 1, true))
+    assert.is_truthy(rendered:find("| Adding a comment", 1, true))
   end)
 
   it("has no filesystem or store side effects while building/serializing", function()
@@ -360,6 +411,9 @@ describe("commentry.codex.payload", function()
         end,
       },
       sidekick = {
+        current_target = function()
+          return { session_id = "session-mixed" }
+        end,
         send = function(payload)
           captured_payloads[#captured_payloads + 1] = vim.deepcopy(payload)
           return true, nil, { dispatched_items = #payload.items }
@@ -367,12 +421,8 @@ describe("commentry.codex.payload", function()
       },
     })
 
-    local result_first = send.send_current_review({
-      target = { session_id = "session-mixed" },
-    })
-    local result_second = send.send_current_review({
-      target = { session_id = "session-mixed" },
-    })
+    local result_first = send.send_current_review({})
+    local result_second = send.send_current_review({})
 
     assert.is_true(result_first.ok)
     assert.is_true(result_second.ok)
@@ -381,8 +431,8 @@ describe("commentry.codex.payload", function()
 
     local payload = captured_payloads[1]
     assert.are.same(fixture.contexts.active, payload.context.context_id)
-    assert.are.same(".", payload.context.root)
-    assert.are.same(".", payload.provenance.root)
+    assert.are.same("/tmp/project", payload.context.root)
+    assert.are.same("/tmp/project", payload.provenance.root)
     assert.are.same(3, #payload.items)
     assert.are.same(
       { "c-active-abs-outside", "c-active-abs-in-repo", "c-active-rel" },
@@ -391,7 +441,8 @@ describe("commentry.codex.payload", function()
     assert.is_nil(payload.items[1].file_path)
     assert.are.same("lua/commentry/codex/send.lua", payload.items[2].file_path)
     assert.are.same("lua/commentry/codex/payload.lua", payload.items[3].file_path)
-    assert_no_absolute_paths(payload)
+    assert_no_absolute_paths(payload.items)
+    assert_no_absolute_paths(payload.provenance.files)
     assert.are.same(Payload.serialize(captured_payloads[1]), Payload.serialize(captured_payloads[2]))
   end)
 end)

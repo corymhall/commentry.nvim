@@ -98,7 +98,7 @@ local function normalize_provenance(provenance, context)
 
   local function copy_value(key, value)
     if key == "root" or key == "repo_root" or key == "project_root" then
-      return root and "."
+      return root
     end
     if type(value) == "string" then
       if key == "file" or key == "path" or key == "file_path" then
@@ -203,11 +203,15 @@ end
 ---@param root string|nil
 ---@return table
 local function project_item(item, thread_parents, root)
+  local line_start = item.line_start or item.line_number
+  local line_end = item.line_end or line_start
   local projected = {
     id = item.id,
     diff_id = item.diff_id or item.context_id,
     file_path = normalize_path(item.file_path, root),
-    line_number = item.line_start or item.line_number,
+    line_number = line_start,
+    line_start = line_start,
+    line_end = line_end,
     line_side = item.line_side,
     comment_type = item.comment_type or "note",
     body = item.body,
@@ -283,7 +287,16 @@ local function normalize_context(context)
   local normalized = deep_copy(context)
   local root = normalize_root(normalized.root or normalized.repo_root or normalized.project_root or normalized.git_root)
 
-  for _, key in ipairs({ "root", "repo_root", "project_root", "git_root", "file_path", "path" }) do
+  for _, key in ipairs({ "root", "repo_root", "project_root", "git_root" }) do
+    if normalized[key] ~= nil then
+      normalized[key] = root
+    end
+  end
+  if normalized.root == nil and root then
+    normalized.root = root
+  end
+
+  for _, key in ipairs({ "file_path", "path" }) do
     normalized[key] = normalize_path(normalized[key], root)
   end
 
@@ -366,6 +379,104 @@ end
 ---@return string
 function M.serialize(payload)
   return stable_encode(payload)
+end
+
+---@param value any
+---@return string[]
+local function normalize_string_list(value)
+  if type(value) ~= "table" then
+    return {}
+  end
+  local out = {}
+  for _, entry in ipairs(value) do
+    if type(entry) == "string" and entry ~= "" then
+      out[#out + 1] = entry
+    end
+  end
+  return out
+end
+
+---@param payload table
+---@return string
+function M.render_compact(payload)
+  payload = type(payload) == "table" and payload or {}
+  local context = type(payload.context) == "table" and payload.context or {}
+  local review_meta = type(payload.review_meta) == "table" and payload.review_meta or {}
+  local provenance = type(payload.provenance) == "table" and payload.provenance or {}
+  local items = type(payload.items) == "table" and payload.items or {}
+
+  local mode = review_meta.mode or context.mode or "working_tree"
+  local context_id = context.context_id or ""
+  local root = context.root or provenance.root or ""
+  local revisions = normalize_string_list(review_meta.revisions or context.revisions)
+
+  local lines = {
+    "COMMENTRY_REVIEW_V1",
+    ("mode: %s"):format(mode),
+  }
+  if context_id ~= "" then
+    lines[#lines + 1] = ("context: %s"):format(context_id)
+  end
+  if root ~= "" then
+    lines[#lines + 1] = ("root: %s"):format(root)
+  end
+  if #revisions > 0 then
+    lines[#lines + 1] = ("revisions: %s"):format(table.concat(revisions, ", "))
+  end
+
+  local anchors = review_meta.revision_anchors or context.revision_anchors
+  if type(anchors) == "table" and #anchors > 0 then
+    local anchor_labels = {}
+    for _, anchor in ipairs(anchors) do
+      if type(anchor) == "table" then
+        local token = anchor.token or "?"
+        if type(anchor.commit) == "string" and anchor.commit ~= "" then
+          anchor_labels[#anchor_labels + 1] = ("%s=%s"):format(token, anchor.commit:sub(1, 12))
+        elseif type(anchor.canonical) == "string" and anchor.canonical ~= "" then
+          anchor_labels[#anchor_labels + 1] = ("%s=%s"):format(token, anchor.canonical)
+        end
+      end
+    end
+    if #anchor_labels > 0 then
+      lines[#lines + 1] = ("anchors: %s"):format(table.concat(anchor_labels, ", "))
+    end
+  end
+
+  lines[#lines + 1] = ("items: %d"):format(#items)
+
+  for index, item in ipairs(items) do
+    if type(item) == "table" then
+      local file_path = item.file_path or "?"
+      local line_start = item.line_start or item.line_number
+      local line_end = item.line_end or line_start
+      local line = "?"
+      if type(line_start) == "number" then
+        if type(line_end) == "number" and line_end > line_start then
+          line = ("%d-%d"):format(line_start, line_end)
+        else
+          line = tostring(line_start)
+        end
+      end
+      local side = item.line_side or "head"
+      local comment_type = item.comment_type or "note"
+      local id = item.id or ("item-%d"):format(index)
+      local header = ("%d. %s:%s [%s/%s] id=%s"):format(index, file_path, line, side, comment_type, id)
+      lines[#lines + 1] = header
+      if type(item.thread_parent_id) == "string" and item.thread_parent_id ~= "" then
+        lines[#lines + 1] = ("   thread=%s"):format(item.thread_parent_id)
+      end
+      local body = type(item.body) == "string" and item.body or ""
+      local body_lines = vim.split(body, "\n", { plain = true })
+      if #body_lines == 0 then
+        body_lines = { "" }
+      end
+      for _, body_line in ipairs(body_lines) do
+        lines[#lines + 1] = ("   | %s"):format(body_line)
+      end
+    end
+  end
+
+  return table.concat(lines, "\n")
 end
 
 return M

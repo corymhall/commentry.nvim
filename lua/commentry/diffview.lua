@@ -175,6 +175,94 @@ local function revisions_from_view(view)
   return nil
 end
 
+---@param root string
+---@param ref string
+---@return string|nil
+local function resolve_commit_ref(root, ref)
+  if type(root) ~= "string" or root == "" or type(ref) ~= "string" or ref == "" then
+    return nil
+  end
+  local output = vim.fn.systemlist({ "git", "-C", root, "rev-parse", "--verify", ("%s^{commit}"):format(ref) })
+  if vim.v.shell_error ~= 0 then
+    return nil
+  end
+  local oid = output[1]
+  if type(oid) == "string" and oid:match("^[0-9a-fA-F]+$") then
+    return oid:lower()
+  end
+  return nil
+end
+
+---@param token string
+---@return string|nil, string|nil, string|nil
+local function split_revision_range(token)
+  if type(token) ~= "string" or token == "" then
+    return nil, nil, nil
+  end
+
+  local triple_start = token:find("...", 1, true)
+  if triple_start then
+    local left = token:sub(1, triple_start - 1)
+    local right = token:sub(triple_start + 3)
+    if left ~= "" and right ~= "" then
+      return left, right, "..."
+    end
+  end
+
+  local double_start = token:find("..", 1, true)
+  if double_start then
+    local left = token:sub(1, double_start - 1)
+    local right = token:sub(double_start + 2)
+    if left ~= "" and right ~= "" then
+      return left, right, ".."
+    end
+  end
+
+  return nil, nil, nil
+end
+
+---@param root string
+---@param revisions string[]|nil
+---@return table[]|nil
+local function resolve_revision_anchors(root, revisions)
+  if type(revisions) ~= "table" or #revisions == 0 then
+    return nil
+  end
+
+  local anchors = {}
+  for _, token in ipairs(revisions) do
+    if type(token) == "string" and token ~= "" then
+      local left_ref, right_ref, separator = split_revision_range(token)
+      if separator then
+        local left_sha = resolve_commit_ref(root, left_ref)
+        local right_sha = resolve_commit_ref(root, right_ref)
+        if left_sha and right_sha then
+          anchors[#anchors + 1] = {
+            token = token,
+            separator = separator,
+            from = left_sha,
+            to = right_sha,
+            canonical = ("%s%s%s"):format(left_sha, separator, right_sha),
+          }
+        end
+      else
+        local commit = resolve_commit_ref(root, token)
+        if commit then
+          anchors[#anchors + 1] = {
+            token = token,
+            commit = commit,
+          }
+        end
+      end
+    end
+  end
+
+  if #anchors == 0 then
+    return nil
+  end
+  return anchors
+end
+
 ---@param view? table
 ---@return integer|nil
 local function tabpage_id_for_view(view)
@@ -249,15 +337,16 @@ function M.resolve_review_context(args, view)
   end
 
   local mode = revisions and #revisions > 0 and "commit_range" or "working_tree"
-  local context_id = ("%s::%s"):format(root, mode)
-  if revisions and #revisions > 0 then
-    context_id = ("%s::%s"):format(context_id, table.concat(revisions, "|"))
-  end
+  -- Keep a stable review scope across Diffview range lenses so draft comments
+  -- persist like GitHub review comments until anchors become outdated.
+  local context_id = ("%s::review"):format(root)
+  local revision_anchors = resolve_revision_anchors(root, revisions)
 
   local context = {
     mode = mode,
     root = root,
     revisions = revisions,
+    revision_anchors = revision_anchors,
     context_id = context_id,
   }
   if type(view) == "table" then

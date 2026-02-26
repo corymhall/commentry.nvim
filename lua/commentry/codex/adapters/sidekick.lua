@@ -1,4 +1,5 @@
 local Adapter = require("commentry.codex.adapter")
+local Payload = require("commentry.codex.payload")
 
 local M = {}
 
@@ -63,29 +64,25 @@ local function normalize_target(raw)
   }
 end
 
+---@param payload any
+---@return string|nil
+local function compact_payload(payload)
+  local text = Payload.render_compact(payload)
+  if type(text) ~= "string" or text == "" then
+    return nil
+  end
+  return text
+end
+
 ---@return fun(payload:any, target:table):boolean,table?,table? | nil
 local function resolve_sender()
-  for _, module_name in ipairs(ENTRYPOINT_MODULES) do
-    local ok, mod = pcall(require, module_name)
-    if ok and type(mod) == "table" then
-      for _, entrypoint in ipairs(ENTRYPOINTS) do
-        if type(mod[entrypoint]) == "function" then
-          return function(payload, target)
-            return mod[entrypoint](payload, target)
-          end
-        end
-      end
-    end
-  end
-
-  -- sidekick.nvim mainline fallback:
-  -- send directly to the attached session object, bypassing sidekick.cli.send
-  -- templating/rendering so JSON payloads are delivered verbatim.
+  -- Prefer direct attached-session transport to guarantee "send this to attached
+  -- session" semantics independent of sidekick higher-level context validation.
   local ok_state, state = pcall(require, "sidekick.cli.state")
   if ok_state and type(state) == "table" and type(state.get) == "function" then
     return function(payload, target)
-      local encoded = vim.json and vim.json.encode(payload) or nil
-      if type(encoded) ~= "string" or encoded == "" then
+      local encoded = compact_payload(payload)
+      if type(encoded) ~= "string" then
         return false, Adapter.error("INTERNAL_ERROR")
       end
 
@@ -106,7 +103,6 @@ local function resolve_sender()
         return false, Adapter.error("ADAPTER_UNAVAILABLE")
       end
 
-      -- Session send writes directly to the tool terminal/mux session.
       local wrote = pcall(function()
         session:send(encoded .. "\n")
       end)
@@ -117,6 +113,23 @@ local function resolve_sender()
       return true, {
         dispatched_items = type(payload) == "table" and type(payload.items) == "table" and #payload.items or nil,
       }
+    end
+  end
+
+  for _, module_name in ipairs(ENTRYPOINT_MODULES) do
+    local ok, mod = pcall(require, module_name)
+    if ok and type(mod) == "table" then
+      for _, entrypoint in ipairs(ENTRYPOINTS) do
+        if type(mod[entrypoint]) == "function" then
+          return function(payload, target)
+            local encoded = compact_payload(payload)
+            if type(encoded) ~= "string" then
+              return false, Adapter.error("INTERNAL_ERROR")
+            end
+            return mod[entrypoint](encoded, target)
+          end
+        end
+      end
     end
   end
 end

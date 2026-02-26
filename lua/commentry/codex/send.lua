@@ -40,36 +40,31 @@ local function load_adapter(name)
 end
 
 ---@param opts table
----@return table|nil, string|nil
+---@return table|nil, string|nil, "NO_TARGET"|"ADAPTER_UNAVAILABLE"|nil
 local function resolve_target(opts)
-  local input_target = type(opts.target) == "table" and vim.deepcopy(opts.target) or {}
-  if type(input_target.send) == "function" then
-    return input_target, input_target.adapter or "custom"
-  end
-
   local configured = Config.codex and Config.codex.adapter or {}
   local selected = configured.select or "auto"
   if selected ~= "auto" and selected ~= "sidekick" then
-    return nil, nil
+    return nil, nil, "ADAPTER_UNAVAILABLE"
   end
 
   local adapter_mod = load_adapter("sidekick")
-  if type(adapter_mod) ~= "table" then
-    return nil, nil
+  if type(adapter_mod) ~= "table" or type(adapter_mod.send) ~= "function" then
+    return nil, nil, "ADAPTER_UNAVAILABLE"
   end
 
   local attached = type(adapter_mod.current_target) == "function" and adapter_mod.current_target() or nil
   local target = {
-    session_id = input_target.session_id or (type(attached) == "table" and attached.session_id or nil),
-    workspace = input_target.workspace or (type(attached) == "table" and attached.workspace or nil),
+    session_id = type(attached) == "table" and attached.session_id or nil,
+    workspace = type(attached) == "table" and attached.workspace or nil,
     send = adapter_mod.send,
   }
 
   if type(target.session_id) ~= "string" or target.session_id == "" then
-    return nil, nil
+    return nil, nil, "NO_TARGET"
   end
 
-  return target, "sidekick"
+  return target, "sidekick", nil
 end
 
 ---@param opts? table
@@ -126,6 +121,7 @@ function M.send_current_review(opts)
     review_meta = {
       mode = review_context.mode,
       revisions = review_context.revisions,
+      revision_anchors = review_context.revision_anchors,
     },
     items = items,
     provenance = {
@@ -133,8 +129,11 @@ function M.send_current_review(opts)
     },
   })
 
-  local target, adapter_name = resolve_target(opts)
+  local target, adapter_name, target_err = resolve_target(opts)
   if target == nil then
+    if target_err == "ADAPTER_UNAVAILABLE" then
+      return fail("ADAPTER_UNAVAILABLE", "Codex adapter is unavailable. Ensure Sidekick runtime is installed and loaded.")
+    end
     return fail("NO_TARGET", "No attached Codex session target available. Attach a Sidekick session and retry.")
   end
 

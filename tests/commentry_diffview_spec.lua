@@ -443,7 +443,7 @@ describe("commentry review context", function()
     package.loaded["commentry.diffview"] = original_diffview
   end)
 
-  it("builds distinct context identity for working tree and revision ranges", function()
+  it("keeps stable review-scope context identity across revision ranges", function()
     package.loaded["commentry.diffview"] = nil
     local Diffview = require("commentry.diffview")
 
@@ -453,7 +453,21 @@ describe("commentry review context", function()
 
     assert.are.same("working_tree", working_context.mode)
     assert.are.same("commit_range", revision_context.mode)
-    assert.are_not.same(working_context.context_id, revision_context.context_id)
+    assert.are.same(working_context.context_id, revision_context.context_id)
     assert.are.same(revision_context.context_id, revision_context_again.context_id)
+    assert.is_truthy(revision_context.context_id:sub(-8) == "::review")
+  end)
+
+  it("adds concrete revision anchors when revisions resolve to commits", function()
+    package.loaded["commentry.diffview"] = nil
+    local Diffview = require("commentry.diffview")
+    local root = vim.fs.normalize(vim.uv.fs_realpath(vim.fn.getcwd()) or vim.fn.getcwd())
+
+    local context = Diffview.resolve_review_context({ "HEAD" }, { git_root = root })
+
+    assert.is_table(context.revision_anchors)
+    assert.are.same(1, #context.revision_anchors)
+    assert.are.same("HEAD", context.revision_anchors[1].token)
+    assert.is_true(type(context.revision_anchors[1].commit) == "string" and #context.revision_anchors[1].commit >= 7)
   end)
 end)

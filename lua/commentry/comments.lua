@@ -49,6 +49,29 @@ local function seed_rng()
   math.randomseed(seed)
 end
 
+---@param value number
+---@return string
+local function to_base36(value)
+  local alphabet = "0123456789abcdefghijklmnopqrstuvwxyz"
+  local n = math.max(0, math.floor(tonumber(value) or 0))
+  if n == 0 then
+    return "0"
+  end
+  local out = {}
+  while n > 0 do
+    local idx = (n % 36) + 1
+    out[#out + 1] = alphabet:sub(idx, idx)
+    n = math.floor(n / 36)
+  end
+  local i, j = 1, #out
+  while i < j do
+    out[i], out[j] = out[j], out[i]
+    i = i + 1
+    j = j - 1
+  end
+  return table.concat(out)
+end
+
 ---@return string
 local function timestamp()
   return os.date("!%Y-%m-%dT%H:%M:%SZ")
@@ -805,7 +828,10 @@ end
 ---@return string
 function M.new_id(prefix)
   seed_rng()
-  return ("%s-%s-%06d"):format(prefix or "c", uv.hrtime(), math.random(0, 999999))
+  local nanos = tonumber(uv.hrtime()) or 0
+  local time_part = to_base36(nanos)
+  local rand_part = to_base36(math.random(0, 36 ^ 4 - 1))
+  return ("%s-%s-%s"):format(prefix or "c", time_part, rand_part)
 end
 
 ---@class commentry.Anchor

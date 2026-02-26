@@ -65,6 +65,8 @@ describe("commentry.comments helpers", function()
     assert.are.same("note", comment.comment_type)
     assert.are.same("Hello", comment.body)
     assert.is_true(type(comment.id) == "string" and comment.id ~= "")
+    assert.is_true(comment.id:match("^c%-%w+%-%w+$") ~= nil)
+    assert.is_nil(comment.id:find("e%+", 1, false))
 
     local updated, update_err = Comments.update_body(comment, "Updated")
     assert.is_nil(update_err)
