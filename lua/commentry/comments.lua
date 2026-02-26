@@ -1231,6 +1231,12 @@ local function exportable_comments(diff_id)
   return comments
 end
 
+---@param diff_id string
+---@return commentry.DraftComment[]
+function M.exportable_comments(diff_id)
+  return vim.deepcopy(exportable_comments(diff_id))
+end
+
 ---@param context? table
 ---@return string|nil, string|nil
 function M.generate_export_markdown(context)
