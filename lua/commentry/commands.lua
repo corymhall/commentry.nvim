@@ -16,6 +16,58 @@ local feature_modules = {
 ---@type table<string, commentry.command.Fn>
 M.commands = {}
 
+---@param cmd_args string
+---@return table
+local function parse_send_options(cmd_args)
+  local opts = {}
+  if type(cmd_args) ~= "string" or cmd_args == "" then
+    return opts
+  end
+  for _, token in ipairs(vim.split(cmd_args, "%s+", { trimempty = true })) do
+    local key, value = token:match("^([%w_%-]+)=(.+)$")
+    if key and value and value ~= "" then
+      if key == "session_id" or key == "workspace" or key == "adapter" or key == "fallback" then
+        opts[key] = value
+      end
+    end
+  end
+  return opts
+end
+
+---@param result table
+local function report_send_failure(result)
+  local code = type(result.code) == "string" and result.code or "UNKNOWN"
+  local message = type(result.message) == "string" and result.message or "Failed to send current review."
+  local base = ("Codex send failed (%s): %s"):format(code, message)
+  if code == "NO_TARGET" then
+    Util.error({
+      base,
+      "Provide a target session: :Commentry send-to-codex session_id=<session-id> [workspace=<path>].",
+    })
+    return
+  end
+  if code == "ADAPTER_UNAVAILABLE" then
+    Util.error({
+      base,
+      "Ensure the configured adapter is installed and available, then retry the command.",
+    })
+    return
+  end
+  if code == "TRANSPORT_FAILED" then
+    local retry_hint = result.retryable and "This failure is retryable; try the command again." or "Review adapter logs before retrying."
+    Util.error({ base, retry_hint })
+    return
+  end
+  if code == "INTERNAL_ERROR" then
+    Util.error({
+      base,
+      "Confirm an active review context exists and run the command again.",
+    })
+    return
+  end
+  Util.error(base)
+end
+
 ---@param bufnr integer
 ---@return table
 local function buffer_debug_info(bufnr)
@@ -151,6 +203,39 @@ function M.setup()
 
   M.register("export", function(_, cmd_args)
     Comments.export_comments(cmd_args)
+  end)
+
+  M.register("send-to-codex", function(_, cmd_args)
+    if not (Config.codex and Config.codex.enabled) then
+      Util.error({
+        "Codex integration is disabled.",
+        "Enable `codex.enabled = true` and retry :Commentry send-to-codex session_id=<session-id>.",
+      })
+      return
+    end
+
+    local ok_orchestrator, orchestrator = pcall(require, "commentry.codex.orchestrator")
+    if not ok_orchestrator or type(orchestrator.send_current_review) ~= "function" then
+      Util.error({
+        "Codex orchestrator is unavailable.",
+        "Check plugin installation/runtimepath and retry :Commentry send-to-codex.",
+      })
+      return
+    end
+
+    local result = orchestrator.send_current_review(parse_send_options(cmd_args))
+    if type(result) ~= "table" then
+      Util.error("Codex send failed: invalid orchestrator response.")
+      return
+    end
+    if not result.ok then
+      report_send_failure(result)
+      return
+    end
+
+    local adapter = type(result.adapter) == "string" and result.adapter or "unknown"
+    local dispatched_items = type(result.dispatched_items) == "number" and result.dispatched_items or 0
+    Util.info(("Sent %d review item(s) to Codex via %s."):format(dispatched_items, adapter))
   end)
 
   for _, module_name in ipairs(feature_modules) do
