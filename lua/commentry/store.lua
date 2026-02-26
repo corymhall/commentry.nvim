@@ -140,10 +140,6 @@ local function validate_file_reviews(file_reviews, errors)
     push_error(errors, "store.file_reviews must be a table")
     return
   end
-  if is_array(file_reviews) then
-    push_error(errors, "store.file_reviews must be a map of file path to boolean")
-    return
-  end
   for file_path, reviewed in pairs(file_reviews) do
     if type(file_path) ~= "string" or file_path == "" then
       push_error(errors, "store.file_reviews keys must be non-empty strings")

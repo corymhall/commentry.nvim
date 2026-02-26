@@ -181,6 +181,15 @@ describe("commentry.store", function()
     assert.are.same({}, errors)
   end)
 
+  it("accepts empty file_reviews map for first-write stores", function()
+    local store = sample_store("/tmp/project")
+    store.file_reviews = {}
+
+    local ok, errors = Store.validate(store)
+    assert.is_true(ok)
+    assert.are.same({}, errors)
+  end)
+
   it("creates distinct context paths for working tree and commit range contexts", function()
     local root = make_temp_dir()
     local working_tree_path, working_tree_err = Store.path_for_context(root, "ctx-working-tree")
