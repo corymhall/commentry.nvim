@@ -6,9 +6,13 @@ describe("commentry.codex.adapters.sidekick", function()
   local original_sidekick
   local original_sidekick_codex
   local original_sidekick_integration
+  local original_sidekick_cli
+  local original_sidekick_cli_state
   local original_sidekick_preload
   local original_sidekick_codex_preload
   local original_sidekick_integration_preload
+  local original_sidekick_cli_preload
+  local original_sidekick_cli_state_preload
 
   before_each(function()
     original_module = package.loaded["commentry.codex.adapters.sidekick"]
@@ -16,9 +20,13 @@ describe("commentry.codex.adapters.sidekick", function()
     original_sidekick = package.loaded["sidekick"]
     original_sidekick_codex = package.loaded["sidekick.codex"]
     original_sidekick_integration = package.loaded["sidekick.integration.codex"]
+    original_sidekick_cli = package.loaded["sidekick.cli"]
+    original_sidekick_cli_state = package.loaded["sidekick.cli.state"]
     original_sidekick_preload = package.preload["sidekick"]
     original_sidekick_codex_preload = package.preload["sidekick.codex"]
     original_sidekick_integration_preload = package.preload["sidekick.integration.codex"]
+    original_sidekick_cli_preload = package.preload["sidekick.cli"]
+    original_sidekick_cli_state_preload = package.preload["sidekick.cli.state"]
   end)
 
   after_each(function()
@@ -27,9 +35,13 @@ describe("commentry.codex.adapters.sidekick", function()
     package.loaded["sidekick"] = original_sidekick
     package.loaded["sidekick.codex"] = original_sidekick_codex
     package.loaded["sidekick.integration.codex"] = original_sidekick_integration
+    package.loaded["sidekick.cli"] = original_sidekick_cli
+    package.loaded["sidekick.cli.state"] = original_sidekick_cli_state
     package.preload["sidekick"] = original_sidekick_preload
     package.preload["sidekick.codex"] = original_sidekick_codex_preload
     package.preload["sidekick.integration.codex"] = original_sidekick_integration_preload
+    package.preload["sidekick.cli"] = original_sidekick_cli_preload
+    package.preload["sidekick.cli.state"] = original_sidekick_cli_state_preload
   end)
 
   it("returns ADAPTER_UNAVAILABLE for invalid targets", function()
@@ -100,5 +112,57 @@ describe("commentry.codex.adapters.sidekick", function()
     assert.are.same("TRANSPORT_FAILED", err.code)
     assert.are.same("Adapter transport failed.", err.message)
     assert.is_true(err.retryable)
+  end)
+
+  it("uses sidekick.cli.send fallback when codex modules are unavailable", function()
+    local seen_opts = nil
+    package.loaded["sidekick.codex"] = nil
+    package.loaded["sidekick.integration.codex"] = nil
+    package.loaded["sidekick"] = nil
+    package.loaded["sidekick.cli"] = {
+      send = function(opts)
+        seen_opts = opts
+      end,
+    }
+    package.loaded["commentry.codex.adapters.sidekick"] = nil
+
+    local sidekick = require("commentry.codex.adapters.sidekick")
+    local ok, err, details = sidekick.send({ items = { { id = "c1" }, { id = "c2" } } }, { session_id = "session-cli" })
+
+    assert.is_true(ok)
+    assert.is_nil(err)
+    assert.are.same(2, details.dispatched_items)
+    assert.are.same("session-cli", seen_opts.filter.session)
+    assert.are.same("codex", seen_opts.filter.name)
+    assert.are.same(true, seen_opts.filter.attached)
+    assert.are.same("string", type(seen_opts.msg))
+  end)
+
+  it("discovers current target via sidekick.cli.state fallback", function()
+    package.loaded["sidekick.codex"] = nil
+    package.loaded["sidekick.integration.codex"] = nil
+    package.loaded["sidekick"] = nil
+    package.loaded["sidekick.cli.state"] = {
+      get = function(filter)
+        if filter and filter.name == "codex" then
+          return {
+            {
+              session = {
+                id = "session-from-state",
+                cwd = "/tmp/state-cwd",
+              },
+            },
+          }
+        end
+        return {}
+      end,
+    }
+    package.loaded["commentry.codex.adapters.sidekick"] = nil
+
+    local sidekick = require("commentry.codex.adapters.sidekick")
+    assert.are.same({
+      session_id = "session-from-state",
+      workspace = "/tmp/state-cwd",
+    }, sidekick.current_target())
   end)
 end)

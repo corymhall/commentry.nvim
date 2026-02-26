@@ -73,6 +73,28 @@ local function resolve_sender()
       end
     end
   end
+
+  local ok_cli, cli = pcall(require, "sidekick.cli")
+  if ok_cli and type(cli) == "table" and type(cli.send) == "function" then
+    return function(payload, target)
+      local encoded = vim.json and vim.json.encode(payload) or nil
+      if type(encoded) ~= "string" or encoded == "" then
+        return false, { code = "INTERNAL_ERROR" }
+      end
+      local opts = {
+        msg = encoded,
+        filter = {
+          attached = true,
+          name = "codex",
+          session = target and target.session_id or nil,
+        },
+      }
+      cli.send(opts)
+      return true, {
+        dispatched_items = type(payload) == "table" and type(payload.items) == "table" and #payload.items or nil,
+      }
+    end
+  end
 end
 
 ---@return table|nil
@@ -93,6 +115,25 @@ local function resolve_current_target()
       end
     end
   end
+
+  local ok_state, state = pcall(require, "sidekick.cli.state")
+  if ok_state and type(state) == "table" and type(state.get) == "function" then
+    local attached = state.get({ attached = true, name = "codex" })
+    if type(attached) == "table" and #attached == 0 then
+      attached = state.get({ attached = true })
+    end
+    if type(attached) == "table" then
+      for _, item in ipairs(attached) do
+        local target = normalize_target({
+          session_id = item and item.session and item.session.id or nil,
+          workspace = item and item.session and item.session.cwd or nil,
+        })
+        if target then
+          return target
+        end
+      end
+    end
+  end
 end
 
 ---@param target? table
@@ -102,7 +143,7 @@ function M.available(target)
     return false
   end
   if target == nil then
-    return true
+    return resolve_current_target() ~= nil
   end
   return valid_target(target)
 end
