@@ -129,11 +129,12 @@ The plan aligns with v1 constraints from the spec: send-and-forget semantics, ac
 - **What:** Reuse existing status semantics to include only active items.
 - **Files:**
   - Modify: `lua/commentry/codex/payload.lua` - filtering and item projection.
-- **Key details:** Preserve `comment_type` (`issue/suggestion/note/praise`) and thread linkage where available.
+- **Key details:** Preserve `comment_type` (`issue/suggestion/note/praise`) and thread linkage where available, and bind filtering behavior to existing `lua/commentry/comments.lua` active-item semantics (`exportable_comments(context)` path or extracted shared helper) to avoid logic drift.
 - **Acceptance criteria:**
   - [ ] Items marked stale/invalid are excluded.
   - [ ] Active items are preserved with type/body metadata.
-  - [ ] Behavior aligns with existing active comment views.
+  - [ ] Behavior matches existing active comment views/export semantics for the same fixture input.
+  - [ ] Regression test proves payload active-item extraction stays in parity with existing comments export behavior.
 - **Dependencies:** 2.1
 
 **2.3 Enforce repo-relative provenance**
@@ -175,11 +176,12 @@ The plan aligns with v1 constraints from the spec: send-and-forget semantics, ac
 - **What:** Add orchestrator entrypoint that resolves context/target, builds payload, and dispatches.
 - **Files:**
   - Create: `lua/commentry/codex/send.lua` - `send_current_review(opts)`.
-- **Key details:** Hard-fail if no target; no automatic retries; no persistence write-back.
+- **Key details:** Hard-fail if no target; no automatic retries; no persistence write-back; use `lua/commentry/diffview.lua` context resolution (`resolve_review_context`, `current_file_context`) and `comments` context identity to scope dispatch to exactly one active review.
 - **Acceptance criteria:**
   - [ ] No-target path blocks dispatch and returns actionable remediation.
   - [ ] Success path returns stable outcome shape.
   - [ ] Send path does not mutate persisted review model.
+  - [ ] Context resolution path is explicitly tested for active review scoping behavior.
 - **Dependencies:** 1.2, 2.1, 2.2
 
 **3.2 Implement optional Sidekick adapter**
@@ -215,22 +217,25 @@ The plan aligns with v1 constraints from the spec: send-and-forget semantics, ac
   - [ ] Health output is explicit and actionable.
 - **Dependencies:** 3.1, 3.2
 
-**3.5 Add command/orchestrator integration tests**
-- **What:** Extend tests covering command routing and send outcomes.
+**3.5 Add command/orchestrator/health integration tests**
+- **What:** Extend tests covering command routing, send outcomes, and health reporting states.
 - **Files:**
   - Modify: `tests/commentry_commands_spec.lua` - command dispatch cases.
   - Create: `tests/commentry_codex_send_spec.lua` - orchestrator behavior.
+  - Modify: `tests/commentry_health_spec.lua` - codex enabled/disabled/unavailable checks.
 - **Key details:** Cover no-target, success, adapter failure, retry-ready failure outputs.
 - **Acceptance criteria:**
   - [ ] No-target behavior blocks and reports correctly.
   - [ ] Success path verifies adapter call.
   - [ ] Failure path returns normalized retryable message.
+  - [ ] Health checks cover disabled codex, enabled-but-unavailable adapter, and available adapter states.
 - **Dependencies:** 3.3, 3.1
 
 #### Phase 3 Exit Criteria
 - [ ] Explicit send command works through orchestrator.
 - [ ] Optional adapter behavior is isolated and normalized.
 - [ ] Core no-target/success/failure scenarios are tested.
+- [ ] Health checks verify codex adapter readiness behavior in enabled/disabled/unavailable states.
 
 ---
 
@@ -293,6 +298,18 @@ The plan aligns with v1 constraints from the spec: send-and-forget semantics, ac
 
 ---
 
+## Integration Surface Mapping
+
+| Module Surface | Required Behavior | Owning Tasks | Verification |
+|----------------|-------------------|--------------|--------------|
+| `lua/commentry/commands.lua` | Register explicit `:Commentry send-to-codex` command and completion path with actionable errors | 3.3, 3.5 | `tests/commentry_commands_spec.lua` |
+| `lua/commentry/diffview.lua` | Use active review context resolution (`resolve_review_context`, `current_file_context`) for single-context send scope | 3.1 | `tests/commentry_codex_send_spec.lua` |
+| `lua/commentry/comments.lua` | Keep active/non-stale extraction semantics aligned with existing export path behavior | 2.2, 2.4 | `tests/commentry_codex_payload_spec.lua` parity fixtures |
+| `lua/commentry/store.lua` | Preserve no-writeback guarantee for send flow and existing context-store semantics | 2.1, 3.1, 4.2 | Send tests assert no persisted send snapshot/disposition writes |
+| `lua/commentry/health.lua` | Report optional adapter readiness without breaking disabled configuration | 3.4, 3.5 | `tests/commentry_health_spec.lua` |
+
+---
+
 ## Cross-Cutting Concerns
 
 ### Error Handling
@@ -306,6 +323,7 @@ The plan aligns with v1 constraints from the spec: send-and-forget semantics, ac
 - Orchestrator tests for no-target/success/failure/retry behaviors.
 - Command integration tests for explicit routing and user feedback.
 - Adapter contract tests for capability gating and normalized errors.
+- Health integration tests for codex disabled/enabled/unavailable adapter states.
 - Required pre-merge gate: tests must cover no-target, success, transport failure, resend determinism, active-item scope, and provenance safety.
 
 ### Migration
@@ -339,7 +357,11 @@ No migration needed in v1. Existing `.commentry/contexts/...` storage model rema
 | Design: Acceptance Criteria (v1) | Phase acceptance criteria and test gates | 2-4 |
 | Design: Error Handling | Cross-Cutting Error Handling; Phase 3/4 tasks | 3-4 |
 | Design: Constraints | Architecture Decisions; Migration; risks | 1-4 |
-| Design: Integration Points | Phase 2/3 file-level tasks | 2-3 |
+| Design: Integration Points | Integration Surface Mapping section + Phase 2/3/4 file-level tasks | 2-4 |
+| Integration Point: `lua/commentry/commands.lua` command architecture | Task 3.3 + Integration Surface Mapping row + command tests | 3 |
+| Integration Point: `lua/commentry/diffview.lua` context resolution | Task 3.1 + Integration Surface Mapping row + orchestrator tests | 3 |
+| Integration Point: `lua/commentry/comments.lua` active-item semantics | Task 2.2 + payload parity tests + Integration Surface Mapping row | 2-4 |
+| Integration Point: `lua/commentry/store.lua` no-writeback local store semantics | Tasks 2.1/3.1 and Migration + Integration Surface Mapping row | 2-4 |
 | Out of Scope | Phase 4.4 deferred scope notes | 4 |
 | Spec Review: Clarifications Added | Architecture Decisions + task specifics (adapter contract, active scope, provenance, tests) | 1-4 |
 | Spec Review: Deferred Items | Migration/Deferred handling | 4 |
@@ -374,8 +396,10 @@ No migration needed in v1. Existing `.commentry/contexts/...` storage model rema
 | `lua/commentry/init.lua` | 1 | Optional codex module wiring/load behavior |
 | `lua/commentry/commands.lua` | 3 | Register explicit send command and completion |
 | `lua/commentry/health.lua` | 3 | Optional adapter readiness checks |
+| `lua/commentry/comments.lua` | 2 | Keep payload active-item extraction aligned with existing export semantics |
 | `lua/commentry/util.lua` | 2 | Shared path/provenance helpers (if extracted) |
 | `tests/commentry_commands_spec.lua` | 3 | Extend command routing tests |
+| `tests/commentry_health_spec.lua` | 3 | Add codex health-state coverage |
 | `README.md` | 4 | Usage docs and v1 constraints |
 | `doc/commentry.txt` | 4 | Help docs for new command |
 | `plans/codex-integration/03-plan/plan.md` | 4 | Migration/deferred scope note completeness |
