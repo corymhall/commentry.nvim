@@ -1,6 +1,7 @@
 *.log
 /.repro
 /.tests
+/.commentry/
 /build
 /debug
 /doc/tags

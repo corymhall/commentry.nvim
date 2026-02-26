@@ -16,6 +16,40 @@ local feature_modules = {
 ---@type table<string, commentry.command.Fn>
 M.commands = {}
 
+---@param result table
+local function report_send_failure(result)
+  local code = type(result.code) == "string" and result.code or "UNKNOWN"
+  local message = type(result.message) == "string" and result.message or "Failed to send current review."
+  local base = ("Codex send failed (%s): %s"):format(code, message)
+  if code == "NO_TARGET" then
+    Util.error({
+      base,
+      "Attach a Sidekick session, then retry: :Commentry send-to-codex",
+    })
+    return
+  end
+  if code == "ADAPTER_UNAVAILABLE" then
+    Util.error({
+      base,
+      "Ensure the configured adapter is installed and available, then retry the command.",
+    })
+    return
+  end
+  if code == "TRANSPORT_FAILED" then
+    local retry_hint = result.retryable and "This failure is retryable; try the command again." or "Review adapter logs before retrying."
+    Util.error({ base, retry_hint })
+    return
+  end
+  if code == "INTERNAL_ERROR" then
+    Util.error({
+      base,
+      "Confirm an active review context exists and run the command again.",
+    })
+    return
+  end
+  Util.error(base)
+end
+
 ---@param bufnr integer
 ---@return table
 local function buffer_debug_info(bufnr)
@@ -91,6 +125,7 @@ local function maybe_attach_keymaps(bufnr)
   Comments.render_current_buffer()
 end
 
+--- setup.
 function M.setup()
   if initialized then
     return
@@ -151,6 +186,54 @@ function M.setup()
 
   M.register("export", function(_, cmd_args)
     Comments.export_comments(cmd_args)
+  end)
+
+  M.register("debug-store", function()
+    -- Keep this as a user-visible command so persistence/debug context can be
+    -- inspected without requiring `debug = true` or custom instrumentation.
+    if type(Comments.debug_store_context) ~= "function" then
+      Util.error("Store debug helper unavailable.")
+      return
+    end
+    local info, err = Comments.debug_store_context()
+    if not info then
+      Util.error(err or "Unable to resolve store context.")
+      return
+    end
+    Util.info(vim.inspect(info))
+  end)
+
+  M.register("send-to-codex", function(_, _cmd_args)
+    if not (Config.codex and Config.codex.enabled) then
+      Util.error({
+        "Codex integration is disabled.",
+        "Enable `codex.enabled = true` and retry :Commentry send-to-codex.",
+      })
+      return
+    end
+
+    local ok_orchestrator, orchestrator = pcall(require, "commentry.codex.orchestrator")
+    if not ok_orchestrator or type(orchestrator.send_current_review) ~= "function" then
+      Util.error({
+        "Codex orchestrator is unavailable.",
+        "Check plugin installation/runtimepath and retry :Commentry send-to-codex.",
+      })
+      return
+    end
+
+    local result = orchestrator.send_current_review({})
+    if type(result) ~= "table" then
+      Util.error("Codex send failed: invalid orchestrator response.")
+      return
+    end
+    if not result.ok then
+      report_send_failure(result)
+      return
+    end
+
+    local adapter = type(result.adapter) == "string" and result.adapter or "unknown"
+    local dispatched_items = type(result.dispatched_items) == "number" and result.dispatched_items or 0
+    Util.info(("Sent %d review item(s) to Codex via %s."):format(dispatched_items, adapter))
   end)
 
   for _, module_name in ipairs(feature_modules) do

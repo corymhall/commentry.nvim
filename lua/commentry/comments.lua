@@ -40,6 +40,7 @@ local function is_integer(value)
   return type(value) == "number" and value > 0 and math.floor(value) == value
 end
 
+--- seed rng.
 local function seed_rng()
   if seeded then
     return
@@ -47,6 +48,29 @@ local function seed_rng()
   seeded = true
   local seed = tonumber(tostring(uv.hrtime()):sub(-9)) or os.time()
   math.randomseed(seed)
+end
+
+---@param value number
+---@return string
+local function to_base36(value)
+  local alphabet = "0123456789abcdefghijklmnopqrstuvwxyz"
+  local n = math.max(0, math.floor(tonumber(value) or 0))
+  if n == 0 then
+    return "0"
+  end
+  local out = {}
+  while n > 0 do
+    local idx = (n % 36) + 1
+    out[#out + 1] = alphabet:sub(idx, idx)
+    n = math.floor(n / 36)
+  end
+  local i, j = 1, #out
+  while i < j do
+    out[i], out[j] = out[j], out[i]
+    i = i + 1
+    j = j - 1
+  end
+  return table.concat(out)
 end
 
 ---@return string
@@ -771,6 +795,12 @@ current_context = function()
   return context, nil
 end
 
+---@param err string|nil
+---@return boolean
+local function is_expected_non_file_context(err)
+  return err == "current buffer is not a diffview file buffer" or err == "diffview has no active file entry"
+end
+
 ---@param file_path string
 ---@param line_start integer
 ---@param line_end integer
@@ -799,7 +829,10 @@ end
 ---@return string
 function M.new_id(prefix)
   seed_rng()
-  return ("%s-%s-%06d"):format(prefix or "c", uv.hrtime(), math.random(0, 999999))
+  local nanos = tonumber(uv.hrtime()) or 0
+  local time_part = to_base36(nanos)
+  local rand_part = to_base36(math.random(0, 36 ^ 4 - 1))
+  return ("%s-%s-%s"):format(prefix or "c", time_part, rand_part)
 end
 
 ---@class commentry.Anchor
@@ -997,9 +1030,14 @@ function M.new_thread(diff_id, anchor, comment_ids)
     nil
 end
 
+--- render current buffer.
 function M.render_current_buffer()
   local context, err = current_context()
   if not context then
+    if is_expected_non_file_context(err) then
+      Util.debug("render skipped", err)
+      return
+    end
     Util.warn(err or "No diffview context")
     return
   end
@@ -1025,6 +1063,7 @@ function M.refresh_hover_preview()
   return true
 end
 
+--- list comments.
 function M.list_comments()
   local context, context_err = current_context()
   if not context then
@@ -1116,6 +1155,7 @@ function M.current_file_reviewed()
   return diff_state(diff_id).file_reviews[context.file_path] == true, nil
 end
 
+--- toggle file reviewed.
 function M.toggle_file_reviewed()
   local context, err = current_context()
   if not context then
@@ -1141,6 +1181,7 @@ function M.toggle_file_reviewed()
   end
 end
 
+--- next unreviewed file.
 function M.next_unreviewed_file()
   local context, err = current_context()
   if not context then
@@ -1229,6 +1270,12 @@ local function exportable_comments(diff_id)
     return (a.id or "") < (b.id or "")
   end)
   return comments
+end
+
+---@param diff_id string
+---@return commentry.DraftComment[]
+function M.exportable_comments(diff_id)
+  return vim.deepcopy(exportable_comments(diff_id))
 end
 
 ---@param context? table
@@ -1383,6 +1430,47 @@ function M.load_current_view()
   return M.load_for_view(view)
 end
 
+---@return table|nil, string|nil
+function M.debug_store_context()
+  -- Debug helper intentionally mirrors the exact resolution flow used by
+  -- persistence read/write paths so troubleshooting output matches runtime.
+  local view, view_err = Diffview.get_current_view()
+  if not view then
+    return nil, view_err or "No diffview view found"
+  end
+
+  local context_id, context_err = M.context_id_for_view(view)
+  if not context_id then
+    return nil, context_err or "context_id_unavailable"
+  end
+
+  local root = project_root_for_view(view)
+  if not root then
+    return nil, "project_root_unavailable"
+  end
+
+  local path, path_err = path_for_context(root, context_id)
+  if not path then
+    return nil, path_err or "store_path_failed"
+  end
+
+  local stat = uv.fs_stat(path)
+  local context = nil
+  if type(Diffview.review_context_for_view) == "function" then
+    context = Diffview.review_context_for_view(view)
+  end
+
+  return {
+    context_id = context_id,
+    mode = context and context.mode or nil,
+    revisions = context and context.revisions or nil,
+    project_root = root,
+    store_path = path,
+    store_exists = stat ~= nil,
+  },
+    nil
+end
+
 ---@param diff_id string
 ---@param prompt string
 ---@param initial_type? string
@@ -1441,6 +1529,7 @@ local function visual_line_range(context)
   return start_line, end_line
 end
 
+--- add comment.
 function M.add_comment()
   local context, err = current_context()
   if not context then
@@ -1481,6 +1570,7 @@ function M.add_comment()
   end)
 end
 
+--- add range comment.
 function M.add_range_comment()
   local context, err = current_context()
   if not context then
@@ -1526,6 +1616,7 @@ function M.add_range_comment()
   end)
 end
 
+--- edit comment.
 function M.edit_comment()
   local context, err = current_context()
   if not context then
@@ -1561,6 +1652,7 @@ function M.edit_comment()
   end)
 end
 
+--- delete comment.
 function M.delete_comment()
   local context, err = current_context()
   if not context then
@@ -1586,6 +1678,7 @@ function M.delete_comment()
   end)
 end
 
+--- set comment type.
 function M.set_comment_type()
   local context, err = current_context()
   if not context then

@@ -42,5 +42,44 @@ COMMANDS                                          *commentry.commands*
   `register`: write markdown to unnamed register.
   `register:{name}`: write markdown to register {name} (example: `register:a`).
 
+:Commentry debug-store
+  Print current review context + on-disk store details:
+  - context id/mode/revisions
+  - project root
+  - store path
+  - whether the store file exists
+  Useful when troubleshooting persistence across sessions/contexts.
+
+:Commentry send-to-codex
+  Send current review payload to Codex.
+  Requires:
+  - codex integration enabled in setup (`codex.enabled = true`)
+  - active attached review context (for example via `:Commentry open` or diffview auto-attach)
+  Adapter behavior:
+  - v1 adapter selection is global/implicit from config and attached runtime target
+  Semantics:
+  - send-and-forget: one dispatch attempt, immediate success/failure feedback
+  - payload format is compact text (`COMMENTRY_REVIEW_V1`), optimized for
+    human readability and low token overhead
+  - no persisted send history/receipts/retry queue in v1
+
+V1 BOUNDARIES                                     *commentry.v1-boundaries*
+
+- No persisted outbound send log/history
+- No background retry queue or delivery reconciliation
+- No receipt tracking inside commentry state
+- No multi-adapter orchestration in v1
+
+PERSISTENCE NOTES                                 *commentry.persistence*
+
+- Store path is context-scoped:
+  `~/.commentry/repos/<repo>/contexts/<context-id>/commentry.json`
+- The store file is created lazily on first successful write in that context.
+- Review context is repository-scoped (`<root>::review`) across Diffview range
+  lenses (`:DiffviewOpen`, `:DiffviewOpen main`, `:DiffviewOpen HEAD~3`, etc).
+- Comments remain in the same context until anchor reconciliation marks them
+  stale/outdated after code changes.
+- Use `:Commentry debug-store` to verify the active context/path when comments seem missing.
+
 =============================================================================
 vim:tw=78:ts=2:sw=2:et:ft=help

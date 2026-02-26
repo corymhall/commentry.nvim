@@ -44,12 +44,14 @@ local function sample_store(root)
 end
 
 describe("commentry.store", function()
-  it("builds context-scoped path under project root", function()
+  it("builds context-scoped path under home-scoped commentry store", function()
     local root = make_temp_dir()
     local path, err = Store.path_for_context(root, "ctx/feature:abc")
     assert.is_nil(err)
     local resolved_root = vim.uv.fs_realpath(vim.fs.normalize(root)) or vim.fs.normalize(root)
-    local expected = vim.fs.joinpath(vim.fs.normalize(resolved_root), ".commentry", "contexts", "ctx_feature_abc", "commentry.json")
+    local home = vim.fs.normalize((vim.uv and vim.uv.os_homedir and vim.uv.os_homedir()) or vim.env.HOME)
+    local repo_dir = vim.fs.normalize(resolved_root):gsub("[^%w%._%-]", "_")
+    local expected = vim.fs.joinpath(home, ".commentry", "repos", repo_dir, "contexts", "ctx_feature_abc", "commentry.json")
     assert.are.same(expected, path)
   end)
 
@@ -177,6 +179,15 @@ describe("commentry.store", function()
 
     Config.comment_types = original_comment_types
 
+    assert.is_true(ok)
+    assert.are.same({}, errors)
+  end)
+
+  it("accepts empty file_reviews map for first-write stores", function()
+    local store = sample_store("/tmp/project")
+    store.file_reviews = {}
+
+    local ok, errors = Store.validate(store)
     assert.is_true(ok)
     assert.are.same({}, errors)
   end)

@@ -140,10 +140,8 @@ local function validate_file_reviews(file_reviews, errors)
     push_error(errors, "store.file_reviews must be a table")
     return
   end
-  if is_array(file_reviews) then
-    push_error(errors, "store.file_reviews must be a map of file path to boolean")
-    return
-  end
+  -- file_reviews is a map (file_path -> boolean). An empty table is valid and
+  -- expected on first write before any file-reviewed toggles are performed.
   for file_path, reviewed in pairs(file_reviews) do
     if type(file_path) ~= "string" or file_path == "" then
       push_error(errors, "store.file_reviews keys must be non-empty strings")
@@ -227,6 +225,15 @@ local function normalize_context_id(context_id)
   return context_id:gsub("[^%w%._%-]", "_")
 end
 
+---@return string|nil
+local function home_dir()
+  local home = (uv and uv.os_homedir and uv.os_homedir()) or vim.env.HOME
+  if type(home) ~= "string" or home == "" then
+    return nil
+  end
+  return vim.fs.normalize(home)
+end
+
 ---@param project_root string
 ---@param context_id string
 ---@param filename? string
@@ -246,13 +253,19 @@ function M.path_for_context(project_root, context_id, filename)
     return nil, "project_root is not a directory"
   end
 
+  local home = home_dir()
+  if not home then
+    return nil, "home directory is unavailable"
+  end
+
   local name = filename or Config.store.filename
   if type(name) ~= "string" or name == "" then
     return nil, "filename is required"
   end
 
+  local repo_dir = normalize_context_id(vim.fs.normalize(resolved))
   local context_dir = normalize_context_id(context_id)
-  local base = vim.fs.joinpath(resolved, ".commentry", "contexts", context_dir)
+  local base = vim.fs.joinpath(home, ".commentry", "repos", repo_dir, "contexts", context_dir)
   return vim.fs.joinpath(base, name), nil
 end
 
