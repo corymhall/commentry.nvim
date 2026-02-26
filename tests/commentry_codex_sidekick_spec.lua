@@ -6,12 +6,10 @@ describe("commentry.codex.adapters.sidekick", function()
   local original_sidekick
   local original_sidekick_codex
   local original_sidekick_integration
-  local original_sidekick_cli
   local original_sidekick_cli_state
   local original_sidekick_preload
   local original_sidekick_codex_preload
   local original_sidekick_integration_preload
-  local original_sidekick_cli_preload
   local original_sidekick_cli_state_preload
 
   before_each(function()
@@ -20,12 +18,10 @@ describe("commentry.codex.adapters.sidekick", function()
     original_sidekick = package.loaded["sidekick"]
     original_sidekick_codex = package.loaded["sidekick.codex"]
     original_sidekick_integration = package.loaded["sidekick.integration.codex"]
-    original_sidekick_cli = package.loaded["sidekick.cli"]
     original_sidekick_cli_state = package.loaded["sidekick.cli.state"]
     original_sidekick_preload = package.preload["sidekick"]
     original_sidekick_codex_preload = package.preload["sidekick.codex"]
     original_sidekick_integration_preload = package.preload["sidekick.integration.codex"]
-    original_sidekick_cli_preload = package.preload["sidekick.cli"]
     original_sidekick_cli_state_preload = package.preload["sidekick.cli.state"]
   end)
 
@@ -35,12 +31,10 @@ describe("commentry.codex.adapters.sidekick", function()
     package.loaded["sidekick"] = original_sidekick
     package.loaded["sidekick.codex"] = original_sidekick_codex
     package.loaded["sidekick.integration.codex"] = original_sidekick_integration
-    package.loaded["sidekick.cli"] = original_sidekick_cli
     package.loaded["sidekick.cli.state"] = original_sidekick_cli_state
     package.preload["sidekick"] = original_sidekick_preload
     package.preload["sidekick.codex"] = original_sidekick_codex_preload
     package.preload["sidekick.integration.codex"] = original_sidekick_integration_preload
-    package.preload["sidekick.cli"] = original_sidekick_cli_preload
     package.preload["sidekick.cli.state"] = original_sidekick_cli_state_preload
   end)
 
@@ -114,14 +108,27 @@ describe("commentry.codex.adapters.sidekick", function()
     assert.is_true(err.retryable)
   end)
 
-  it("uses sidekick.cli.send fallback when codex modules are unavailable", function()
-    local seen_opts = nil
+  it("uses attached sidekick.cli.state session fallback when codex modules are unavailable", function()
+    local sent = nil
     package.loaded["sidekick.codex"] = nil
     package.loaded["sidekick.integration.codex"] = nil
     package.loaded["sidekick"] = nil
-    package.loaded["sidekick.cli"] = {
-      send = function(opts)
-        seen_opts = opts
+    package.loaded["sidekick.cli.state"] = {
+      get = function(filter)
+        if filter and filter.attached and filter.session == "session-cli" then
+          return {
+            {
+              session = {
+                id = "session-cli",
+                cwd = "/tmp/repo",
+                send = function(_, msg)
+                  sent = msg
+                end,
+              },
+            },
+          }
+        end
+        return {}
       end,
     }
     package.loaded["commentry.codex.adapters.sidekick"] = nil
@@ -132,10 +139,9 @@ describe("commentry.codex.adapters.sidekick", function()
     assert.is_true(ok)
     assert.is_nil(err)
     assert.are.same(2, details.dispatched_items)
-    assert.are.same("session-cli", seen_opts.filter.session)
-    assert.are.same("codex", seen_opts.filter.name)
-    assert.are.same(true, seen_opts.filter.attached)
-    assert.are.same("string", type(seen_opts.msg))
+    assert.are.same("string", type(sent))
+    assert.is_truthy(sent:sub(-1) == "\n")
+    assert.is_truthy(sent:find("\"items\"", 1, true))
   end)
 
   it("discovers current target via sidekick.cli.state fallback", function()

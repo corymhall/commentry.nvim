@@ -187,6 +187,19 @@ function M.setup()
     Comments.export_comments(cmd_args)
   end)
 
+  M.register("debug-store", function()
+    if type(Comments.debug_store_context) ~= "function" then
+      Util.error("Store debug helper unavailable.")
+      return
+    end
+    local info, err = Comments.debug_store_context()
+    if not info then
+      Util.error(err or "Unable to resolve store context.")
+      return
+    end
+    Util.info(vim.inspect(info))
+  end)
+
   M.register("send-to-codex", function(_, _cmd_args)
     if not (Config.codex and Config.codex.enabled) then
       Util.error({

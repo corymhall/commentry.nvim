@@ -1389,6 +1389,45 @@ function M.load_current_view()
   return M.load_for_view(view)
 end
 
+---@return table|nil, string|nil
+function M.debug_store_context()
+  local view, view_err = Diffview.get_current_view()
+  if not view then
+    return nil, view_err or "No diffview view found"
+  end
+
+  local context_id, context_err = M.context_id_for_view(view)
+  if not context_id then
+    return nil, context_err or "context_id_unavailable"
+  end
+
+  local root = project_root_for_view(view)
+  if not root then
+    return nil, "project_root_unavailable"
+  end
+
+  local path, path_err = path_for_context(root, context_id)
+  if not path then
+    return nil, path_err or "store_path_failed"
+  end
+
+  local stat = uv.fs_stat(path)
+  local context = nil
+  if type(Diffview.review_context_for_view) == "function" then
+    context = Diffview.review_context_for_view(view)
+  end
+
+  return {
+    context_id = context_id,
+    mode = context and context.mode or nil,
+    revisions = context and context.revisions or nil,
+    project_root = root,
+    store_path = path,
+    store_exists = stat ~= nil,
+  },
+    nil
+end
+
 ---@param diff_id string
 ---@param prompt string
 ---@param initial_type? string

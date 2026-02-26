@@ -74,22 +74,38 @@ local function resolve_sender()
     end
   end
 
-  local ok_cli, cli = pcall(require, "sidekick.cli")
-  if ok_cli and type(cli) == "table" and type(cli.send) == "function" then
+  local ok_state, state = pcall(require, "sidekick.cli.state")
+  if ok_state and type(state) == "table" and type(state.get) == "function" then
     return function(payload, target)
       local encoded = vim.json and vim.json.encode(payload) or nil
       if type(encoded) ~= "string" or encoded == "" then
-        return false, { code = "INTERNAL_ERROR" }
+        return false, Adapter.error("INTERNAL_ERROR")
       end
-      local opts = {
-        msg = encoded,
-        filter = {
+
+      local attached = state.get({
+        attached = true,
+        name = "codex",
+        session = target and target.session_id or nil,
+      })
+      if type(attached) ~= "table" or #attached == 0 then
+        attached = state.get({
           attached = true,
-          name = "codex",
           session = target and target.session_id or nil,
-        },
-      }
-      cli.send(opts)
+        })
+      end
+      local current = type(attached) == "table" and attached[1] or nil
+      local session = current and current.session or nil
+      if type(session) ~= "table" or type(session.send) ~= "function" then
+        return false, Adapter.error("ADAPTER_UNAVAILABLE")
+      end
+
+      local wrote = pcall(function()
+        session:send(encoded .. "\n")
+      end)
+      if not wrote then
+        return false, Adapter.error("TRANSPORT_FAILED")
+      end
+
       return true, {
         dispatched_items = type(payload) == "table" and type(payload.items) == "table" and #payload.items or nil,
       }
