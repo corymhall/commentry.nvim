@@ -200,12 +200,13 @@ end
 
 ---@param item table
 ---@param thread_parents table<string, string>
+---@param root string|nil
 ---@return table
-local function project_item(item, thread_parents)
+local function project_item(item, thread_parents, root)
   local projected = {
     id = item.id,
     diff_id = item.diff_id or item.context_id,
-    file_path = item.file_path,
+    file_path = normalize_path(item.file_path, root),
     line_number = item.line_start or item.line_number,
     line_side = item.line_side,
     comment_type = item.comment_type or "note",
@@ -264,11 +265,29 @@ function M.extract_active_items(items, opts)
   end)
 
   local projected = {}
+  local root = normalize_root(opts.root or opts.repo_root or opts.project_root or opts.git_root)
   local thread_parents = thread_parent_by_comment(opts.threads)
   for _, item in ipairs(active) do
-    projected[#projected + 1] = project_item(item, thread_parents)
+    projected[#projected + 1] = project_item(item, thread_parents, root)
   end
   return projected
+end
+
+---@param context table
+---@return table
+local function normalize_context(context)
+  if type(context) ~= "table" then
+    return {}
+  end
+
+  local normalized = deep_copy(context)
+  local root = normalize_root(normalized.root or normalized.repo_root or normalized.project_root or normalized.git_root)
+
+  for _, key in ipairs({ "root", "repo_root", "project_root", "git_root", "file_path", "path" }) do
+    normalized[key] = normalize_path(normalized[key], root)
+  end
+
+  return normalized
 end
 
 ---@param value any
@@ -332,10 +351,11 @@ function M.build_payload(context, opts)
   context = context or {}
   local items = M.extract_active_items(opts.items or {}, {
     threads = opts.threads,
+    root = context.root or context.repo_root or context.project_root or context.git_root,
   })
 
   return {
-    context = deep_copy(context),
+    context = normalize_context(context),
     review_meta = deep_copy(opts.review_meta or {}),
     items = deep_copy(items),
     provenance = normalize_provenance(deep_copy(opts.provenance or {}), context),

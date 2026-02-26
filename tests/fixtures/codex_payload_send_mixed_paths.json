@@ -1,0 +1,68 @@
+{
+  "review_context": {
+    "context_id": "ctx-diffview",
+    "mode": "working_tree",
+    "root": "/tmp/project"
+  },
+  "contexts": {
+    "active": "ctx-active",
+    "other": "ctx-other"
+  },
+  "comments_by_context": {
+    "ctx-active": [
+      {
+        "id": "c-stale",
+        "diff_id": "ctx-active",
+        "file_path": "lua/commentry/stale.lua",
+        "line_number": 1,
+        "line_side": "head",
+        "body": "stale",
+        "stale": true
+      },
+      {
+        "id": "c-unresolved",
+        "diff_id": "ctx-active",
+        "file_path": "lua/commentry/unresolved.lua",
+        "line_number": 2,
+        "line_side": "head",
+        "body": "unresolved",
+        "status": "unresolved"
+      },
+      {
+        "id": "c-active-abs-in-repo",
+        "diff_id": "ctx-active",
+        "file_path": "/tmp/project/lua/commentry/codex/send.lua",
+        "line_number": 3,
+        "line_side": "head",
+        "comment_type": "suggestion",
+        "body": "keep absolute in-repo"
+      },
+      {
+        "id": "c-active-rel",
+        "diff_id": "ctx-active",
+        "file_path": "lua/commentry/codex/payload.lua",
+        "line_number": 4,
+        "line_side": "head",
+        "body": "keep relative"
+      },
+      {
+        "id": "c-active-abs-outside",
+        "diff_id": "ctx-active",
+        "file_path": "/tmp/outside.lua",
+        "line_number": 5,
+        "line_side": "head",
+        "body": "outside path should be dropped"
+      }
+    ],
+    "ctx-other": [
+      {
+        "id": "c-other-context",
+        "diff_id": "ctx-other",
+        "file_path": "lua/commentry/other.lua",
+        "line_number": 10,
+        "line_side": "head",
+        "body": "wrong context"
+      }
+    ]
+  }
+}

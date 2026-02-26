@@ -26,6 +26,62 @@ local function load_comments_with_store(stubs)
   return comments
 end
 
+local function load_send_with_stubs(stubs)
+  local original_config = package.loaded["commentry.config"]
+  local original_diffview = package.loaded["commentry.diffview"]
+  local original_comments = package.loaded["commentry.comments"]
+  local original_payload = package.loaded["commentry.codex.payload"]
+  local original_adapter = package.loaded["commentry.codex.adapter"]
+  local original_sidekick = package.loaded["commentry.codex.adapters.sidekick"]
+  local original_send = package.loaded["commentry.codex.send"]
+
+  package.loaded["commentry.config"] = stubs.config
+  package.loaded["commentry.diffview"] = stubs.diffview
+  package.loaded["commentry.comments"] = stubs.comments
+  package.loaded["commentry.codex.payload"] = stubs.payload
+  package.loaded["commentry.codex.adapter"] = stubs.adapter
+  package.loaded["commentry.codex.adapters.sidekick"] = stubs.sidekick
+  package.loaded["commentry.codex.send"] = nil
+
+  local send = require("commentry.codex.send")
+
+  package.loaded["commentry.config"] = original_config
+  package.loaded["commentry.diffview"] = original_diffview
+  package.loaded["commentry.comments"] = original_comments
+  package.loaded["commentry.codex.payload"] = original_payload
+  package.loaded["commentry.codex.adapter"] = original_adapter
+  package.loaded["commentry.codex.adapters.sidekick"] = original_sidekick
+  package.loaded["commentry.codex.send"] = original_send
+
+  return send
+end
+
+local function is_absolute_path(value)
+  if type(value) ~= "string" or value == "" then
+    return false
+  end
+  if value:sub(1, 1) == "/" then
+    return true
+  end
+  if value:match("^%a:[/\\]") then
+    return true
+  end
+  return false
+end
+
+local function assert_no_absolute_paths(value)
+  if type(value) == "string" then
+    assert.is_false(is_absolute_path(value))
+    return
+  end
+  if type(value) ~= "table" then
+    return
+  end
+  for _, entry in pairs(value) do
+    assert_no_absolute_paths(entry)
+  end
+end
+
 describe("commentry.codex.payload", function()
   it("builds payload with required top-level sections", function()
     local payload = Payload.build_payload({ context_id = "ctx-1" }, {
@@ -253,5 +309,89 @@ describe("commentry.codex.payload", function()
       assert.are.same(comment.body, projected.body)
       assert.are.same(comment.status, projected.status)
     end
+  end)
+
+  it("produces safe, scoped payload in full send flow with mixed stale/active and mixed paths", function()
+    local fixture = load_fixture("codex_payload_send_mixed_paths.json")
+    local exported_context_ids = {}
+    local captured_payloads = {}
+    local send = load_send_with_stubs({
+      config = {
+        codex = {
+          adapter = {
+            select = "sidekick",
+            fallback = nil,
+          },
+        },
+      },
+      diffview = {
+        current_file_context = function()
+          return {
+            file_path = "lua/commentry/codex/payload.lua",
+            line_number = 10,
+            line_side = "head",
+            view = { id = "view-mixed" },
+          }, nil
+        end,
+        resolve_review_context = function()
+          return vim.deepcopy(fixture.review_context), nil
+        end,
+      },
+      comments = {
+        context_id_for_view = function()
+          return fixture.contexts.active, nil
+        end,
+        exportable_comments = function(context_id)
+          exported_context_ids[#exported_context_ids + 1] = context_id
+          return vim.deepcopy(fixture.comments_by_context[context_id] or {})
+        end,
+      },
+      payload = Payload,
+      adapter = {
+        error = function(code)
+          if code == "NO_TARGET" then
+            return { code = "NO_TARGET", message = "No target adapter configured.", retryable = false }
+          end
+          return { code = "INTERNAL_ERROR", message = "Internal adapter error.", retryable = false }
+        end,
+        send = function(payload)
+          captured_payloads[#captured_payloads + 1] = vim.deepcopy(payload)
+          return true, nil, { dispatched_items = #payload.items }
+        end,
+      },
+      sidekick = {
+        send = function(payload)
+          captured_payloads[#captured_payloads + 1] = vim.deepcopy(payload)
+          return true, nil, { dispatched_items = #payload.items }
+        end,
+      },
+    })
+
+    local result_first = send.send_current_review({
+      target = { session_id = "session-mixed" },
+    })
+    local result_second = send.send_current_review({
+      target = { session_id = "session-mixed" },
+    })
+
+    assert.is_true(result_first.ok)
+    assert.is_true(result_second.ok)
+    assert.are.same({ fixture.contexts.active, fixture.contexts.active }, exported_context_ids)
+    assert.are.same(2, #captured_payloads)
+
+    local payload = captured_payloads[1]
+    assert.are.same(fixture.contexts.active, payload.context.context_id)
+    assert.are.same(".", payload.context.root)
+    assert.are.same(".", payload.provenance.root)
+    assert.are.same(3, #payload.items)
+    assert.are.same(
+      { "c-active-abs-outside", "c-active-abs-in-repo", "c-active-rel" },
+      { payload.items[1].id, payload.items[2].id, payload.items[3].id }
+    )
+    assert.is_nil(payload.items[1].file_path)
+    assert.are.same("lua/commentry/codex/send.lua", payload.items[2].file_path)
+    assert.are.same("lua/commentry/codex/payload.lua", payload.items[3].file_path)
+    assert_no_absolute_paths(payload)
+    assert.are.same(Payload.serialize(captured_payloads[1]), Payload.serialize(captured_payloads[2]))
   end)
 end)
