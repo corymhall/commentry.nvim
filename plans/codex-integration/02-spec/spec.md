@@ -94,7 +94,7 @@ Each send is an immutable snapshot. Sending creates a payload identity with deli
 **Component 3: Transport Adapter Interface**
 - Responsibility: Abstract delivery path to active Codex session.
 - Interface: `send(payload, target)` with adapter-specific implementation.
-- Key considerations: Sidekick is optional; adapter selection should not alter payload semantics.
+- Key considerations: Sidekick is optional; adapter selection should not alter payload semantics. In v1, adapter choice is global/implicit from the active attachment (no per-send selector).
 
 **Component 4: Handoff Status/Disposition Tracker**
 - Responsibility: Represent send lifecycle and PR-like per-item outcomes.
@@ -103,7 +103,7 @@ Each send is an immutable snapshot. Sending creates a payload identity with deli
 
 ### Data Model
 
-No disruptive storage migration is required in v1. Existing Commentry persistence remains the primary model. New fields can be introduced in review-adjacent metadata (or parallel sidecar state) for handoff snapshots and disposition tracking.
+No disruptive storage migration is required in v1. Existing Commentry persistence remains the primary model. New fields will be introduced in review-adjacent metadata in the existing store (not a sidecar file) for handoff snapshots and disposition tracking.
 
 Proposed additions:
 - `send_snapshot_id` (immutable send identity)
@@ -138,6 +138,17 @@ Existing constraints to preserve:
 2. System returns explicit actionable message (attach first).
 3. No payload is lost; user can retry after attach.
 
+### Acceptance Criteria (v1)
+
+| Scenario | Expected Outcome |
+|---|---|
+| Send with attached session target | Payload snapshot is created from unresolved review items and delivery status becomes `sent` (or `failed` with error details). |
+| Send with no attached target | Send is blocked with actionable remediation; no send snapshot is recorded as delivered. |
+| Transport failure during send | Failure is persisted with clear retry path; retry creates a new immutable snapshot. |
+| Review edited after prior send | New send creates a new snapshot; prior snapshot is marked superseded, not mutated. |
+| Disposition tracking | Item-level disposition state is persisted independently from transport delivery state. |
+| Resend flow | Re-send from updated review remains deterministic: unresolved items only, immutable history retained. |
+
 ### Error Handling
 
 - **No target attached:** Block send and return explicit remediation.
@@ -145,6 +156,12 @@ Existing constraints to preserve:
 - **Partial acceptance semantics:** Keep delivery success distinct from item disposition.
 - **Stale content risk:** If review changes after send, mark prior snapshot superseded by newer snapshot.
 - **Ambiguous/weak review text:** Preserve content but support `needs_clarification` disposition.
+
+### Constraints
+
+- v1 has no performance-specific requirements; do not block release on latency/throughput targets.
+- Behavior must stay compatible with existing local store semantics and context identity model.
+- Transport adapter behavior must preserve payload semantics across implementations.
 
 ### Integration Points
 
@@ -168,18 +185,37 @@ The following are explicitly excluded from v1:
 
 ---
 
-## Open Questions
+## Spec Review
 
-- [ ] Should transport adapter selection be user-configurable per send or globally configured?
-- [ ] Where should send snapshot metadata live long-term (extend existing store vs sidecar file)?
-- [ ] What is the minimal disposition UX presentation that still feels PR-like without clutter?
+**Reviewed:** 2026-02-26
+**Gaps identified:** 6
+**Gaps resolved:** 6
+
+### Clarifications Added
+
+| Topic | Clarification |
+|---|---|
+| Acceptance criteria | Added scenario matrix for send/no-target/failure/retry/supersede/disposition behavior. |
+| Adapter selection | v1 uses global/implicit adapter selection from active attachment; no per-send selector. |
+| Metadata storage | Send snapshot metadata extends existing Commentry store; no sidecar file in v1. |
+| Disposition UX | Minimal v1 UX is snapshot status plus per-item disposition and optional note, PR-like but compact. |
+| Constraints | Explicitly no performance gating requirements in v1. |
+| Safety/loop closure | Delivery state remains distinct from disposition state; supersede flow remains immutable. |
+
+### Deferred Items
+
+| Item | Rationale | Revisit When |
+|---|---|---|
+| Q98: Review-to-Beads conversion | Beads integration deferred in v1 | v2 Beads exploration |
+| Q103: Multi-person collaboration flow | Product boundary is solo-only | If product boundary changes |
+| Q122: Beads continuity proof artifact | Depends on Beads integration strategy | v2 Beads exploration |
 
 ---
 
 ## Next Steps
 
 - [ ] Review this spec for alignment with transport-first scope.
-- [ ] Run spec review (next pipeline stage) for completeness and risk.
+- [x] Run spec review (questions interview) and resolve critical gaps.
 - [ ] Define adapter interface contract and minimal send/disposition schema.
 - [ ] Create implementation plan and split into beads issues.
 
