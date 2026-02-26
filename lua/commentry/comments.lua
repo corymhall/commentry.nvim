@@ -40,6 +40,7 @@ local function is_integer(value)
   return type(value) == "number" and value > 0 and math.floor(value) == value
 end
 
+--- seed rng.
 local function seed_rng()
   if seeded then
     return
@@ -1029,6 +1030,7 @@ function M.new_thread(diff_id, anchor, comment_ids)
     nil
 end
 
+--- render current buffer.
 function M.render_current_buffer()
   local context, err = current_context()
   if not context then
@@ -1061,6 +1063,7 @@ function M.refresh_hover_preview()
   return true
 end
 
+--- list comments.
 function M.list_comments()
   local context, context_err = current_context()
   if not context then
@@ -1152,6 +1155,7 @@ function M.current_file_reviewed()
   return diff_state(diff_id).file_reviews[context.file_path] == true, nil
 end
 
+--- toggle file reviewed.
 function M.toggle_file_reviewed()
   local context, err = current_context()
   if not context then
@@ -1177,6 +1181,7 @@ function M.toggle_file_reviewed()
   end
 end
 
+--- next unreviewed file.
 function M.next_unreviewed_file()
   local context, err = current_context()
   if not context then
@@ -1524,6 +1529,7 @@ local function visual_line_range(context)
   return start_line, end_line
 end
 
+--- add comment.
 function M.add_comment()
   local context, err = current_context()
   if not context then
@@ -1564,6 +1570,7 @@ function M.add_comment()
   end)
 end
 
+--- add range comment.
 function M.add_range_comment()
   local context, err = current_context()
   if not context then
@@ -1609,6 +1616,7 @@ function M.add_range_comment()
   end)
 end
 
+--- edit comment.
 function M.edit_comment()
   local context, err = current_context()
   if not context then
@@ -1644,6 +1652,7 @@ function M.edit_comment()
   end)
 end
 
+--- delete comment.
 function M.delete_comment()
   local context, err = current_context()
   if not context then
@@ -1669,6 +1678,7 @@ function M.delete_comment()
   end)
 end
 
+--- set comment type.
 function M.set_comment_type()
   local context, err = current_context()
   if not context then

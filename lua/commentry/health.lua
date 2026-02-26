@@ -47,6 +47,7 @@ local function codex_health(codex)
   ok("codex adapter ready (sidekick transport available); :Commentry send-to-codex uses attached session target")
 end
 
+--- check.
 function M.check()
   start("commentry")
   if pcall(require, "diffview") then

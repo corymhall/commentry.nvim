@@ -125,6 +125,7 @@ local function maybe_attach_keymaps(bufnr)
   Comments.render_current_buffer()
 end
 
+--- setup.
 function M.setup()
   if initialized then
     return

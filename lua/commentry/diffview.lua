@@ -8,6 +8,7 @@ local uv = vim.uv or vim.loop
 local ROOT_CANDIDATE_KEYS = { "git_root", "toplevel", "root", "cwd", "path" }
 local view_context_by_tabpage = {}
 
+--- mark buffer.
 local function mark_buffer(bufnr)
   if type(bufnr) == "number" and vim.api.nvim_buf_is_valid(bufnr) then
     pcall(vim.api.nvim_buf_set_var, bufnr, "commentry_diffview", true)
@@ -355,6 +356,7 @@ function M.resolve_review_context(args, view)
   return context, nil
 end
 
+--- mark view buffers.
 local function mark_view_buffers()
   local ok, lib = pcall(require, "diffview.lib")
   if not ok then
@@ -375,6 +377,7 @@ local function mark_view_buffers()
   end
 end
 
+--- sync comments for view.
 local function sync_comments_for_view()
   local ok, comments = pcall(require, "commentry.comments")
   if not ok then
@@ -406,6 +409,7 @@ local function is_diff_buffer(bufnr)
   return is_diff == true
 end
 
+--- refresh hover for current buffer.
 local function refresh_hover_for_current_buffer()
   local bufnr = vim.api.nvim_get_current_buf()
   if not is_diff_buffer(bufnr) then
@@ -491,6 +495,7 @@ function M.mark_current_buffer()
   return true
 end
 
+--- setup.
 function M.setup()
   if not Config.diffview.auto_attach then
     return
