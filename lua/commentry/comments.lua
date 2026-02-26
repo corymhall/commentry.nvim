@@ -771,6 +771,12 @@ current_context = function()
   return context, nil
 end
 
+---@param err string|nil
+---@return boolean
+local function is_expected_non_file_context(err)
+  return err == "current buffer is not a diffview file buffer" or err == "diffview has no active file entry"
+end
+
 ---@param file_path string
 ---@param line_start integer
 ---@param line_end integer
@@ -1000,6 +1006,10 @@ end
 function M.render_current_buffer()
   local context, err = current_context()
   if not context then
+    if is_expected_non_file_context(err) then
+      Util.debug("render skipped", err)
+      return
+    end
     Util.warn(err or "No diffview context")
     return
   end

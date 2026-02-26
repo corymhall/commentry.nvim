@@ -1926,4 +1926,35 @@ describe("commentry.comments persistence", function()
     comments.list_comments()
     assert.are.same("snacks.nvim is required for :Commentry list-comments", errors[1])
   end)
+
+  it("does not warn when render runs in diffview non-file windows", function()
+    local warned = 0
+    package.loaded["commentry.util"] = {
+      info = function() end,
+      error = function() end,
+      warn = function()
+        warned = warned + 1
+      end,
+      debug = function() end,
+    }
+
+    local comments = load_with_stubs({
+      store = {
+        read = function()
+          return nil, "not_found"
+        end,
+        write = function()
+          return true
+        end,
+      },
+      diffview = {
+        current_file_context = function()
+          return nil, "current buffer is not a diffview file buffer"
+        end,
+      },
+    })
+
+    comments.render_current_buffer()
+    assert.are.same(0, warned)
+  end)
 end)
