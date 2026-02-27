@@ -1,5 +1,6 @@
 ---@class commentry.config: commentry.Config
 local M = {}
+local Util = require("commentry.util")
 
 M.ns = vim.api.nvim_create_namespace("commentry")
 
@@ -103,6 +104,30 @@ local keymap_keys = {
   "next_unreviewed_file",
 }
 
+local keymap_empty_allowed = {
+  toggle_file_reviewed = true,
+  next_unreviewed_file = true,
+}
+
+---@param value string
+---@return boolean
+local function is_valid_keymap_format(value)
+  if value:match("^%s*$") then
+    return false
+  end
+  if value:find("[\n\r]") then
+    return false
+  end
+  return true
+end
+
+---@param action string
+---@param provided unknown
+---@param expected string
+local function warn_keymap_validation(action, provided, expected)
+  Util.warn(("commentry setup: keymaps.%s=%s is invalid; expected %s"):format(action, vim.inspect(provided), expected))
+end
+
 ---@param keymaps unknown
 ---@return commentry.Keymaps
 local function normalize_keymaps(keymaps)
@@ -112,8 +137,19 @@ local function normalize_keymaps(keymaps)
   end
 
   for _, key in ipairs(keymap_keys) do
-    if keymaps[key] ~= nil then
-      normalized[key] = keymaps[key]
+    local value = keymaps[key]
+    if value ~= nil then
+      local allow_empty = keymap_empty_allowed[key] == true
+      local expected_shape = allow_empty and 'string (use "" to disable)' or "non-empty string"
+      if type(value) ~= "string" then
+        warn_keymap_validation(key, value, expected_shape)
+      elseif value == "" and not allow_empty then
+        warn_keymap_validation(key, value, expected_shape)
+      elseif value ~= "" and not is_valid_keymap_format(value) then
+        warn_keymap_validation(key, value, expected_shape)
+      else
+        normalized[key] = value
+      end
     end
   end
 
