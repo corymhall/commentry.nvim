@@ -107,7 +107,7 @@ Delivery is phased to maximize parallelism after shared foundations are set. Pha
 - **Files:**
   - Modify: `lua/commentry/commands.lua` (only if corrections are needed to maintain parity).
 - **Key details:**
-  - Command-backed actions include existing subcommands such as `toggle-file-reviewed`, `next-unreviewed`, `set-comment-type`, `add-range-comment`.
+  - Command-backed actions are exactly: `toggle-file-reviewed`, `next-unreviewed`, `set-comment-type`, `add-range-comment`.
   - Treat `:Commentry` subcommand registration in `lua/commentry/commands.lua` as source of truth for fallback claims.
   - Do not expand scope by adding new command surfaces unless required by updated spec.
 - **Acceptance criteria:**
