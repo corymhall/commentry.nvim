@@ -12,6 +12,7 @@ M.ns = vim.api.nvim_create_namespace("commentry")
 ---@field set_comment_type string
 ---@field toggle_file_reviewed string
 ---@field next_unreviewed_file string
+---@field send_to_codex string
 
 ---@class commentry.StoreConfig
 ---@field filename string
@@ -62,6 +63,7 @@ local defaults = {
     set_comment_type = "mt",
     toggle_file_reviewed = "mr",
     next_unreviewed_file = "]r",
+    send_to_codex = "ms",
   },
   comment_types = { "note", "suggestion", "issue", "praise" },
   default_comment_type = "note",
@@ -94,6 +96,9 @@ local defaults = {
   },
 }
 
+-- Canonical defaults shared across setup normalization and runtime fallback.
+M.default_keymaps = vim.deepcopy(defaults.keymaps)
+
 local keymap_keys = {
   "add_comment",
   "add_range_comment",
@@ -102,6 +107,7 @@ local keymap_keys = {
   "set_comment_type",
   "toggle_file_reviewed",
   "next_unreviewed_file",
+  "send_to_codex",
 }
 
 local keymap_empty_allowed = {

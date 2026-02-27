@@ -6,7 +6,7 @@ local Util = require("commentry.util")
 local M = {}
 local initialized = false
 
-local keymap_defaults = {
+local fallback_keymap_defaults = {
   add_comment = "mc",
   add_range_comment = "mc",
   edit_comment = "me",
@@ -14,7 +14,10 @@ local keymap_defaults = {
   set_comment_type = "mt",
   toggle_file_reviewed = "mr",
   next_unreviewed_file = "]r",
+  send_to_codex = "ms",
 }
+
+local keymap_defaults = vim.deepcopy(Config.default_keymaps or fallback_keymap_defaults)
 
 local keymap_empty_disable_allowed = {
   toggle_file_reviewed = true,
@@ -131,6 +134,15 @@ local function maybe_attach_keymaps(bufnr)
 
   Util.debug("Attaching comment keymaps", buffer_debug_info(bufnr))
 
+  local function send_to_codex_keymap()
+    local send_cmd = M.commands["send-to-codex"]
+    if type(send_cmd) ~= "function" then
+      Util.error("Codex send command is unavailable.")
+      return
+    end
+    send_cmd({}, "")
+  end
+
   local keymap_specs = {
     { action = "add_comment", mode = "n", desc = "Commentry add comment", handler = Comments.add_comment },
     { action = "add_range_comment", mode = "x", desc = "Commentry add range comment", handler = Comments.add_range_comment },
@@ -148,6 +160,12 @@ local function maybe_attach_keymaps(bufnr)
       mode = "n",
       desc = "Commentry jump next unreviewed file",
       handler = Comments.next_unreviewed_file,
+    },
+    {
+      action = "send_to_codex",
+      mode = "n",
+      desc = "Commentry send to codex",
+      handler = send_to_codex_keymap,
     },
   }
 

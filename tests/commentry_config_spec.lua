@@ -70,6 +70,7 @@ describe("commentry config", function()
       set_comment_type = "mt",
       toggle_file_reviewed = "mr",
       next_unreviewed_file = "]r",
+      send_to_codex = "ms",
     }
 
     for key, value in pairs(expected) do
@@ -93,6 +94,7 @@ describe("commentry config", function()
     assert.are.same("mt", Config.keymaps.set_comment_type)
     assert.are.same("mr", Config.keymaps.toggle_file_reviewed)
     assert.are.same("]r", Config.keymaps.next_unreviewed_file)
+    assert.are.same("ms", Config.keymaps.send_to_codex)
   end)
 
   it("normalizes malformed keymaps overrides back to defaults", function()
@@ -109,6 +111,7 @@ describe("commentry config", function()
       set_comment_type = "mt",
       toggle_file_reviewed = "mr",
       next_unreviewed_file = "]r",
+      send_to_codex = "ms",
     }, Config.keymaps)
   end)
 
@@ -218,6 +221,27 @@ describe("commentry config", function()
     Config.setup({
       keymaps = {
         set_comment_type = "   ",
+      },
+    })
+
+    assert.are.same("mt", Config.keymaps.set_comment_type)
+    assert.are.same(1, #warns)
+    assert.is_truthy(warns[1]:find("keymaps.set_comment_type", 1, true))
+    assert.is_truthy(warns[1]:find("non%-empty string"))
+  end)
+
+  it("warns and restores default when keymap contains newline characters", function()
+    local warns = {}
+    package.loaded["commentry.util"] = {
+      warn = function(msg)
+        warns[#warns + 1] = msg
+      end,
+    }
+
+    local Config = require("commentry.config")
+    Config.setup({
+      keymaps = {
+        set_comment_type = "m\nc",
       },
     })
 
