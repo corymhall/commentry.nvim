@@ -350,6 +350,85 @@ describe("commentry keymap attachment", function()
     assert.is_nil(lhs_by_desc["Commentry toggle file reviewed"])
     assert.is_nil(lhs_by_desc["Commentry jump next unreviewed file"])
   end)
+
+  it("uses default key bindings when no keymaps are configured", function()
+    local autocmd
+    local mapped = {}
+    local bufnr = vim.api.nvim_get_current_buf()
+    vim.b[bufnr].commentry_diffview = true
+    vim.b[bufnr].commentry_keymaps = nil
+
+    vim.api.nvim_create_autocmd = function(_, opts)
+      if opts.pattern == "DiffviewDiffBufWinEnter" then
+        autocmd = opts
+      end
+      return 1
+    end
+    vim.schedule = function(cb)
+      cb()
+    end
+    vim.keymap.set = function(mode, lhs, _, opts)
+      mapped[#mapped + 1] = { mode = mode, lhs = lhs, desc = opts.desc }
+    end
+
+    package.loaded["commentry.comments"] = {
+      add_comment = function()
+        return
+      end,
+      add_range_comment = function()
+        return
+      end,
+      edit_comment = function()
+        return
+      end,
+      delete_comment = function()
+        return
+      end,
+      set_comment_type = function()
+        return
+      end,
+      toggle_file_reviewed = function()
+        return
+      end,
+      next_unreviewed_file = function()
+        return
+      end,
+      list_comments = function()
+        return
+      end,
+      export_comments = function()
+        return
+      end,
+      render_current_buffer = function()
+        return
+      end,
+    }
+    package.loaded["commentry.config"] = {
+      augroup = 1,
+      diffview = { enabled = true },
+      keymaps = nil,
+    }
+    package.loaded["commentry.diffview"] = { open = function() return true end }
+
+    package.loaded["commentry.commands"] = nil
+    local Commands = require("commentry.commands")
+    Commands.setup()
+    autocmd.callback()
+
+    assert.are.same(7, #mapped)
+    local by_desc = {}
+    for _, mapping in ipairs(mapped) do
+      by_desc[mapping.desc] = mapping
+    end
+    assert.are.same("mc", by_desc["Commentry add comment"].lhs)
+    assert.are.same("x", by_desc["Commentry add range comment"].mode)
+    assert.are.same("mc", by_desc["Commentry add range comment"].lhs)
+    assert.are.same("me", by_desc["Commentry edit comment"].lhs)
+    assert.are.same("md", by_desc["Commentry delete comment"].lhs)
+    assert.are.same("mt", by_desc["Commentry set comment type"].lhs)
+    assert.are.same("mr", by_desc["Commentry toggle file reviewed"].lhs)
+    assert.are.same("]r", by_desc["Commentry jump next unreviewed file"].lhs)
+  end)
 end)
 
 describe("commentry command routing", function()
