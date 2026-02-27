@@ -555,4 +555,160 @@ describe("commentry.codex.send", function()
     assert.are.same("session-attached", seen_target.session_id)
     assert.are.same("/tmp/attached", seen_target.workspace)
   end)
+
+  it("supports async send flow with adapter-driven target resolution", function()
+    local seen_target = nil
+    local send = load_send_with_stubs({
+      config = {
+        codex = {
+          adapter = {
+            select = "sidekick",
+            fallback = nil,
+          },
+        },
+      },
+      diffview = {
+        current_file_context = function()
+          return {
+            file_path = "a.lua",
+            line_number = 3,
+            line_side = "head",
+            view = { id = "view-async" },
+          }, nil
+        end,
+        resolve_review_context = function()
+          return {
+            context_id = "ctx-async",
+            mode = "working_tree",
+            root = "/tmp/project",
+          }, nil
+        end,
+      },
+      comments = {
+        context_id_for_view = function()
+          return "ctx-async", nil
+        end,
+        exportable_comments = function()
+          return {
+            { id = "c1", diff_id = "ctx-async", body = "draft", file_path = "a.lua", line_number = 3, line_side = "head" },
+          }
+        end,
+      },
+      payload = {
+        build_payload = function(context, opts)
+          return { context = context, items = opts.items }
+        end,
+      },
+      adapter = {
+        error = function(code)
+          if code == "NO_TARGET" then
+            return { code = "NO_TARGET", message = "No target adapter configured.", retryable = false }
+          end
+          if code == "ADAPTER_UNAVAILABLE" then
+            return { code = "ADAPTER_UNAVAILABLE", message = "Target adapter is unavailable.", retryable = true }
+          end
+          return { code = "INTERNAL_ERROR", message = "Internal adapter error.", retryable = false }
+        end,
+        send = function(_, target)
+          seen_target = target
+          return true, nil, { dispatched_items = 1 }
+        end,
+      },
+      sidekick = {
+        resolve_target_async = function(cb)
+          cb({ session_id = "session-async", workspace = "/tmp/async" }, nil, nil)
+        end,
+        send = function()
+          return true, nil, {}
+        end,
+      },
+    })
+
+    local seen = nil
+    send.send_current_review_async({}, function(result)
+      seen = result
+    end)
+
+    assert.is_table(seen)
+    assert.is_true(seen.ok)
+    assert.are.same("session-async", seen_target.session_id)
+    assert.are.same("/tmp/async", seen_target.workspace)
+  end)
+
+  it("returns NO_TARGET in async flow when no session is selected", function()
+    local send = load_send_with_stubs({
+      config = {
+        codex = {
+          adapter = {
+            select = "sidekick",
+            fallback = nil,
+          },
+        },
+      },
+      diffview = {
+        current_file_context = function()
+          return {
+            file_path = "a.lua",
+            line_number = 3,
+            line_side = "head",
+            view = { id = "view-async-no-target" },
+          }, nil
+        end,
+        resolve_review_context = function()
+          return {
+            context_id = "ctx-async-no-target",
+            mode = "working_tree",
+            root = "/tmp/project",
+          }, nil
+        end,
+      },
+      comments = {
+        context_id_for_view = function()
+          return "ctx-async-no-target", nil
+        end,
+        exportable_comments = function()
+          return {}
+        end,
+      },
+      payload = {
+        build_payload = function(context, opts)
+          return { context = context, items = opts.items }
+        end,
+      },
+      adapter = {
+        error = function(code)
+          if code == "NO_TARGET" then
+            return { code = "NO_TARGET", message = "No target adapter configured.", retryable = false }
+          end
+          if code == "ADAPTER_UNAVAILABLE" then
+            return { code = "ADAPTER_UNAVAILABLE", message = "Target adapter is unavailable.", retryable = true }
+          end
+          return { code = "INTERNAL_ERROR", message = "Internal adapter error.", retryable = false }
+        end,
+        send = function()
+          return true, nil, {}
+        end,
+      },
+      sidekick = {
+        resolve_target_async = function(cb)
+          cb(nil, "NO_TARGET", "No Codex session selected.")
+        end,
+        send = function()
+          return true, nil, {}
+        end,
+      },
+    })
+
+    local seen = nil
+    send.send_current_review_async({}, function(result)
+      seen = result
+    end)
+
+    assert.are.same({
+      ok = false,
+      code = "NO_TARGET",
+      message = "No Codex session selected.",
+      retryable = false,
+    }, seen)
+  end)
 end)

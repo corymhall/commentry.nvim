@@ -16,4 +16,10 @@ function M.send_current_review(opts)
   return Send.send_current_review(opts)
 end
 
+---@param opts? table
+---@param cb? fun(result: table)
+function M.send_current_review_async(opts, cb)
+  return Send.send_current_review_async(opts, cb)
+end
+
 return M

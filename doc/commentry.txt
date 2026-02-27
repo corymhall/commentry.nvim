@@ -116,7 +116,11 @@ COMMANDS                                          *commentry.commands*
   - codex integration enabled in setup (`codex.enabled = true`)
   - active attached review context (for example via `:Commentry open` or diffview auto-attach)
   Adapter behavior:
-  - v1 adapter selection is global/implicit from config and attached runtime target
+  - v1 adapter selection is global/implicit from config
+  - when exactly one existing Codex Sidekick session exists, send auto-attaches it
+  - when multiple existing sessions exist but exactly one matches current cwd, send auto-selects it
+  - when multiple existing sessions exist, send prompts for target selection
+  - when no existing sessions exist, send fails with actionable guidance
   Semantics:
   - send-and-forget: one dispatch attempt, immediate success/failure feedback
   - payload format is compact text (`COMMENTRY_REVIEW_V1`), optimized for
@@ -135,8 +139,9 @@ PERSISTENCE NOTES                                 *commentry.persistence*
 - Store path is context-scoped:
   `~/.commentry/repos/<repo>/contexts/<context-id>/commentry.json`
 - The store file is created lazily on first successful write in that context.
-- Review context is repository-scoped (`<root>::review`) across Diffview range
-  lenses (`:DiffviewOpen`, `:DiffviewOpen main`, `:DiffviewOpen HEAD~3`, etc).
+- Review context is branch-scoped (`<root>::review::branch::<branch-name>`) across
+  Diffview range lenses (`:DiffviewOpen`, `:DiffviewOpen main`, `:DiffviewOpen HEAD~3`, etc)
+  for that branch.
 - Comments remain in the same context until anchor reconciliation marks them
   stale/outdated after code changes.
 - Comment add/edit/range opens a floating multiline editor:

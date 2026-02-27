@@ -887,6 +887,131 @@ describe("commentry.comments persistence", function()
     assert.are.same("wt-1", captured[1].id)
   end)
 
+  it("isolates comments by branch-scoped context id within the same repo root", function()
+    local function context_id_for_branch(branch)
+      return ("/tmp/project::review::branch::%s"):format(branch)
+    end
+
+    local function path_for_context(_, context_id)
+      local safe = context_id:gsub("[^%w%._%-]", "_")
+      return "/tmp/" .. safe .. ".json"
+    end
+
+    local stores = {
+      [path_for_context("", context_id_for_branch("main"))] = {
+        project_root = "/tmp/project",
+        context_id = context_id_for_branch("main"),
+        comments = {
+          {
+            id = "main-1",
+            context_id = context_id_for_branch("main"),
+            file_path = "file.lua",
+            line_start = 1,
+            line_end = 1,
+            line_side = "head",
+            comment_type = "note",
+            body = "main comment",
+            created_at = "2026-02-21T00:00:00Z",
+            updated_at = "2026-02-21T00:00:00Z",
+          },
+        },
+        threads = {
+          {
+            id = "t-main-1",
+            context_id = context_id_for_branch("main"),
+            file_path = "file.lua",
+            line_start = 1,
+            line_end = 1,
+            line_side = "head",
+            comment_ids = { "main-1" },
+          },
+        },
+        file_reviews = {},
+      },
+      [path_for_context("", context_id_for_branch("feature"))] = {
+        project_root = "/tmp/project",
+        context_id = context_id_for_branch("feature"),
+        comments = {
+          {
+            id = "feature-1",
+            context_id = context_id_for_branch("feature"),
+            file_path = "file.lua",
+            line_start = 1,
+            line_end = 1,
+            line_side = "head",
+            comment_type = "issue",
+            body = "feature comment",
+            created_at = "2026-02-21T00:00:00Z",
+            updated_at = "2026-02-21T00:00:00Z",
+          },
+        },
+        threads = {
+          {
+            id = "t-feature-1",
+            context_id = context_id_for_branch("feature"),
+            file_path = "file.lua",
+            line_start = 1,
+            line_end = 1,
+            line_side = "head",
+            comment_ids = { "feature-1" },
+          },
+        },
+        file_reviews = {},
+      },
+    }
+
+    local active_branch = "main"
+    local captured = {}
+    local comments = load_with_stubs({
+      store = {
+        path_for_context = path_for_context,
+        read = function(path)
+          return stores[path], nil
+        end,
+        write = function()
+          return true
+        end,
+      },
+      diffview = {
+        current_file_context = function()
+          return {
+            file_path = "file.lua",
+            line_number = 1,
+            line_side = "head",
+            bufnr = 1,
+            view = { git_root = "/tmp/project", branch = active_branch },
+          }
+        end,
+        resolve_review_context = function(_, view)
+          return {
+            context_id = context_id_for_branch(view.branch),
+            root = "/tmp/project",
+            mode = "working_tree",
+          }
+        end,
+        render_comment_markers = function(_, comments_to_render)
+          captured = comments_to_render
+        end,
+      },
+    })
+
+    vim.api.nvim_buf_line_count = function()
+      return 10
+    end
+    vim.api.nvim_buf_get_lines = function()
+      return { "line 1" }
+    end
+
+    comments.load_for_view({ git_root = "/tmp/project", branch = "main" })
+    comments.render_current_buffer()
+    assert.are.same("main-1", captured[1].id)
+
+    active_branch = "feature"
+    comments.load_for_view({ git_root = "/tmp/project", branch = "feature" })
+    comments.render_current_buffer()
+    assert.are.same("feature-1", captured[1].id)
+  end)
+
   it("preserves typed/range metadata and file review map when reconciling mismatches", function()
     local persisted = nil
     local root = make_temp_dir()

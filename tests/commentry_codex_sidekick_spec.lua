@@ -11,6 +11,10 @@ describe("commentry.codex.adapters.sidekick", function()
   local original_sidekick_codex_preload
   local original_sidekick_integration_preload
   local original_sidekick_cli_state_preload
+  local original_sidekick_cli_ui_select
+  local original_sidekick_cli_ui_select_preload
+  local original_ui_select
+  local original_getcwd
 
   before_each(function()
     original_module = package.loaded["commentry.codex.adapters.sidekick"]
@@ -23,6 +27,10 @@ describe("commentry.codex.adapters.sidekick", function()
     original_sidekick_codex_preload = package.preload["sidekick.codex"]
     original_sidekick_integration_preload = package.preload["sidekick.integration.codex"]
     original_sidekick_cli_state_preload = package.preload["sidekick.cli.state"]
+    original_sidekick_cli_ui_select = package.loaded["sidekick.cli.ui.select"]
+    original_sidekick_cli_ui_select_preload = package.preload["sidekick.cli.ui.select"]
+    original_ui_select = vim.ui.select
+    original_getcwd = vim.fn.getcwd
   end)
 
   after_each(function()
@@ -36,6 +44,10 @@ describe("commentry.codex.adapters.sidekick", function()
     package.preload["sidekick.codex"] = original_sidekick_codex_preload
     package.preload["sidekick.integration.codex"] = original_sidekick_integration_preload
     package.preload["sidekick.cli.state"] = original_sidekick_cli_state_preload
+    package.loaded["sidekick.cli.ui.select"] = original_sidekick_cli_ui_select
+    package.preload["sidekick.cli.ui.select"] = original_sidekick_cli_ui_select_preload
+    vim.ui.select = original_ui_select
+    vim.fn.getcwd = original_getcwd
   end)
 
   it("returns ADAPTER_UNAVAILABLE for invalid targets", function()
@@ -171,5 +183,137 @@ describe("commentry.codex.adapters.sidekick", function()
       session_id = "session-from-state",
       workspace = "/tmp/state-cwd",
     }, sidekick.current_target())
+  end)
+
+  it("auto-attaches the only existing codex session target", function()
+    local attach_calls = 0
+    package.loaded["sidekick.codex"] = nil
+    package.loaded["sidekick.integration.codex"] = nil
+    package.loaded["sidekick"] = nil
+    package.loaded["sidekick.cli.state"] = {
+      get = function(filter)
+        if filter and filter.name == "codex" then
+          return {
+            {
+              session = {
+                id = "session-single",
+                cwd = "/tmp/one",
+              },
+            },
+          }
+        end
+        return {}
+      end,
+      attach = function(state)
+        attach_calls = attach_calls + 1
+        return state, true
+      end,
+    }
+    package.loaded["commentry.codex.adapters.sidekick"] = nil
+
+    local sidekick = require("commentry.codex.adapters.sidekick")
+    local seen = nil
+    sidekick.resolve_target_async(function(target, err_code, err_message)
+      seen = { target = target, err_code = err_code, err_message = err_message }
+    end)
+
+    assert.are.same(1, attach_calls)
+    assert.are.same(nil, seen.err_code)
+    assert.are.same({
+      session_id = "session-single",
+      workspace = "/tmp/one",
+    }, seen.target)
+  end)
+
+  it("prompts to choose codex session when multiple existing sessions are available", function()
+    local attach_calls = 0
+    local prompted = false
+    vim.ui.select = function(items, _, cb)
+      prompted = true
+      cb(items[2])
+    end
+    package.loaded["sidekick.codex"] = nil
+    package.loaded["sidekick.integration.codex"] = nil
+    package.loaded["sidekick"] = nil
+    package.loaded["sidekick.cli.state"] = {
+      get = function(filter)
+        if filter and filter.name == "codex" then
+          return {
+            { session = { id = "session-a", cwd = "/tmp/a" } },
+            { session = { id = "session-b", cwd = "/tmp/b" } },
+          }
+        end
+        return {}
+      end,
+      attach = function(state)
+        attach_calls = attach_calls + 1
+        return state, true
+      end,
+    }
+    package.loaded["commentry.codex.adapters.sidekick"] = nil
+
+    local sidekick = require("commentry.codex.adapters.sidekick")
+    local seen = nil
+    sidekick.resolve_target_async(function(target, err_code, err_message)
+      seen = { target = target, err_code = err_code, err_message = err_message }
+    end)
+
+    assert.is_true(prompted)
+    assert.are.same(1, attach_calls)
+    assert.are.same(nil, seen.err_code)
+    assert.are.same({
+      session_id = "session-b",
+      workspace = "/tmp/b",
+    }, seen.target)
+  end)
+
+  it("auto-selects the single codex session matching current cwd", function()
+    local attach_calls = 0
+    local prompted = false
+    vim.ui.select = function(_, _, _)
+      prompted = true
+    end
+    vim.fn.getcwd = function()
+      return "/tmp/b"
+    end
+    package.loaded["sidekick.codex"] = nil
+    package.loaded["sidekick.integration.codex"] = nil
+    package.loaded["sidekick"] = nil
+    package.loaded["sidekick.cli.ui.select"] = nil
+    package.preload["sidekick.cli.ui.select"] = function()
+      return {
+        select = function()
+          prompted = true
+        end,
+      }
+    end
+    package.loaded["sidekick.cli.state"] = {
+      get = function(filter)
+        if filter and filter.name == "codex" then
+          return {
+            { session = { id = "session-a", cwd = "/tmp/a" } },
+            { session = { id = "session-b", cwd = "/tmp/b" } },
+            { session = { id = "session-c", cwd = "/tmp/c" } },
+          }
+        end
+        return {}
+      end,
+      attach = function(state)
+        attach_calls = attach_calls + 1
+        return state, true
+      end,
+    }
+    package.loaded["commentry.codex.adapters.sidekick"] = nil
+
+    local sidekick = require("commentry.codex.adapters.sidekick")
+    local seen = nil
+    sidekick.resolve_target_async(function(target, err_code, err_message)
+      seen = { target = target, err_code = err_code, err_message = err_message }
+    end)
+
+    assert.are.same(1, attach_calls)
+    assert.is_false(prompted)
+    assert.are.same(nil, seen.err_code)
+    assert.are.same("session-b", seen.target.session_id)
   end)
 end)

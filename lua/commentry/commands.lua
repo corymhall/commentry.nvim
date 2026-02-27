@@ -270,7 +270,7 @@ function M.setup()
     end
 
     local ok_orchestrator, orchestrator = pcall(require, "commentry.codex.orchestrator")
-    if not ok_orchestrator or type(orchestrator.send_current_review) ~= "function" then
+    if not ok_orchestrator then
       Util.error({
         "Codex orchestrator is unavailable.",
         "Check plugin installation/runtimepath and retry :Commentry send-to-codex.",
@@ -278,19 +278,34 @@ function M.setup()
       return
     end
 
-    local result = orchestrator.send_current_review({})
-    if type(result) ~= "table" then
-      Util.error("Codex send failed: invalid orchestrator response.")
+    local function handle_result(result)
+      if type(result) ~= "table" then
+        Util.error("Codex send failed: invalid orchestrator response.")
+        return
+      end
+      if not result.ok then
+        report_send_failure(result)
+        return
+      end
+
+      local adapter = type(result.adapter) == "string" and result.adapter or "unknown"
+      local dispatched_items = type(result.dispatched_items) == "number" and result.dispatched_items or 0
+      Util.info(("Sent %d review item(s) to Codex via %s."):format(dispatched_items, adapter))
+    end
+
+    if type(orchestrator.send_current_review_async) == "function" then
+      orchestrator.send_current_review_async({}, handle_result)
       return
     end
-    if not result.ok then
-      report_send_failure(result)
+    if type(orchestrator.send_current_review) ~= "function" then
+      Util.error({
+        "Codex orchestrator is unavailable.",
+        "Check plugin installation/runtimepath and retry :Commentry send-to-codex.",
+      })
       return
     end
 
-    local adapter = type(result.adapter) == "string" and result.adapter or "unknown"
-    local dispatched_items = type(result.dispatched_items) == "number" and result.dispatched_items or 0
-    Util.info(("Sent %d review item(s) to Codex via %s."):format(dispatched_items, adapter))
+    handle_result(orchestrator.send_current_review({}))
   end)
 
   for _, module_name in ipairs(feature_modules) do

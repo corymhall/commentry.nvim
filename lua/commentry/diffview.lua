@@ -27,6 +27,26 @@ local function git_root()
 end
 
 ---@param root string
+---@return string|nil
+local function git_branch_id(root)
+  if type(root) ~= "string" or root == "" then
+    return nil
+  end
+
+  local branch = vim.fn.systemlist({ "git", "-C", root, "symbolic-ref", "--short", "HEAD" })[1]
+  if vim.v.shell_error == 0 and type(branch) == "string" and branch ~= "" then
+    return branch
+  end
+
+  local short = vim.fn.systemlist({ "git", "-C", root, "rev-parse", "--short", "HEAD" })[1]
+  if vim.v.shell_error == 0 and type(short) == "string" and short ~= "" then
+    return ("detached-%s"):format(short)
+  end
+
+  return nil
+end
+
+---@param root string
 ---@return boolean|nil, string|nil
 local function has_local_changes(root)
   local output = vim.fn.systemlist({ "git", "-C", root, "status", "--porcelain" })
@@ -336,9 +356,10 @@ function M.resolve_review_context(args, view)
   end
 
   local mode = revisions and #revisions > 0 and "commit_range" or "working_tree"
-  -- Keep a stable review scope across Diffview range lenses so draft comments
-  -- persist like GitHub review comments until anchors become outdated.
-  local context_id = ("%s::review"):format(root)
+  -- Keep a stable review scope across Diffview range lenses for a branch so
+  -- draft comments persist until anchors become outdated.
+  local branch_id = git_branch_id(root) or "unknown"
+  local context_id = ("%s::review::branch::%s"):format(root, branch_id)
   local revision_anchors = resolve_revision_anchors(root, revisions)
 
   local context = {

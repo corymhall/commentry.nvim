@@ -121,16 +121,16 @@ require("commentry").setup({
 ## Behavior Notes
 
 - Draft comments are persisted per review context under `~/.commentry/repos/<repo>/contexts/<context-id>/`.
-- Review context identity is stable per repository review scope (`<root>::review`), so comments persist across
-  different `:DiffviewOpen` range lenses until anchors become outdated by code changes.
+- Review context identity is branch-scoped (`<root>::review::branch::<branch-name>`), so comments remain stable across
+  different `:DiffviewOpen` range lenses on the same branch until anchors become outdated by code changes.
 - Add/edit/range comment actions open a floating multiline editor (`Enter` for newline, `Ctrl-s` to save, `q`/`Esc` in normal mode to cancel, `Tab` to cycle type).
 - Draft comment bodies are rendered as persistent boxed cards on commented lines, even when the cursor moves away.
 - Range comments render start/mid/end gutter signs (`╭`, `│`, `╰`) with subtle line tinting to show covered lines.
 - File reviewed state is tracked per context and rendered as a lightweight `[reviewed]` / `[unreviewed]` indicator in diff buffers.
 - Send flow is explicit: open/attach a review (`:Commentry open` or auto-attach), ensure Codex integration is enabled, then run
   `:Commentry send-to-codex`.
-- Adapter behavior is global/implicit in v1: the configured adapter resolves the currently attached session target.
-  A valid adapter runtime and attached target are required.
+- Adapter behavior is global/implicit in v1. `send-to-codex` discovers existing Sidekick Codex sessions:
+  auto-attaches when exactly one exists, auto-selects when exactly one matches current cwd, uses the Sidekick picker when multiple remain, and fails when none exist.
 - `send-to-codex` requires an attached active review context. Running it outside an attached review buffer/context fails.
 - Send is send-and-forget in v1: Commentry dispatches a compact human-readable payload (`COMMENTRY_REVIEW_V1`) once
   and reports success/failure in Neovim messages.
@@ -142,7 +142,8 @@ require("commentry").setup({
   Commentry creates `~/.commentry/repos/<repo>/contexts/<context-id>/commentry.json` lazily on first successful write
   (add/edit/delete comment, set type, toggle reviewed). If no writes happened in that context yet, the file is absent.
 - Wrong context:
-  review context is repository-scoped (`<root>::review`) and shared across diff ranges. Comments become stale/outdated
+  review context is branch-scoped (`<root>::review::branch::<branch-name>`) and shared across diff ranges on that branch.
+  Comments become stale/outdated
   when anchor reconciliation detects code drift. Use `:Commentry debug-store` to confirm the active context id/path.
-- Sidekick attached but send fails:
-  ensure a Codex Sidekick session is attached and run `:Commentry send-to-codex` from an attached review buffer/context.
+- Sidekick send target not found:
+  ensure at least one existing Codex Sidekick session is available, then run `:Commentry send-to-codex` from an attached review buffer/context.

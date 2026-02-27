@@ -1030,6 +1030,85 @@ describe("commentry command routing", function()
     assert.are.same("Sent 3 review item(s) to Codex via sidekick.", info_messages[1])
   end)
 
+  it("prefers async orchestrator send when available", function()
+    local async_calls = 0
+    local sync_calls = 0
+    local info_messages = {}
+    local error_messages = {}
+
+    vim.api.nvim_create_autocmd = function()
+      return 1
+    end
+    package.loaded["commentry.util"] = {
+      info = function(msg)
+        info_messages[#info_messages + 1] = msg
+      end,
+      error = function(msg)
+        error_messages[#error_messages + 1] = msg
+      end,
+      warn = function()
+        return
+      end,
+      debug = function()
+        return
+      end,
+    }
+    package.loaded["commentry.codex.orchestrator"] = {
+      send_current_review = function()
+        sync_calls = sync_calls + 1
+        return {
+          ok = true,
+          code = "OK",
+          adapter = "sync",
+          dispatched_items = 1,
+        }
+      end,
+      send_current_review_async = function(opts, cb)
+        async_calls = async_calls + 1
+        cb({
+          ok = true,
+          code = "OK",
+          adapter = "sidekick",
+          dispatched_items = 2,
+        })
+      end,
+    }
+    package.loaded["commentry.comments"] = {
+      list_comments = function()
+        return
+      end,
+      set_comment_type = function()
+        return
+      end,
+      export_comments = function()
+        return
+      end,
+      render_current_buffer = function()
+        return
+      end,
+    }
+    package.loaded["commentry.config"] = {
+      augroup = 1,
+      codex = { enabled = true },
+      diffview = { enabled = true },
+      keymaps = { add_comment = "mc", edit_comment = "me", delete_comment = "md", set_comment_type = "mt" },
+    }
+    package.loaded["commentry.diffview"] = {
+      open = function()
+        return true
+      end,
+    }
+
+    package.loaded["commentry.commands"] = nil
+    local Commands = require("commentry.commands")
+    Commands.cmd({ args = "send-to-codex" })
+
+    assert.are.same(1, async_calls)
+    assert.are.same(0, sync_calls)
+    assert.are.same(0, #error_messages)
+    assert.are.same("Sent 2 review item(s) to Codex via sidekick.", info_messages[1])
+  end)
+
   it("shows actionable failure when send-to-codex has no target", function()
     local error_messages = {}
 
