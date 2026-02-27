@@ -58,10 +58,11 @@ describe("commentry config", function()
     assert.are.same("reuse", Config.codex.behavior.open)
   end)
 
-  it("defines explicit defaults for all supported keymap actions", function()
+  it("defines explicit defaults for all supported keymap actions after setup({})", function()
     local Config = require("commentry.config")
+    Config.setup({})
 
-    assert.are.same({
+    local expected = {
       add_comment = "mc",
       add_range_comment = "mc",
       edit_comment = "me",
@@ -69,7 +70,12 @@ describe("commentry config", function()
       set_comment_type = "mt",
       toggle_file_reviewed = "mr",
       next_unreviewed_file = "]r",
-    }, Config.keymaps)
+    }
+
+    for key, value in pairs(expected) do
+      assert.is_not_nil(Config.keymaps[key])
+      assert.are.same(value, Config.keymaps[key])
+    end
   end)
 
   it("preserves unrelated keymap defaults on partial override", function()
@@ -148,6 +154,7 @@ describe("commentry config", function()
     assert.are.same(1, #warns)
     assert.is_truthy(warns[1]:find("keymaps.add_comment", 1, true))
     assert.is_truthy(warns[1]:find('""', 1, true))
+    assert.is_truthy(warns[1]:find("expected non%-empty string"))
     assert.is_truthy(warns[1]:find("non%-empty string"))
   end)
 
@@ -172,7 +179,7 @@ describe("commentry config", function()
     assert.are.same(0, #warns)
   end)
 
-  it("warns and restores default when keymap override has invalid type", function()
+  it("warns and restores defaults when keymap overrides have invalid types", function()
     local warns = {}
     package.loaded["commentry.util"] = {
       warn = function(msg)
@@ -184,14 +191,19 @@ describe("commentry config", function()
     Config.setup({
       keymaps = {
         edit_comment = false,
+        delete_comment = {},
       },
     })
 
     assert.are.same("me", Config.keymaps.edit_comment)
-    assert.are.same(1, #warns)
+    assert.are.same("md", Config.keymaps.delete_comment)
+    assert.are.same(2, #warns)
     assert.is_truthy(warns[1]:find("keymaps.edit_comment", 1, true))
     assert.is_truthy(warns[1]:find("false", 1, true))
-    assert.is_truthy(warns[1]:find("non%-empty string"))
+    assert.is_truthy(warns[1]:find("expected non%-empty string"))
+    assert.is_truthy(warns[2]:find("keymaps.delete_comment", 1, true))
+    assert.is_truthy(warns[2]:find("{}", 1, true))
+    assert.is_truthy(warns[2]:find("expected non%-empty string"))
   end)
 
   it("warns and restores default when keymap string format is unsupported", function()
