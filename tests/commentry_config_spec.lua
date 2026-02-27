@@ -55,6 +55,54 @@ describe("commentry config", function()
     assert.are.same("reuse", Config.codex.behavior.open)
   end)
 
+  it("defines explicit defaults for all supported keymap actions", function()
+    local Config = require("commentry.config")
+
+    assert.are.same({
+      add_comment = "mc",
+      add_range_comment = "mc",
+      edit_comment = "me",
+      delete_comment = "md",
+      set_comment_type = "mt",
+      toggle_file_reviewed = "mr",
+      next_unreviewed_file = "]r",
+    }, Config.keymaps)
+  end)
+
+  it("preserves unrelated keymap defaults on partial override", function()
+    local Config = require("commentry.config")
+    Config.setup({
+      keymaps = {
+        edit_comment = "gce",
+      },
+    })
+
+    assert.are.same("mc", Config.keymaps.add_comment)
+    assert.are.same("mc", Config.keymaps.add_range_comment)
+    assert.are.same("gce", Config.keymaps.edit_comment)
+    assert.are.same("md", Config.keymaps.delete_comment)
+    assert.are.same("mt", Config.keymaps.set_comment_type)
+    assert.are.same("mr", Config.keymaps.toggle_file_reviewed)
+    assert.are.same("]r", Config.keymaps.next_unreviewed_file)
+  end)
+
+  it("normalizes malformed keymaps overrides back to defaults", function()
+    local Config = require("commentry.config")
+    Config.setup({
+      keymaps = "invalid",
+    })
+
+    assert.are.same({
+      add_comment = "mc",
+      add_range_comment = "mc",
+      edit_comment = "me",
+      delete_comment = "md",
+      set_comment_type = "mt",
+      toggle_file_reviewed = "mr",
+      next_unreviewed_file = "]r",
+    }, Config.keymaps)
+  end)
+
   it("is idempotent across repeated setup calls", function()
     local Config = require("commentry.config")
     local opts = {

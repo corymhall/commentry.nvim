@@ -93,6 +93,33 @@ local defaults = {
   },
 }
 
+local keymap_keys = {
+  "add_comment",
+  "add_range_comment",
+  "edit_comment",
+  "delete_comment",
+  "set_comment_type",
+  "toggle_file_reviewed",
+  "next_unreviewed_file",
+}
+
+---@param keymaps unknown
+---@return commentry.Keymaps
+local function normalize_keymaps(keymaps)
+  local normalized = vim.deepcopy(defaults.keymaps)
+  if type(keymaps) ~= "table" then
+    return normalized
+  end
+
+  for _, key in ipairs(keymap_keys) do
+    if keymaps[key] ~= nil then
+      normalized[key] = keymaps[key]
+    end
+  end
+
+  return normalized
+end
+
 local state_dir = vim.fn.stdpath("state") .. "/commentry"
 local config = vim.deepcopy(defaults) --[[@as commentry.Config]]
 M.augroup = vim.api.nvim_create_augroup("commentry", { clear = true })
@@ -105,6 +132,7 @@ end
 ---@param opts? commentry.Config
 function M.setup(opts)
   config = vim.tbl_deep_extend("force", {}, vim.deepcopy(defaults), opts or {})
+  config.keymaps = normalize_keymaps(config.keymaps)
 
   vim.api.nvim_create_user_command("Commentry", function(args)
     require("commentry.commands").cmd(args)
