@@ -34,7 +34,7 @@ The target audience is existing Commentry users reviewing diffs in Neovim. Core 
 | 4 | Discoverability expectations? | Provide clear docs/help and command parity. | Minimal-path default |
 | 5 | Consistent across sessions/repos? | Yes, deterministic config behavior across sessions/repos. | Minimal-path default |
 | 6 | Preserve personal keybinding habits? | Yes, user overrides are first-class. | Minimal-path default |
-| 7 | Disable individual mappings? | No; remap-only in v1 with non-empty string mappings required. Empty-string disable is not part of the v1 contract. | Human choice |
+| 7 | Disable individual mappings? | Selective disable is supported in v1 for `toggle_file_reviewed` and `next_unreviewed_file` via empty string; other mappings are remap-only. | Human choice |
 | 8 | Behavior when mapping cannot be used? | Show actionable error/warn message; no silent failure. | Minimal-path default |
 | 9 | Distinct mappings for similar actions? | Yes for risky/semantically different actions; avoid destructive collisions. | Minimal-path default |
 | 10 | Beginner-safe and power-user efficient defaults? | Yes, preserve current concise defaults while allowing overrides. | Minimal-path default |
@@ -48,7 +48,7 @@ The target audience is existing Commentry users reviewing diffs in Neovim. Core 
 | 18 | Recovery from broken routine? | Update config and retry immediately; clear messaging on invalid mapping use. | Minimal-path default |
 | 19 | Global once or per-project evolution? | Global configuration model (plugin setup), repo-agnostic behavior. | Minimal-path default |
 | 20 | One-week success criteria? | Users can execute all review actions via preferred mappings without confusion. | Minimal-path default |
-| 21 | Intentionally unmapped functions? | Out of scope in v1 due remap-only decision. | Decision consequence |
+| 21 | Intentionally unmapped functions? | Supported only for `toggle_file_reviewed` and `next_unreviewed_file` in v1 via empty-string disable. | Decision consequence |
 | 22 | Similar mappings forgotten/distinguished poorly? | Keep defaults semantically distinct; docs reinforce intent. | Minimal-path default |
 | 23 | Shared mapping import mismatch? | Users can override per function in setup. | Minimal-path default |
 | 24 | Multiple keyboard layout switching? | Allow simple per-function remapping without assumptions about physical layout. | Minimal-path default |
@@ -99,7 +99,7 @@ This preserves current plugin structure and keeps behavior deterministic.
 **Component 3: Command Parity / Fallback Path**
 - Responsibility: ensure command-based workflows still work independent of mappings.
 - Interface: `:Commentry <subcommand>` registry.
-- Key considerations: mappings enhance UX but never become sole access path.
+- Key considerations: mappings enhance UX; fallback claims are limited to actions with existing `:Commentry` commands.
 
 ### Data Model
 
@@ -128,7 +128,9 @@ No persistence schema or storage format changes.
 - Invalid or conflicting user choices are not auto-resolved by this feature; users keep control.
 - If an action cannot run due to context/state, existing action-level error messaging remains authoritative.
 - Never fail silently when mapped actions are invoked and cannot complete.
-- Empty-string keymap values are treated as invalid v1 configuration for remapped functions and should raise actionable feedback rather than silently becoming disable semantics.
+- Keymap validation uses setup-time warnings plus runtime guard behavior:
+  - Setup-time: warn for unsupported empty-string values on remap-only actions.
+  - Runtime: keep attach-time guards for optional mappings and emit actionable warnings for invalid mappings.
 
 ### Integration Points
 
@@ -144,9 +146,9 @@ No persistence schema or storage format changes.
 1. All seven supported functions are configurable through `Config.keymaps`.
 2. Default keymaps remain defined for all seven functions.
 3. Overriding one function mapping does not alter others.
-4. Remap-only behavior is preserved (disable-via-empty-string is explicitly out of contract for v1).
+4. Remap-only behavior is preserved for core comment actions; selective empty-string disable remains supported only for `toggle_file_reviewed` and `next_unreviewed_file`.
 5. Mappings attach only for commentry diffview buffers.
-6. Underlying commands remain available as fallback behavior.
+6. Underlying commands remain available as fallback behavior for actions that already expose `:Commentry` subcommands.
 7. Documentation clearly lists configurable functions and override examples.
 8. Regression coverage verifies buffer-local attachment and default keymap preservation when no remaps are provided.
 
@@ -158,10 +160,11 @@ No persistence schema or storage format changes.
    - Overriding one mapping does not mutate unrelated mappings.
    - `maybe_attach_keymaps(bufnr)` only binds keys when `commentry_diffview` is true.
    - Existing defaults still bind when no user remaps are provided.
+   - Optional empty-string disable behavior remains scoped to `toggle_file_reviewed` and `next_unreviewed_file`.
 3. Manual smoke checks:
    - Open a diffview review buffer and confirm configured mappings execute expected commands.
    - Open a non-diffview buffer and confirm commentry keymaps are not attached.
-   - Verify command fallback (`:Commentry toggle-file-reviewed`, `:Commentry next-unreviewed`) still works when keymaps are remapped.
+   - Verify command fallback for existing command-backed actions (`:Commentry toggle-file-reviewed`, `:Commentry next-unreviewed`, `:Commentry set-comment-type`, `:Commentry add-range-comment`) still works when keymaps are remapped.
 
 ---
 
@@ -179,31 +182,40 @@ No persistence schema or storage format changes.
 - [ ] Should v2 add explicit per-function disable semantics in addition to remap?
 - [ ] Do we want a built-in `:Commentry help keymaps` quick-reference command?
 
-## Spec Review
+## Multi-Model Review
 
 **Reviewed:** 2026-02-27
-**Gaps identified:** 3
-**Gaps resolved:** 3
+**Models:** Codex
+**Issues Found:** 5 (0 critical, 2 high, 2 medium, 1 low)
 
-### Clarifications Added
+### Findings Addressed
 
-| Topic | Clarification |
+| # | Issue | Resolution |
 |---|---|
-| Verification mapping | Added explicit acceptance-to-verification checklist with concrete automated/manual checks. |
-| Remap-only semantics | v1 now explicitly requires non-empty string remaps; empty-string disable is out of contract. |
-| Regression guard | Added explicit regression requirement for buffer-local attach and default keymap preservation. |
+| 1 | Remap-only vs empty-string runtime behavior | Aligned spec with current selective disable behavior for `toggle_file_reviewed` and `next_unreviewed_file`. |
+| 2 | Missing validation policy for invalid mappings | Added setup-time warning + runtime guard strategy with actionable feedback. |
+| 3 | Command fallback criterion over-broad | Narrowed fallback criterion to existing command-backed actions. |
+| 4 | Verification gap for keymap attach behavior | Added explicit automated checks for diffview-only attach, default preservation, and scoped optional-disable behavior. |
+| 5 | Optional-key internal inconsistency | Unified wording across design/error handling/acceptance criteria. |
+
+### Ambiguities Resolved
+
+| Topic | Decision | Rationale |
+|---|---|---|
+| Empty-string mappings in v1 | Preserve selective disable for `toggle_file_reviewed` and `next_unreviewed_file`. | Matches current runtime behavior and avoids unnecessary breaking change. |
+| Invalid mapping handling | Setup-time warn + runtime guard. | Balances user guidance with resilient runtime behavior. |
+| Fallback command scope | Narrow to existing command surface. | Keeps v1 scope focused without adding unrelated command work. |
 
 ### Deferred Items
 
 | Item | Rationale | Revisit When |
 |---|---|---|
-| Per-function disable semantics | Keep v1 behavior narrowly scoped to remap-only. | v2 planning |
+| Full per-function disable semantics | Keep v1 behavior scoped to existing selective disable support only. | v2 planning |
 
 ---
 
 ## Next Steps
 
-- [ ] Stage 4 multimodal spec review.
 - [ ] Commit reviewed spec artifacts.
 
 ---
