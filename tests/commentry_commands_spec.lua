@@ -69,6 +69,289 @@ describe("commentry lifecycle hooks", function()
   end)
 end)
 
+describe("commentry keymap attachment", function()
+  local original_comments
+  local original_config
+  local original_diffview
+  local original_commands
+  local original_create_autocmd
+  local original_schedule
+  local original_keymap_set
+
+  before_each(function()
+    original_comments = package.loaded["commentry.comments"]
+    original_config = package.loaded["commentry.config"]
+    original_diffview = package.loaded["commentry.diffview"]
+    original_commands = package.loaded["commentry.commands"]
+    original_create_autocmd = vim.api.nvim_create_autocmd
+    original_schedule = vim.schedule
+    original_keymap_set = vim.keymap.set
+  end)
+
+  after_each(function()
+    package.loaded["commentry.comments"] = original_comments
+    package.loaded["commentry.config"] = original_config
+    package.loaded["commentry.diffview"] = original_diffview
+    package.loaded["commentry.commands"] = original_commands
+    vim.api.nvim_create_autocmd = original_create_autocmd
+    vim.schedule = original_schedule
+    vim.keymap.set = original_keymap_set
+  end)
+
+  it("attaches keymaps only for diffview buffers", function()
+    local autocmd
+    local mapped = {}
+    local bufnr = vim.api.nvim_get_current_buf()
+    vim.b[bufnr].commentry_diffview = false
+    vim.b[bufnr].commentry_keymaps = nil
+
+    vim.api.nvim_create_autocmd = function(_, opts)
+      if opts.pattern == "DiffviewDiffBufWinEnter" then
+        autocmd = opts
+      end
+      return 1
+    end
+    vim.schedule = function(cb)
+      cb()
+    end
+    vim.keymap.set = function(mode, lhs, _, opts)
+      mapped[#mapped + 1] = { mode = mode, lhs = lhs, opts = opts }
+    end
+
+    package.loaded["commentry.comments"] = {
+      add_comment = function()
+        return
+      end,
+      add_range_comment = function()
+        return
+      end,
+      edit_comment = function()
+        return
+      end,
+      delete_comment = function()
+        return
+      end,
+      set_comment_type = function()
+        return
+      end,
+      toggle_file_reviewed = function()
+        return
+      end,
+      next_unreviewed_file = function()
+        return
+      end,
+      list_comments = function()
+        return
+      end,
+      export_comments = function()
+        return
+      end,
+      render_current_buffer = function()
+        return
+      end,
+    }
+    package.loaded["commentry.config"] = {
+      augroup = 1,
+      diffview = { enabled = true },
+      keymaps = {
+        add_comment = "ga",
+        add_range_comment = "gr",
+        edit_comment = "ge",
+        delete_comment = "gd",
+        set_comment_type = "gt",
+        toggle_file_reviewed = "gf",
+        next_unreviewed_file = "gn",
+      },
+    }
+    package.loaded["commentry.diffview"] = { open = function() return true end }
+
+    package.loaded["commentry.commands"] = nil
+    local Commands = require("commentry.commands")
+    Commands.setup()
+    autocmd.callback()
+
+    assert.are.same(0, #mapped)
+    assert.is_nil(vim.b[bufnr].commentry_keymaps)
+  end)
+
+  it("attaches seven action keymaps once with add_range fallback", function()
+    local autocmd
+    local mapped = {}
+    local render_calls = 0
+    local bufnr = vim.api.nvim_get_current_buf()
+    vim.b[bufnr].commentry_diffview = true
+    vim.b[bufnr].commentry_keymaps = nil
+
+    vim.api.nvim_create_autocmd = function(_, opts)
+      if opts.pattern == "DiffviewDiffBufWinEnter" then
+        autocmd = opts
+      end
+      return 1
+    end
+    vim.schedule = function(cb)
+      cb()
+    end
+    vim.keymap.set = function(mode, lhs, _, opts)
+      mapped[#mapped + 1] = { mode = mode, lhs = lhs, desc = opts.desc, buffer = opts.buffer }
+    end
+
+    package.loaded["commentry.comments"] = {
+      add_comment = function()
+        return
+      end,
+      add_range_comment = function()
+        return
+      end,
+      edit_comment = function()
+        return
+      end,
+      delete_comment = function()
+        return
+      end,
+      set_comment_type = function()
+        return
+      end,
+      toggle_file_reviewed = function()
+        return
+      end,
+      next_unreviewed_file = function()
+        return
+      end,
+      list_comments = function()
+        return
+      end,
+      export_comments = function()
+        return
+      end,
+      render_current_buffer = function()
+        render_calls = render_calls + 1
+      end,
+    }
+    package.loaded["commentry.config"] = {
+      augroup = 1,
+      diffview = { enabled = true },
+      keymaps = {
+        add_comment = "ga",
+        edit_comment = "ge",
+        delete_comment = "gd",
+        set_comment_type = "gt",
+        toggle_file_reviewed = "gf",
+        next_unreviewed_file = "gn",
+      },
+    }
+    package.loaded["commentry.diffview"] = { open = function() return true end }
+
+    package.loaded["commentry.commands"] = nil
+    local Commands = require("commentry.commands")
+    Commands.setup()
+    autocmd.callback()
+    autocmd.callback()
+
+    assert.are.same(7, #mapped)
+    assert.are.same(2, render_calls)
+    assert.is_true(vim.b[bufnr].commentry_keymaps)
+
+    local by_desc = {}
+    for _, mapping in ipairs(mapped) do
+      by_desc[mapping.desc] = mapping
+    end
+    assert.are.same("ga", by_desc["Commentry add comment"].lhs)
+    assert.are.same("x", by_desc["Commentry add range comment"].mode)
+    assert.are.same("ga", by_desc["Commentry add range comment"].lhs)
+    assert.are.same("ge", by_desc["Commentry edit comment"].lhs)
+    assert.are.same("gd", by_desc["Commentry delete comment"].lhs)
+    assert.are.same("gt", by_desc["Commentry set comment type"].lhs)
+    assert.are.same("gf", by_desc["Commentry toggle file reviewed"].lhs)
+    assert.are.same("gn", by_desc["Commentry jump next unreviewed file"].lhs)
+  end)
+
+  it("treats empty disable as scoped to file review toggles", function()
+    local autocmd
+    local mapped = {}
+    local bufnr = vim.api.nvim_get_current_buf()
+    vim.b[bufnr].commentry_diffview = true
+    vim.b[bufnr].commentry_keymaps = nil
+
+    vim.api.nvim_create_autocmd = function(_, opts)
+      if opts.pattern == "DiffviewDiffBufWinEnter" then
+        autocmd = opts
+      end
+      return 1
+    end
+    vim.schedule = function(cb)
+      cb()
+    end
+    vim.keymap.set = function(mode, lhs, _, opts)
+      mapped[#mapped + 1] = { mode = mode, lhs = lhs, desc = opts.desc }
+    end
+
+    package.loaded["commentry.comments"] = {
+      add_comment = function()
+        return
+      end,
+      add_range_comment = function()
+        return
+      end,
+      edit_comment = function()
+        return
+      end,
+      delete_comment = function()
+        return
+      end,
+      set_comment_type = function()
+        return
+      end,
+      toggle_file_reviewed = function()
+        return
+      end,
+      next_unreviewed_file = function()
+        return
+      end,
+      list_comments = function()
+        return
+      end,
+      export_comments = function()
+        return
+      end,
+      render_current_buffer = function()
+        return
+      end,
+    }
+    package.loaded["commentry.config"] = {
+      augroup = 1,
+      diffview = { enabled = true },
+      keymaps = {
+        add_comment = "",
+        add_range_comment = "",
+        edit_comment = "",
+        delete_comment = "",
+        set_comment_type = "",
+        toggle_file_reviewed = "",
+        next_unreviewed_file = "",
+      },
+    }
+    package.loaded["commentry.diffview"] = { open = function() return true end }
+
+    package.loaded["commentry.commands"] = nil
+    local Commands = require("commentry.commands")
+    Commands.setup()
+    autocmd.callback()
+
+    assert.are.same(5, #mapped)
+    local lhs_by_desc = {}
+    for _, mapping in ipairs(mapped) do
+      lhs_by_desc[mapping.desc] = mapping.lhs
+    end
+    assert.are.same("mc", lhs_by_desc["Commentry add comment"])
+    assert.are.same("mc", lhs_by_desc["Commentry add range comment"])
+    assert.are.same("me", lhs_by_desc["Commentry edit comment"])
+    assert.are.same("md", lhs_by_desc["Commentry delete comment"])
+    assert.are.same("mt", lhs_by_desc["Commentry set comment type"])
+    assert.is_nil(lhs_by_desc["Commentry toggle file reviewed"])
+    assert.is_nil(lhs_by_desc["Commentry jump next unreviewed file"])
+  end)
+end)
+
 describe("commentry command routing", function()
   local original_comments
   local original_config

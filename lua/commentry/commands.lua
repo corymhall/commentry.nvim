@@ -6,6 +6,21 @@ local Util = require("commentry.util")
 local M = {}
 local initialized = false
 
+local keymap_defaults = {
+  add_comment = "mc",
+  add_range_comment = "mc",
+  edit_comment = "me",
+  delete_comment = "md",
+  set_comment_type = "mt",
+  toggle_file_reviewed = "mr",
+  next_unreviewed_file = "]r",
+}
+
+local keymap_empty_disable_allowed = {
+  toggle_file_reviewed = true,
+  next_unreviewed_file = true,
+}
+
 local feature_modules = {
   "commentry.diffview",
   "commentry.comments",
@@ -63,6 +78,33 @@ local function buffer_debug_info(bufnr)
   }
 end
 
+---@param value unknown
+---@return string|nil
+local function non_empty_keymap(value)
+  if type(value) ~= "string" or value == "" then
+    return nil
+  end
+  return value
+end
+
+---@param keymaps unknown
+---@param action string
+---@return string|nil
+local function resolve_keymap(keymaps, action)
+  local configured = type(keymaps) == "table" and keymaps[action] or nil
+  if configured == "" and keymap_empty_disable_allowed[action] then
+    return nil
+  end
+  local resolved = non_empty_keymap(configured)
+
+  if action == "add_range_comment" and not resolved then
+    local add_comment = type(keymaps) == "table" and keymaps.add_comment or nil
+    resolved = non_empty_keymap(add_comment)
+  end
+
+  return resolved or keymap_defaults[action]
+end
+
 ---@param bufnr integer
 local function maybe_attach_keymaps(bufnr)
   if type(bufnr) ~= "number" or not vim.api.nvim_buf_is_valid(bufnr) then
@@ -89,37 +131,34 @@ local function maybe_attach_keymaps(bufnr)
 
   Util.debug("Attaching comment keymaps", buffer_debug_info(bufnr))
 
-  vim.keymap.set("n", Config.keymaps.add_comment, function()
-    Comments.add_comment()
-  end, { buffer = bufnr, desc = "Commentry add comment" })
+  local keymap_specs = {
+    { action = "add_comment", mode = "n", desc = "Commentry add comment", handler = Comments.add_comment },
+    { action = "add_range_comment", mode = "x", desc = "Commentry add range comment", handler = Comments.add_range_comment },
+    { action = "edit_comment", mode = "n", desc = "Commentry edit comment", handler = Comments.edit_comment },
+    { action = "delete_comment", mode = "n", desc = "Commentry delete comment", handler = Comments.delete_comment },
+    { action = "set_comment_type", mode = "n", desc = "Commentry set comment type", handler = Comments.set_comment_type },
+    {
+      action = "toggle_file_reviewed",
+      mode = "n",
+      desc = "Commentry toggle file reviewed",
+      handler = Comments.toggle_file_reviewed,
+    },
+    {
+      action = "next_unreviewed_file",
+      mode = "n",
+      desc = "Commentry jump next unreviewed file",
+      handler = Comments.next_unreviewed_file,
+    },
+  }
 
-  local add_range_key = Config.keymaps.add_range_comment or Config.keymaps.add_comment
-  vim.keymap.set("x", add_range_key, function()
-    Comments.add_range_comment()
-  end, { buffer = bufnr, desc = "Commentry add range comment" })
-
-  vim.keymap.set("n", Config.keymaps.edit_comment, function()
-    Comments.edit_comment()
-  end, { buffer = bufnr, desc = "Commentry edit comment" })
-
-  vim.keymap.set("n", Config.keymaps.delete_comment, function()
-    Comments.delete_comment()
-  end, { buffer = bufnr, desc = "Commentry delete comment" })
-
-  vim.keymap.set("n", Config.keymaps.set_comment_type, function()
-    Comments.set_comment_type()
-  end, { buffer = bufnr, desc = "Commentry set comment type" })
-
-  if type(Config.keymaps.toggle_file_reviewed) == "string" and Config.keymaps.toggle_file_reviewed ~= "" then
-    vim.keymap.set("n", Config.keymaps.toggle_file_reviewed, function()
-      Comments.toggle_file_reviewed()
-    end, { buffer = bufnr, desc = "Commentry toggle file reviewed" })
-  end
-
-  if type(Config.keymaps.next_unreviewed_file) == "string" and Config.keymaps.next_unreviewed_file ~= "" then
-    vim.keymap.set("n", Config.keymaps.next_unreviewed_file, function()
-      Comments.next_unreviewed_file()
-    end, { buffer = bufnr, desc = "Commentry jump next unreviewed file" })
+  for _, spec in ipairs(keymap_specs) do
+    local key = resolve_keymap(Config.keymaps, spec.action)
+    if key then
+      local handler = spec.handler
+      vim.keymap.set(spec.mode, key, function()
+        handler()
+      end, { buffer = bufnr, desc = spec.desc })
+    end
   end
 
   Comments.render_current_buffer()
