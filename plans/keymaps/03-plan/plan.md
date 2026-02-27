@@ -30,25 +30,11 @@ Delivery is phased to maximize parallelism after shared foundations are set. Pha
 
 ---
 
-## Shared Abstractions
+## Implementation Contracts
 
-### 1. Keymap Validation Rules
-- **Name:** Keymap validation rules
-- **Location:** `lua/commentry/config.lua`
-- **Purpose:** Enforce/validate accepted `keymaps` input shape and selective-empty semantics during setup.
-- **Consumers:** Phase 1 contract work, Phase 2 runtime attach assumptions, Phase 3 config tests.
-
-### 2. Attach Behavior Contract
-- **Name:** Diffview-only/idempotent attach contract
-- **Location:** `lua/commentry/commands.lua` (`maybe_attach_keymaps`)
-- **Purpose:** Single authoritative mapping attach path with explicit guards and fallback behavior.
-- **Consumers:** Phase 2 runtime work, Phase 3 command/attach tests.
-
-### 3. Documentation Contract for Keymaps
-- **Name:** User keymap matrix + override guidance
-- **Location:** `README.md`, `doc/commentry.txt`
-- **Purpose:** Make configurable actions, defaults, remap behavior, and scoped disable behavior explicit.
-- **Consumers:** Phase 4 docs and manual verification.
+- `lua/commentry/config.lua` remains the single contract for keymap schema/defaults and setup-time validation.
+- `lua/commentry/commands.lua` (`maybe_attach_keymaps`) remains the single runtime attach path for diffview-only/idempotent bindings and fallback behavior.
+- `README.md` and `doc/commentry.txt` remain the user-facing contract for keymap defaults, remaps, and selective disable semantics.
 
 ---
 
@@ -83,7 +69,9 @@ Delivery is phased to maximize parallelism after shared foundations are set. Pha
   - Other invalid values warn with actionable message; do not silently fail.
 - **Acceptance criteria:**
   - [ ] Unsupported empty-string values trigger setup warning.
+  - [ ] Invalid non-empty keymap values (wrong type/unsupported value) trigger actionable setup warnings.
   - [ ] Runtime remains resilient (plugin still loads with warnings).
+  - [ ] Warning behavior is explicitly verifiable (no silent failure path for invalid mappings).
 - **Dependencies:** Task 1.1
 
 #### Phase 1 Exit Criteria
@@ -120,9 +108,11 @@ Delivery is phased to maximize parallelism after shared foundations are set. Pha
   - Modify: `lua/commentry/commands.lua` (only if corrections are needed to maintain parity).
 - **Key details:**
   - Command-backed actions include existing subcommands such as `toggle-file-reviewed`, `next-unreviewed`, `set-comment-type`, `add-range-comment`.
+  - Treat `:Commentry` subcommand registration in `lua/commentry/commands.lua` as source of truth for fallback claims.
   - Do not expand scope by adding new command surfaces unless required by updated spec.
 - **Acceptance criteria:**
-  - [ ] Runtime and docs claims align with actual command registry.
+  - [ ] Runtime and docs claims align with actual `:Commentry` subcommand registry entries.
+  - [ ] Verification records which registry entries back each documented fallback claim.
   - [ ] No unintended command-surface regressions.
 - **Dependencies:** Task 2.1
 
@@ -147,6 +137,7 @@ Delivery is phased to maximize parallelism after shared foundations are set. Pha
   - Assert all seven defaults exist.
   - Assert changing one keymap entry does not mutate others.
   - Assert validation warnings for unsupported empty-string usage.
+  - Assert validation warnings for invalid non-empty keymap values.
 - **Acceptance criteria:**
   - [ ] Tests fail before behavior and pass after behavior.
   - [ ] Assertions cover defaults, partial override, and validation scope.
@@ -223,8 +214,8 @@ Delivery is phased to maximize parallelism after shared foundations are set. Pha
 
 ### Error Handling
 - Use existing `lua/commentry/util.lua` messaging (`warn`/`error`) for setup/runtime feedback.
-- Setup-time warnings for unsupported keymap values (especially unsupported empty disables).
-- Keep runtime guards in attach/action paths; no silent failures on invalid invocation paths.
+- Setup-time warnings for unsupported keymap values (including unsupported empty disables and invalid non-empty values).
+- Keep runtime guards in attach/action paths, and ensure invalid mapping paths surface actionable user feedback instead of silent skips.
 
 ### Testing Strategy
 - Extend `tests/commentry_config_spec.lua` for contract/default/override/validation behavior.
@@ -251,16 +242,19 @@ No migration needed. Keymap behavior is runtime configuration only; no store sch
 
 ## Spec Coverage Matrix
 
+This matrix is the canonical spec-to-plan map for implementation. `plan-review.md`
+is a point-in-time audit and should reference this matrix rather than duplicate it.
+
 | Spec Section | Plan Section | Phase |
 |-------------|-------------|-------|
 | Overview | Overview; Architecture Decisions | 1-4 |
 | Scope Questions & Answers | Architecture Decisions; Phase 1.2; Phase 2.2; Phase 4.1 | 1,2,4 |
 | Design: Architecture Overview | Architecture Decisions; Phase 1; Phase 2 | 1,2 |
-| Design: Components | Shared Abstractions; Phase 1; Phase 2 | 1,2 |
+| Design: Components | Implementation Contracts; Phase 1; Phase 2 | 1,2 |
 | Design: Data Model | Architecture Decisions (Persistence strategy); Migration | 1-4 |
 | Design: User Flows | Phase 2.1; Phase 4.2 | 2,4 |
 | Design: Error Handling | Cross-Cutting Concerns: Error Handling; Phase 1.2 | 1 |
-| Design: Integration Points | Key Files Reference; Tasks across Phases 1-4 | 1-4 |
+| Design: Integration Points | Appendix: Key File Paths; Tasks across Phases 1-4 | 1-4 |
 | Acceptance Criteria (1-8) | Tasks 1.1, 1.2, 2.1, 2.2, 3.1, 3.2, 4.1, 4.2 | 1-4 |
 | Verification Checklist | Phase 3.3; Phase 4.2 | 3,4 |
 | Out of Scope | Architecture Decisions (fallback scope/persistence); task scoping notes | 1-4 |
@@ -289,4 +283,3 @@ No migration needed. Keymap behavior is runtime configuration only; no store sch
 | `tests/commentry_commands_spec.lua` | 3 | Diffview-only attach/idempotence/selective-disable regression coverage |
 | `README.md` | 4 | Keymap matrix, remap examples, scoped disable docs |
 | `doc/commentry.txt` | 4 | Vim help updates for keymaps and fallback behavior |
-
