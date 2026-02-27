@@ -1,5 +1,6 @@
 ---@class commentry.config: commentry.Config
 local M = {}
+local Util = require("commentry.util")
 
 M.ns = vim.api.nvim_create_namespace("commentry")
 
@@ -11,6 +12,7 @@ M.ns = vim.api.nvim_create_namespace("commentry")
 ---@field set_comment_type string
 ---@field toggle_file_reviewed string
 ---@field next_unreviewed_file string
+---@field send_to_codex string
 
 ---@class commentry.StoreConfig
 ---@field filename string
@@ -61,6 +63,7 @@ local defaults = {
     set_comment_type = "mt",
     toggle_file_reviewed = "mr",
     next_unreviewed_file = "]r",
+    send_to_codex = "ms",
   },
   comment_types = { "note", "suggestion", "issue", "praise" },
   default_comment_type = "note",
@@ -93,6 +96,72 @@ local defaults = {
   },
 }
 
+-- Canonical defaults shared across setup normalization and runtime fallback.
+M.default_keymaps = vim.deepcopy(defaults.keymaps)
+
+local keymap_keys = {
+  "add_comment",
+  "add_range_comment",
+  "edit_comment",
+  "delete_comment",
+  "set_comment_type",
+  "toggle_file_reviewed",
+  "next_unreviewed_file",
+  "send_to_codex",
+}
+
+local keymap_empty_allowed = {
+  toggle_file_reviewed = true,
+  next_unreviewed_file = true,
+}
+
+---@param value string
+---@return boolean
+local function is_valid_keymap_format(value)
+  if value:match("^%s*$") then
+    return false
+  end
+  if value:find("[\n\r]") then
+    return false
+  end
+  return true
+end
+
+---@param action string
+---@param provided unknown
+---@param expected string
+local function warn_keymap_validation(action, provided, expected)
+  Util.warn(("commentry setup: keymaps.%s=%s is invalid; expected %s"):format(action, vim.inspect(provided), expected))
+end
+
+---@param keymaps unknown
+---@return commentry.Keymaps
+local function normalize_keymaps(keymaps)
+  local normalized = vim.deepcopy(defaults.keymaps)
+  if type(keymaps) ~= "table" then
+    return normalized
+  end
+
+  for _, key in ipairs(keymap_keys) do
+    local value = keymaps[key]
+    if value ~= nil then
+      local allow_empty = keymap_empty_allowed[key] == true
+      local expected_shape = allow_empty and 'string (use "" to disable)' or "non-empty string"
+      if type(value) ~= "string" then
+        warn_keymap_validation(key, value, expected_shape)
+      elseif value == "" and not allow_empty then
+        warn_keymap_validation(key, value, expected_shape)
+      elseif value ~= "" and not is_valid_keymap_format(value) then
+        warn_keymap_validation(key, value, expected_shape)
+      else
+        normalized[key] = value
+      end
+    end
+  end
+
+  return normalized
+end
+
 local state_dir = vim.fn.stdpath("state") .. "/commentry"
 local config = vim.deepcopy(defaults) --[[@as commentry.Config]]
 M.augroup = vim.api.nvim_create_augroup("commentry", { clear = true })
@@ -105,6 +174,7 @@ end
 ---@param opts? commentry.Config
 function M.setup(opts)
   config = vim.tbl_deep_extend("force", {}, vim.deepcopy(defaults), opts or {})
+  config.keymaps = normalize_keymaps(config.keymaps)
 
   vim.api.nvim_create_user_command("Commentry", function(args)
     require("commentry.commands").cmd(args)
