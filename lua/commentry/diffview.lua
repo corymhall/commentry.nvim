@@ -1,9 +1,7 @@
 local M = {}
 
 local Config = require("commentry.config")
-local hover_ns = vim.api.nvim_create_namespace("commentry-hover-preview")
 local file_review_ns = vim.api.nvim_create_namespace("commentry-file-review")
-local hover_attached = {}
 local uv = vim.uv or vim.loop
 local ROOT_CANDIDATE_KEYS = { "git_root", "toplevel", "root", "cwd", "path" }
 local view_context_by_tabpage = {}
@@ -389,54 +387,6 @@ local function sync_comments_for_view()
   if type(comments.render_current_buffer) == "function" then
     comments.render_current_buffer()
   end
-  if type(comments.refresh_hover_preview) == "function" then
-    comments.refresh_hover_preview()
-  end
-end
-
----@param bufnr integer
-local function is_diff_buffer(bufnr)
-  if type(bufnr) ~= "number" or not vim.api.nvim_buf_is_valid(bufnr) then
-    return false
-  end
-  local is_diff = vim.b[bufnr].commentry_diffview
-  if is_diff == nil then
-    local ok, value = pcall(vim.api.nvim_buf_get_var, bufnr, "commentry_diffview")
-    if ok then
-      is_diff = value
-    end
-  end
-  return is_diff == true
-end
-
---- refresh hover for current buffer.
-local function refresh_hover_for_current_buffer()
-  local bufnr = vim.api.nvim_get_current_buf()
-  if not is_diff_buffer(bufnr) then
-    M.clear_hover_preview(bufnr)
-    return
-  end
-  local ok, comments = pcall(require, "commentry.comments")
-  if not ok or type(comments.refresh_hover_preview) ~= "function" then
-    M.clear_hover_preview(bufnr)
-    return
-  end
-  comments.refresh_hover_preview()
-end
-
----@param bufnr integer
-local function ensure_hover_autocmd(bufnr)
-  if type(bufnr) ~= "number" or hover_attached[bufnr] then
-    return
-  end
-  hover_attached[bufnr] = true
-  vim.api.nvim_create_autocmd({ "CursorMoved", "CursorHold" }, {
-    group = Config.augroup,
-    buffer = bufnr,
-    callback = function()
-      refresh_hover_for_current_buffer()
-    end,
-  })
 end
 
 ---@return boolean
@@ -491,7 +441,6 @@ function M.mark_current_buffer()
     return false
   end
   mark_buffer(context.bufnr)
-  ensure_hover_autocmd(context.bufnr)
   return true
 end
 
@@ -500,6 +449,7 @@ function M.setup()
   if not Config.diffview.auto_attach then
     return
   end
+  M.ensure_highlights()
   vim.api.nvim_create_autocmd("User", {
     group = Config.augroup,
     pattern = "DiffviewViewPostLayout",
@@ -658,6 +608,228 @@ function M.focus_file(view, path)
   return false, "unable_to_focus_file"
 end
 
+local TYPE_LABEL = {
+  note = "NOTE",
+  suggestion = "SUGGESTION",
+  issue = "ISSUE",
+  praise = "PRAISE",
+}
+
+local TYPE_HL = {
+  note = { border = "CommentryBorderNote", tag = "CommentryTypeNote" },
+  suggestion = { border = "CommentryBorderSuggestion", tag = "CommentryTypeSuggestion" },
+  issue = { border = "CommentryBorderIssue", tag = "CommentryTypeIssue" },
+  praise = { border = "CommentryBorderPraise", tag = "CommentryTypePraise" },
+}
+
+local TYPE_PRIORITY = {
+  issue = 4,
+  suggestion = 3,
+  note = 2,
+  praise = 1,
+}
+
+---@return table
+local function comment_card_config()
+  local cfg = (((Config.diffview or {}).comment_cards) or {})
+  return {
+    max_width = math.max(24, tonumber(cfg.max_width) or 88),
+    max_body_lines = math.max(1, tonumber(cfg.max_body_lines) or 8),
+    show_markers = cfg.show_markers ~= false,
+  }
+end
+
+---@return table
+local function comment_range_config()
+  local cfg = (((Config.diffview or {}).comment_ranges) or {})
+  return {
+    enabled = cfg.enabled ~= false,
+    line_highlight = cfg.line_highlight ~= false,
+  }
+end
+
+---@param comment_type string
+---@return table
+local function type_hl(comment_type)
+  return TYPE_HL[comment_type] or TYPE_HL.note
+end
+
+---@param comment_type string
+---@return string
+local function type_label(comment_type)
+  return TYPE_LABEL[comment_type] or comment_type:upper()
+end
+
+---@param comment table
+---@return integer
+local function line_start(comment)
+  return comment.line_start or comment.line_number or 1
+end
+
+---@param comment table
+---@return integer
+local function line_end(comment)
+  return comment.line_end or line_start(comment)
+end
+
+---@param comment table
+---@return string
+local function line_label(comment)
+  local first = line_start(comment)
+  local last = line_end(comment)
+  if last <= first then
+    return ("L%d"):format(first)
+  end
+  return ("L%d-L%d"):format(first, last)
+end
+
+---@param text string
+---@param max_width integer
+---@return string[]
+local function wrap_text(text, max_width)
+  local limit = math.max(12, max_width)
+  if #text <= limit then
+    return { text }
+  end
+  local out = {}
+  local start = 1
+  while start <= #text do
+    out[#out + 1] = text:sub(start, start + limit - 1)
+    start = start + limit
+  end
+  return out
+end
+
+---@param by_type table<string, integer>
+---@return string
+local function marker_label(by_type)
+  local types = vim.tbl_keys(by_type)
+  table.sort(types)
+  if #types == 1 then
+    local only_type = types[1]
+    local count = by_type[only_type]
+    if count == 1 then
+      return ("[%s]"):format(only_type)
+    end
+    return ("[%s:%d]"):format(only_type, count)
+  end
+  local pieces = {}
+  for _, comment_type in ipairs(types) do
+    local count = by_type[comment_type]
+    if count == 1 then
+      pieces[#pieces + 1] = comment_type
+    else
+      pieces[#pieces + 1] = ("%s:%d"):format(comment_type, count)
+    end
+  end
+  return ("[%s]"):format(table.concat(pieces, ","))
+end
+
+---@param comment table
+---@param cfg table
+---@return table[]
+local function card_lines_for_comment(comment, cfg)
+  local comment_type = comment.comment_type or "note"
+  local hl = type_hl(comment_type)
+  local max_body_width = math.max(12, cfg.max_width - 6)
+  local range = line_label(comment)
+  local header = ("[%s] %s"):format(type_label(comment_type), range)
+  local lines = {
+    { { "  ╭─ ", hl.border }, { header, hl.tag } },
+  }
+
+  local body_lines = vim.split(comment.body or "", "\n", { plain = true })
+  if #body_lines == 0 then
+    body_lines = { "" }
+  end
+  local rendered = 0
+  for _, body_line in ipairs(body_lines) do
+    for _, segment in ipairs(wrap_text(body_line, max_body_width)) do
+      if rendered >= cfg.max_body_lines then
+        break
+      end
+      lines[#lines + 1] = { { "  │ ", hl.border }, { segment, "CommentryBody" } }
+      rendered = rendered + 1
+    end
+    if rendered >= cfg.max_body_lines then
+      break
+    end
+  end
+  if rendered == cfg.max_body_lines and #body_lines > 0 then
+    lines[#lines + 1] = { { "  │ ", hl.border }, { "...", "CommentryBody" } }
+  end
+
+  lines[#lines + 1] = { { "  ╰" .. string.rep("─", math.max(10, #header + 1)), hl.border } }
+  return lines
+end
+
+function M.ensure_highlights()
+  pcall(vim.api.nvim_set_hl, 0, "CommentryMarker", { link = "Comment" })
+  pcall(vim.api.nvim_set_hl, 0, "CommentryBody", { link = "Comment" })
+  pcall(vim.api.nvim_set_hl, 0, "CommentryBorderNote", { link = "Comment" })
+  pcall(vim.api.nvim_set_hl, 0, "CommentryTypeNote", { link = "Comment" })
+  pcall(vim.api.nvim_set_hl, 0, "CommentryBorderSuggestion", { link = "DiagnosticHint" })
+  pcall(vim.api.nvim_set_hl, 0, "CommentryTypeSuggestion", { link = "DiagnosticHint" })
+  pcall(vim.api.nvim_set_hl, 0, "CommentryBorderIssue", { link = "DiagnosticError" })
+  pcall(vim.api.nvim_set_hl, 0, "CommentryTypeIssue", { link = "DiagnosticError" })
+  pcall(vim.api.nvim_set_hl, 0, "CommentryBorderPraise", { link = "DiagnosticOk" })
+  pcall(vim.api.nvim_set_hl, 0, "CommentryTypePraise", { link = "DiagnosticOk" })
+  pcall(vim.api.nvim_set_hl, 0, "CommentryRangeLineNote", { link = "CursorLine" })
+  pcall(vim.api.nvim_set_hl, 0, "CommentryRangeLineSuggestion", { link = "CursorLine" })
+  pcall(vim.api.nvim_set_hl, 0, "CommentryRangeLineIssue", { link = "CursorLine" })
+  pcall(vim.api.nvim_set_hl, 0, "CommentryRangeLinePraise", { link = "CursorLine" })
+  pcall(vim.api.nvim_set_hl, 0, "CommentryRangeSignNote", { link = "CommentryBorderNote" })
+  pcall(vim.api.nvim_set_hl, 0, "CommentryRangeSignSuggestion", { link = "CommentryBorderSuggestion" })
+  pcall(vim.api.nvim_set_hl, 0, "CommentryRangeSignIssue", { link = "CommentryBorderIssue" })
+  pcall(vim.api.nvim_set_hl, 0, "CommentryRangeSignPraise", { link = "CommentryBorderPraise" })
+end
+
+---@param comment_type string
+---@return string
+local function range_sign_hl(comment_type)
+  local suffix = (comment_type == "issue" or comment_type == "suggestion" or comment_type == "praise") and comment_type
+    or "note"
+  return "CommentryRangeSign" .. suffix:sub(1, 1):upper() .. suffix:sub(2)
+end
+
+---@param comment_type string
+---@return string
+local function range_line_hl(comment_type)
+  local suffix = (comment_type == "issue" or comment_type == "suggestion" or comment_type == "praise") and comment_type
+    or "note"
+  return "CommentryRangeLine" .. suffix:sub(1, 1):upper() .. suffix:sub(2)
+end
+
+---@param kind string
+---@return string
+local function range_sign_text(kind)
+  if kind == "start" then
+    return "╭"
+  end
+  if kind == "end" then
+    return "╰"
+  end
+  if kind == "single" then
+    return "●"
+  end
+  return "│"
+end
+
+---@param existing table|nil
+---@param candidate table
+---@return table
+local function preferred_decoration(existing, candidate)
+  if not existing then
+    return candidate
+  end
+  local existing_priority = TYPE_PRIORITY[existing.comment_type or "note"] or 0
+  local candidate_priority = TYPE_PRIORITY[candidate.comment_type or "note"] or 0
+  if candidate_priority > existing_priority then
+    return candidate
+  end
+  return existing
+end
+
 ---@param bufnr integer
 ---@param comments commentry.DraftComment[]
 function M.render_comment_markers(bufnr, comments)
@@ -671,46 +843,102 @@ function M.render_comment_markers(bufnr, comments)
     return
   end
 
+  M.ensure_highlights()
+  local cfg = comment_card_config()
+  local range_cfg = comment_range_config()
   local counts = {}
+  local comments_by_line = {}
+  local range_decorations = {}
   for _, comment in ipairs(comments) do
     if type(comment) == "table" then
-      local line_start = comment.line_start or comment.line_number
-      if type(line_start) == "number" and line_start > 0 then
-        local key = line_start
+      local anchor_line = line_start(comment)
+      if type(anchor_line) == "number" and anchor_line > 0 then
+        local key = anchor_line
         if not counts[key] then
           counts[key] = { total = 0, by_type = {} }
         end
         counts[key].total = counts[key].total + 1
         local comment_type = comment.comment_type or "note"
         counts[key].by_type[comment_type] = (counts[key].by_type[comment_type] or 0) + 1
+        comments_by_line[key] = comments_by_line[key] or {}
+        comments_by_line[key][#comments_by_line[key] + 1] = comment
+      end
+
+      if range_cfg.enabled then
+        local first = math.max(line_start(comment), 1)
+        local last = math.max(line_end(comment), first)
+        local comment_type = comment.comment_type or "note"
+        if first == last then
+          range_decorations[first] = preferred_decoration(range_decorations[first], {
+            comment_type = comment_type,
+            kind = "single",
+          })
+        else
+          for line_number = first, last do
+            local kind = "mid"
+            if line_number == first then
+              kind = "start"
+            elseif line_number == last then
+              kind = "end"
+            end
+            range_decorations[line_number] = preferred_decoration(range_decorations[line_number], {
+              comment_type = comment_type,
+              kind = kind,
+            })
+          end
+        end
       end
     end
   end
 
-  for line_number, group in pairs(counts) do
-    local types = vim.tbl_keys(group.by_type)
-    table.sort(types)
-    local label = nil
-    if #types == 1 then
-      local only_type = types[1]
-      local count = group.by_type[only_type]
-      label = count == 1 and ("[%s]"):format(only_type) or ("[%s:%d]"):format(only_type, count)
-    else
-      local pieces = {}
-      for _, comment_type in ipairs(types) do
-        local count = group.by_type[comment_type]
-        if count == 1 then
-          pieces[#pieces + 1] = comment_type
-        else
-          pieces[#pieces + 1] = ("%s:%d"):format(comment_type, count)
-        end
+  if range_cfg.enabled then
+    for line_number, decoration in pairs(range_decorations) do
+      local line = math.max(line_number - 1, 0)
+      local opts = {
+        sign_text = range_sign_text(decoration.kind),
+        sign_hl_group = range_sign_hl(decoration.comment_type),
+      }
+      if range_cfg.line_highlight then
+        opts.line_hl_group = range_line_hl(decoration.comment_type)
       end
-      label = ("[%s]"):format(table.concat(pieces, ","))
+      pcall(vim.api.nvim_buf_set_extmark, bufnr, Config.ns, line, 0, opts)
     end
+  end
+
+  local lines = vim.tbl_keys(counts)
+  table.sort(lines)
+  for _, line_number in ipairs(lines) do
+    local group = counts[line_number]
     local line = math.max(line_number - 1, 0)
+    if cfg.show_markers then
+      pcall(vim.api.nvim_buf_set_extmark, bufnr, Config.ns, line, 0, {
+        virt_text = { { marker_label(group.by_type), "CommentryMarker" } },
+        virt_text_pos = "eol",
+        hl_mode = "combine",
+      })
+    end
+
+    local line_comments = comments_by_line[line_number] or {}
+    table.sort(line_comments, function(a, b)
+      if (a.created_at or "") ~= (b.created_at or "") then
+        return (a.created_at or "") < (b.created_at or "")
+      end
+      return (a.id or "") < (b.id or "")
+    end)
+
+    local virt_lines = {}
+    for index, comment in ipairs(line_comments) do
+      for _, vline in ipairs(card_lines_for_comment(comment, cfg)) do
+        virt_lines[#virt_lines + 1] = vline
+      end
+      if index < #line_comments then
+        virt_lines[#virt_lines + 1] = { { " ", "CommentryBody" } }
+      end
+    end
+
     pcall(vim.api.nvim_buf_set_extmark, bufnr, Config.ns, line, 0, {
-      virt_text = { { label, "Comment" } },
-      virt_text_pos = "eol",
+      virt_lines = virt_lines,
+      virt_lines_above = false,
       hl_mode = "combine",
     })
   end
@@ -731,47 +959,16 @@ function M.render_file_review_indicator(bufnr, reviewed)
   })
 end
 
----@param bufnr integer
-function M.clear_hover_preview(bufnr)
-  if type(bufnr) ~= "number" or not vim.api.nvim_buf_is_valid(bufnr) then
-    return
-  end
-  vim.api.nvim_buf_clear_namespace(bufnr, hover_ns, 0, -1)
+---@param _bufnr integer
+function M.clear_hover_preview(_bufnr)
+  return
 end
 
----@param bufnr integer
----@param line_number integer
----@param comments commentry.DraftComment[]
-function M.render_hover_preview(bufnr, line_number, comments)
-  if type(bufnr) ~= "number" or not vim.api.nvim_buf_is_valid(bufnr) then
-    return
-  end
-  M.clear_hover_preview(bufnr)
-  if type(line_number) ~= "number" or line_number < 1 then
-    return
-  end
-  if type(comments) ~= "table" or #comments == 0 then
-    return
-  end
-
-  local virt_lines = {}
-  for _, comment in ipairs(comments) do
-    if type(comment) == "table" and type(comment.body) == "string" and comment.body ~= "" then
-      local body = comment.body:gsub("\n", " ")
-      local comment_type = comment.comment_type or "note"
-      virt_lines[#virt_lines + 1] = { { ("[%s] %s"):format(comment_type, body), "Comment" } }
-    end
-  end
-  if #virt_lines == 0 then
-    return
-  end
-
-  local line = math.max(line_number - 1, 0)
-  pcall(vim.api.nvim_buf_set_extmark, bufnr, hover_ns, line, 0, {
-    virt_lines = virt_lines,
-    virt_lines_above = false,
-    hl_mode = "combine",
-  })
+---@param _bufnr integer
+---@param _line_number integer
+---@param _comments commentry.DraftComment[]
+function M.render_hover_preview(_bufnr, _line_number, _comments)
+  return
 end
 
 return M

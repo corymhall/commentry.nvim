@@ -1,9 +1,7 @@
 ---@module 'luassert'
 
-describe("commentry.diffview hover preview", function()
+describe("commentry.diffview comment cards", function()
   local original_diffview
-  local original_comments
-  local original_store
   local original_config
   local original_diffview_lib
   local original_create_autocmd
@@ -11,23 +9,10 @@ describe("commentry.diffview hover preview", function()
   local original_buf_is_valid
   local original_clear_namespace
   local original_set_extmark
-
-  local function load_comments_with_stubs(stubs)
-    original_store = package.loaded["commentry.store"]
-    original_diffview = package.loaded["commentry.diffview"]
-    original_comments = package.loaded["commentry.comments"]
-
-    package.loaded["commentry.store"] = stubs.store
-    package.loaded["commentry.diffview"] = stubs.diffview
-    package.loaded["commentry.comments"] = nil
-
-    return require("commentry.comments")
-  end
+  local original_set_hl
 
   before_each(function()
-    original_store = package.loaded["commentry.store"]
     original_diffview = package.loaded["commentry.diffview"]
-    original_comments = package.loaded["commentry.comments"]
     original_config = package.loaded["commentry.config"]
     original_diffview_lib = package.loaded["diffview.lib"]
     original_create_autocmd = vim.api.nvim_create_autocmd
@@ -35,12 +20,11 @@ describe("commentry.diffview hover preview", function()
     original_buf_is_valid = vim.api.nvim_buf_is_valid
     original_clear_namespace = vim.api.nvim_buf_clear_namespace
     original_set_extmark = vim.api.nvim_buf_set_extmark
+    original_set_hl = vim.api.nvim_set_hl
   end)
 
   after_each(function()
-    package.loaded["commentry.store"] = original_store
     package.loaded["commentry.diffview"] = original_diffview
-    package.loaded["commentry.comments"] = original_comments
     package.loaded["commentry.config"] = original_config
     package.loaded["diffview.lib"] = original_diffview_lib
     vim.api.nvim_create_autocmd = original_create_autocmd
@@ -48,52 +32,28 @@ describe("commentry.diffview hover preview", function()
     vim.api.nvim_buf_is_valid = original_buf_is_valid
     vim.api.nvim_buf_clear_namespace = original_clear_namespace
     vim.api.nvim_buf_set_extmark = original_set_extmark
+    vim.api.nvim_set_hl = original_set_hl
   end)
 
-  it("renders and clears hover preview extmarks", function()
-    local clear_calls = 0
-    local extmark_calls = 0
-    local extmark_opts = nil
-
-    vim.api.nvim_buf_is_valid = function()
-      return true
-    end
-    vim.api.nvim_buf_clear_namespace = function()
-      clear_calls = clear_calls + 1
-    end
-    vim.api.nvim_buf_set_extmark = function(_, _, _, _, opts)
-      extmark_calls = extmark_calls + 1
-      extmark_opts = opts
-      return 1
-    end
-
-    package.loaded["commentry.diffview"] = nil
-    local Diffview = require("commentry.diffview")
-
-    Diffview.render_hover_preview(1, 4, {
-      { body = "one" },
-      { body = "two\nlines" },
-    })
-
-    assert.are.same(1, extmark_calls)
-    assert.is_table(extmark_opts.virt_lines)
-    assert.are.same("[note] one", extmark_opts.virt_lines[1][1][1])
-    assert.are.same("[note] two lines", extmark_opts.virt_lines[2][1][1])
-
-    Diffview.clear_hover_preview(1)
-    assert.is_true(clear_calls >= 2)
-  end)
-
-  it("aggregates marker labels by range start and comment type counts", function()
+  it("renders marker labels and persistent boxed comment cards", function()
     local marker_calls = {}
+    local card_calls = {}
+
     vim.api.nvim_buf_is_valid = function()
       return true
     end
     vim.api.nvim_buf_clear_namespace = function()
       return
     end
+    vim.api.nvim_set_hl = function()
+      return
+    end
     vim.api.nvim_buf_set_extmark = function(_, _, line, _, opts)
-      marker_calls[#marker_calls + 1] = { line = line, opts = opts }
+      if opts.virt_text then
+        marker_calls[#marker_calls + 1] = { line = line, opts = opts }
+      elseif opts.virt_lines then
+        card_calls[#card_calls + 1] = { line = line, opts = opts }
+      end
       return 1
     end
 
@@ -101,14 +61,56 @@ describe("commentry.diffview hover preview", function()
     local Diffview = require("commentry.diffview")
 
     Diffview.render_comment_markers(1, {
-      { line_start = 4, line_end = 6, comment_type = "note" },
-      { line_start = 4, line_end = 6, comment_type = "note" },
-      { line_start = 4, line_end = 6, comment_type = "issue" },
+      { id = "c-1", line_start = 4, line_end = 6, comment_type = "note", body = "one\ntwo" },
+      { id = "c-2", line_start = 4, line_end = 6, comment_type = "issue", body = "three" },
     })
 
     assert.are.same(1, #marker_calls)
     assert.are.same(3, marker_calls[1].line)
-    assert.are.same("[issue,note:2]", marker_calls[1].opts.virt_text[1][1])
+    assert.are.same("[issue,note]", marker_calls[1].opts.virt_text[1][1])
+
+    assert.are.same(1, #card_calls)
+    assert.are.same(3, card_calls[1].line)
+    local first_card_line = card_calls[1].opts.virt_lines[1]
+    assert.are.same("  ╭─ ", first_card_line[1][1])
+    assert.is_true(first_card_line[2][1]:find("%[NOTE%] L4%-L6", 1, false) ~= nil)
+  end)
+
+  it("renders range gutter signs with subtle line highlights", function()
+    local range_calls = {}
+
+    vim.api.nvim_buf_is_valid = function()
+      return true
+    end
+    vim.api.nvim_buf_clear_namespace = function()
+      return
+    end
+    vim.api.nvim_set_hl = function()
+      return
+    end
+    vim.api.nvim_buf_set_extmark = function(_, _, line, _, opts)
+      if opts.sign_text then
+        range_calls[#range_calls + 1] = { line = line, opts = opts }
+      end
+      return 1
+    end
+
+    package.loaded["commentry.diffview"] = nil
+    local Diffview = require("commentry.diffview")
+
+    Diffview.render_comment_markers(1, {
+      { id = "c-1", line_start = 4, line_end = 6, comment_type = "issue", body = "range body" },
+    })
+
+    table.sort(range_calls, function(a, b)
+      return a.line < b.line
+    end)
+    assert.are.same(3, #range_calls)
+    assert.are.same("╭", range_calls[1].opts.sign_text)
+    assert.are.same("│", range_calls[2].opts.sign_text)
+    assert.are.same("╰", range_calls[3].opts.sign_text)
+    assert.are.same("CommentryRangeSignIssue", range_calls[1].opts.sign_hl_group)
+    assert.are.same("CommentryRangeLineIssue", range_calls[2].opts.line_hl_group)
   end)
 
   it("renders reviewed state indicator labels", function()
@@ -171,199 +173,8 @@ describe("commentry.diffview hover preview", function()
     assert.are.same("b.lua", focused)
   end)
 
-  it("shows preview only for current commented line and clears otherwise", function()
-    local rendered = nil
-    local cleared = 0
-
-    local comments = load_comments_with_stubs({
-      store = {
-        path_for_project = function()
-          return "/tmp/project/.commentry/commentry.json"
-        end,
-        read = function()
-          return {
-            project_root = "/tmp/project",
-            diff_id = "/tmp/project",
-            comments = {
-              {
-                id = "c1",
-                diff_id = "/tmp/project",
-                file_path = "file.lua",
-                line_number = 7,
-                line_start = 7,
-                line_end = 9,
-                line_side = "head",
-                comment_type = "issue",
-                body = "hover me",
-                line_content = "line seven",
-              },
-            },
-            threads = {
-              {
-                id = "t-/tmp/project-file.lua|head|7",
-                diff_id = "/tmp/project",
-                file_path = "file.lua",
-                line_number = 7,
-                line_start = 7,
-                line_end = 9,
-                line_side = "head",
-                comment_ids = { "c1" },
-              },
-            },
-          }
-        end,
-        write = function()
-          return true
-        end,
-      },
-      diffview = {
-        current_file_context = function()
-          return {
-            file_path = "file.lua",
-            line_number = 7,
-            line_side = "head",
-            bufnr = 1,
-            view = { git_root = "/tmp/project" },
-          }
-        end,
-        render_comment_markers = function()
-          return
-        end,
-        render_hover_preview = function(bufnr, line_number, line_comments)
-          rendered = { bufnr = bufnr, line_number = line_number, line_comments = line_comments }
-        end,
-        clear_hover_preview = function()
-          cleared = cleared + 1
-        end,
-      },
-    })
-
-    comments.load_for_view({ git_root = "/tmp/project" })
-    local shown = comments.refresh_hover_preview()
-    assert.is_true(shown)
-    assert.is_table(rendered)
-    assert.are.same(7, rendered.line_number)
-    assert.are.same("c1", rendered.line_comments[1].id)
-
-    rendered = nil
-    package.loaded["commentry.diffview"].current_file_context = function()
-      return {
-        file_path = "file.lua",
-        line_number = 8,
-        line_side = "head",
-        bufnr = 1,
-        view = { git_root = "/tmp/project" },
-      }
-    end
-
-    local shown_in_range = comments.refresh_hover_preview()
-    assert.is_true(shown_in_range)
-    assert.is_table(rendered)
-    assert.are.same("c1", rendered.line_comments[1].id)
-
-    rendered = nil
-    package.loaded["commentry.diffview"].current_file_context = function()
-      return {
-        file_path = "file.lua",
-        line_number = 10,
-        line_side = "head",
-        bufnr = 1,
-        view = { git_root = "/tmp/project" },
-      }
-    end
-
-    local shown_none = comments.refresh_hover_preview()
-    assert.is_false(shown_none)
-    assert.is_nil(rendered)
-    assert.are.same(1, cleared)
-  end)
-
-  it("does not bleed hover previews across base/head sides on the same line", function()
-    local rendered = nil
-    local comments = load_comments_with_stubs({
-      store = {
-        path_for_project = function()
-          return "/tmp/project/.commentry/commentry.json"
-        end,
-        read = function()
-          return {
-            project_root = "/tmp/project",
-            diff_id = "/tmp/project",
-            comments = {
-              {
-                id = "c-head",
-                diff_id = "/tmp/project",
-                file_path = "file.lua",
-                line_number = 7,
-                line_side = "head",
-                body = "head side",
-              },
-              {
-                id = "c-base",
-                diff_id = "/tmp/project",
-                file_path = "file.lua",
-                line_number = 7,
-                line_side = "base",
-                body = "base side",
-              },
-            },
-            threads = {
-              {
-                id = "t-head",
-                diff_id = "/tmp/project",
-                file_path = "file.lua",
-                line_number = 7,
-                line_side = "head",
-                comment_ids = { "c-head" },
-              },
-              {
-                id = "t-base",
-                diff_id = "/tmp/project",
-                file_path = "file.lua",
-                line_number = 7,
-                line_side = "base",
-                comment_ids = { "c-base" },
-              },
-            },
-          }
-        end,
-        write = function()
-          return true
-        end,
-      },
-      diffview = {
-        current_file_context = function()
-          return {
-            file_path = "file.lua",
-            line_number = 7,
-            line_side = "head",
-            bufnr = 1,
-            view = { git_root = "/tmp/project" },
-          }
-        end,
-        render_comment_markers = function()
-          return
-        end,
-        render_hover_preview = function(_, _, line_comments)
-          rendered = line_comments
-        end,
-        clear_hover_preview = function()
-          return
-        end,
-      },
-    })
-
-    comments.load_for_view({ git_root = "/tmp/project" })
-    local shown = comments.refresh_hover_preview()
-    assert.is_true(shown)
-    assert.is_table(rendered)
-    assert.are.same(1, #rendered)
-    assert.are.same("c-head", rendered[1].id)
-  end)
-
-  it("wires cursor movement and hold handlers to hover refresh", function()
+  it("wires diffview lifecycle hooks and avoids cursor-hover hooks", function()
     local autocmds = {}
-    local refresh_calls = 0
 
     vim.api.nvim_create_autocmd = function(events, opts)
       autocmds[#autocmds + 1] = { events = events, opts = opts }
@@ -371,10 +182,13 @@ describe("commentry.diffview hover preview", function()
     vim.schedule = function(cb)
       cb()
     end
+    vim.api.nvim_set_hl = function()
+      return
+    end
 
     package.loaded["commentry.config"] = {
       augroup = 1,
-      diffview = { auto_attach = true },
+      diffview = { auto_attach = true, comment_cards = {} },
       ns = 1,
     }
     package.loaded["commentry.comments"] = {
@@ -383,10 +197,6 @@ describe("commentry.diffview hover preview", function()
       end,
       render_current_buffer = function()
         return
-      end,
-      refresh_hover_preview = function()
-        refresh_calls = refresh_calls + 1
-        return true
       end,
     }
     package.loaded["diffview.lib"] = {
@@ -397,38 +207,11 @@ describe("commentry.diffview hover preview", function()
 
     package.loaded["commentry.diffview"] = nil
     local Diffview = require("commentry.diffview")
-
-    vim.api.nvim_buf_is_valid = function()
-      return true
-    end
-
     Diffview.setup()
+
     assert.are.same(2, #autocmds)
-
-    Diffview.current_file_context = function()
-      return {
-        file_path = "file.lua",
-        line_number = 1,
-        line_side = "head",
-        bufnr = vim.api.nvim_get_current_buf(),
-        view = {},
-      }
-    end
-    local marked = Diffview.mark_current_buffer()
-    assert.is_true(marked)
-
-    local cursor_handler = nil
-    for _, autocmd in ipairs(autocmds) do
-      if type(autocmd.events) == "table"
-        and autocmd.events[1] == "CursorMoved"
-        and autocmd.opts.buffer == vim.api.nvim_get_current_buf() then
-        cursor_handler = autocmd.opts.callback
-      end
-    end
-
-    assert.is_not_nil(cursor_handler)
-    cursor_handler()
-    assert.are.same(1, refresh_calls)
+    assert.are.same("User", autocmds[1].events)
+    assert.are.same("User", autocmds[2].events)
   end)
 end)
 

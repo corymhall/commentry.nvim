@@ -710,9 +710,9 @@ describe("commentry.comments persistence", function()
     vim.api.nvim_buf_get_lines = function()
       return { "line text" }
     end
-    vim.ui.input = function(_, cb)
-      cb(table.remove(user_inputs, 1))
-    end
+    comments._set_input_provider_for_tests(function(_, cb)
+      cb(table.remove(user_inputs, 1), "note")
+    end)
 
     comments.add_comment()
     assert.are.same(1, writes)
@@ -975,7 +975,7 @@ describe("commentry.comments persistence", function()
 
   it("persists add/edit/delete lifecycle for a diffview context", function()
     local writes = {}
-    local user_inputs = { "First", "Edited body" }
+    local user_inputs = { "First line\nSecond line", "Edited body\nMore detail" }
     local context = {
       file_path = "file.lua",
       line_number = 3,
@@ -1013,10 +1013,10 @@ describe("commentry.comments persistence", function()
     vim.api.nvim_buf_get_lines = function()
       return { "line text" }
     end
-    vim.ui.input = function(_, cb)
+    comments._set_input_provider_for_tests(function(_, cb)
       local next_value = table.remove(user_inputs, 1)
-      cb(next_value)
-    end
+      cb(next_value, "note")
+    end)
     vim.ui.select = function(items, _, cb)
       cb(items[1])
     end
@@ -1027,10 +1027,10 @@ describe("commentry.comments persistence", function()
 
     assert.are.same(3, #writes)
     assert.are.same(1, #writes[1].comments)
-    assert.are.same("First", writes[1].comments[1].body)
+    assert.are.same("First line\nSecond line", writes[1].comments[1].body)
     assert.are.same("note", writes[1].comments[1].comment_type)
     assert.are.same(1, #writes[2].comments)
-    assert.are.same("Edited body", writes[2].comments[1].body)
+    assert.are.same("Edited body\nMore detail", writes[2].comments[1].body)
     assert.are.same("note", writes[2].comments[1].comment_type)
     assert.are.same(0, #writes[3].comments)
     assert.are.same(0, #writes[3].threads)
@@ -1081,9 +1081,9 @@ describe("commentry.comments persistence", function()
       end
       return { 1, 7, 1, 0 }
     end
-    vim.ui.input = function(_, cb)
-      cb("Range note")
-    end
+    comments._set_input_provider_for_tests(function(_, cb)
+      cb("Range note", "note")
+    end)
 
     comments.add_range_comment()
 
@@ -1136,9 +1136,9 @@ describe("commentry.comments persistence", function()
     vim.api.nvim_buf_get_lines = function()
       return { "line text" }
     end
-    vim.ui.input = function(_, cb)
-      cb(table.remove(user_inputs, 1))
-    end
+    comments._set_input_provider_for_tests(function(_, cb)
+      cb(table.remove(user_inputs, 1), "note")
+    end)
     vim.ui.select = function(items, opts, cb)
       if opts.prompt == "Set comment type" then
         cb("issue")
@@ -1246,13 +1246,13 @@ describe("commentry.comments persistence", function()
     vim.api.nvim_buf_get_lines = function()
       return { "line text" }
     end
-    vim.ui.input = function(opts, cb)
-      if opts.prompt == "Edit comment: " then
-        cb("edited second range")
+    comments._set_input_provider_for_tests(function(opts, cb)
+      if opts.title == "Edit comment" then
+        cb("edited second range", "issue")
         return
       end
-      cb(nil)
-    end
+      cb(nil, nil)
+    end)
     vim.ui.select = function(items, opts, cb)
       if opts.prompt == "Set comment type" and type(items[1]) == "string" then
         cb("issue")
@@ -1325,9 +1325,9 @@ describe("commentry.comments persistence", function()
       end
       return { 1, 6, 1, 0 }
     end
-    vim.ui.input = function(_, cb)
-      cb("range note")
-    end
+    comments._set_input_provider_for_tests(function(_, cb)
+      cb("range note", "note")
+    end)
     vim.ui.select = function(_, _, cb)
       selects = selects + 1
       cb(nil)

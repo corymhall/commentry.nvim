@@ -20,7 +20,17 @@ Using lazy.nvim:
 
 ```lua
 require("commentry").setup({
-  -- add configuration here
+  diffview = {
+    comment_cards = {
+      max_width = 88,
+      max_body_lines = 8,
+      show_markers = true,
+    },
+    comment_ranges = {
+      enabled = true,
+      line_highlight = true,
+    },
+  },
 })
 ```
 
@@ -64,7 +74,9 @@ require("commentry").setup({
 - Draft comments are persisted per review context under `~/.commentry/repos/<repo>/contexts/<context-id>/`.
 - Review context identity is stable per repository review scope (`<root>::review`), so comments persist across
   different `:DiffviewOpen` range lenses until anchors become outdated by code changes.
-- Draft listing and hover previews remain scoped to the active file + side (`base`/`head`) for the current context.
+- Add/edit/range comment actions open a floating multiline editor (`Enter` for newline, `Ctrl-s` to save, `q`/`Esc` in normal mode to cancel, `Tab` to cycle type).
+- Draft comment bodies are rendered as persistent boxed cards on commented lines, even when the cursor moves away.
+- Range comments render start/mid/end gutter signs (`╭`, `│`, `╰`) with subtle line tinting to show covered lines.
 - File reviewed state is tracked per context and rendered as a lightweight `[reviewed]` / `[unreviewed]` indicator in diff buffers.
 - Send flow is explicit: open/attach a review (`:Commentry open` or auto-attach), ensure Codex integration is enabled, then run
   `:Commentry send-to-codex`.

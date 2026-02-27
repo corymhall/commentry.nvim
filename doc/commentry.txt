@@ -11,7 +11,13 @@ SETUP                                             *commentry.setup*
 Use the Lua API to configure the plugin:
 >
   require("commentry").setup({
-    -- configuration goes here
+    diffview = {
+      comment_cards = {
+        max_width = 88,
+        max_body_lines = 8,
+        show_markers = true,
+      },
+    },
   })
 <
 
@@ -79,6 +85,13 @@ PERSISTENCE NOTES                                 *commentry.persistence*
   lenses (`:DiffviewOpen`, `:DiffviewOpen main`, `:DiffviewOpen HEAD~3`, etc).
 - Comments remain in the same context until anchor reconciliation marks them
   stale/outdated after code changes.
+- Comment add/edit/range opens a floating multiline editor:
+  - `Enter` inserts newline
+  - `Ctrl-s` saves
+  - `q` or `Esc` in normal mode cancels
+  - `Tab` cycles comment type
+- Comment bodies render as persistent boxed virtual cards on commented lines;
+  they stay visible when moving the cursor.
 - Use `:Commentry debug-store` to verify the active context/path when comments seem missing.
 
 =============================================================================

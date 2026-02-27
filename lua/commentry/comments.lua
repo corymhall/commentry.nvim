@@ -7,6 +7,7 @@ local M = {}
 
 local uv = vim.uv or vim.loop
 local seeded = false
+local input_provider_for_tests = nil
 
 local state = {
   diffs = {},
@@ -15,6 +16,7 @@ local current_context
 
 local ROOT_CANDIDATE_KEYS = { "git_root", "toplevel", "root", "cwd", "path" }
 local DEFAULT_COMMENT_TYPES = { "note", "suggestion", "issue", "praise" }
+local editor_ns = vim.api.nvim_create_namespace("commentry-comment-editor")
 
 ---@param root string
 ---@return string|nil
@@ -1046,20 +1048,6 @@ end
 
 ---@return boolean
 function M.refresh_hover_preview()
-  local context, err = current_context()
-  if not context then
-    Diffview.clear_hover_preview(vim.api.nvim_get_current_buf())
-    if err then
-      Util.debug("hover preview skipped", err)
-    end
-    return false
-  end
-  local comments = active_comments_for_line(context)
-  if #comments == 0 then
-    Diffview.clear_hover_preview(context.bufnr)
-    return false
-  end
-  Diffview.render_hover_preview(context.bufnr, context.line_number, comments)
   return true
 end
 
@@ -1096,7 +1084,6 @@ function M.list_comments()
       return
     end
     jump_to_comment(choice)
-    M.refresh_hover_preview()
   end)
 end
 
@@ -1506,6 +1493,145 @@ local function select_comment_type(diff_id, prompt, initial_type, cb)
   end)
 end
 
+---@param choices string[]
+---@param current string
+---@return string
+local function next_comment_type_choice(choices, current)
+  local idx = 1
+  for i, choice in ipairs(choices) do
+    if choice == current then
+      idx = i
+      break
+    end
+  end
+  local next_idx = (idx % #choices) + 1
+  return choices[next_idx]
+end
+
+---@param lines string[]
+---@return string
+local function normalize_editor_body(lines)
+  local out = vim.deepcopy(lines or {})
+  while #out > 0 and vim.trim(out[#out]) == "" do
+    table.remove(out)
+  end
+  return table.concat(out, "\n")
+end
+
+---@param win integer
+---@param comment_type string
+---@param title string
+local function set_editor_winbar(win, comment_type, title)
+  if type(win) ~= "number" or not vim.api.nvim_win_is_valid(win) then
+    return
+  end
+  pcall(vim.api.nvim_set_option_value, "winbar", ("%s [%s]  Enter:newline  C-s:save  q/Esc:cancel  Tab:type"):format(title, comment_type), {
+    scope = "local",
+    win = win,
+  })
+end
+
+---@param opts table
+---@param cb fun(body: string|nil, comment_type: string|nil)
+local function prompt_comment_body(opts, cb)
+  opts = opts or {}
+  if type(input_provider_for_tests) == "function" then
+    input_provider_for_tests(opts, cb)
+    return
+  end
+
+  local choices = comment_type_choices()
+  local active_type = opts.comment_type
+  if not is_valid_comment_type(active_type) then
+    active_type = default_comment_type()
+  end
+
+  local initial_body = type(opts.default) == "string" and opts.default or ""
+  local body_lines = vim.split(initial_body, "\n", { plain = true })
+  if #body_lines == 0 then
+    body_lines = { "" }
+  end
+
+  local width = math.max(70, math.floor(vim.o.columns * 0.60))
+  local height = math.max(10, math.floor(vim.o.lines * 0.30))
+  local row = math.max(1, math.floor((vim.o.lines - height) / 2 - 1))
+  local col = math.max(0, math.floor((vim.o.columns - width) / 2))
+
+  local bufnr = vim.api.nvim_create_buf(false, true)
+  vim.bo[bufnr].buftype = "nofile"
+  vim.bo[bufnr].bufhidden = "wipe"
+  vim.bo[bufnr].swapfile = false
+  vim.bo[bufnr].filetype = "markdown"
+  vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, body_lines)
+
+  local win = vim.api.nvim_open_win(bufnr, true, {
+    relative = "editor",
+    style = "minimal",
+    border = "rounded",
+    width = width,
+    height = height,
+    row = row,
+    col = col,
+    title = " Commentry Comment ",
+    title_pos = "center",
+  })
+  vim.wo[win].wrap = true
+  vim.wo[win].number = false
+  vim.wo[win].relativenumber = false
+  vim.wo[win].cursorline = false
+  set_editor_winbar(win, active_type, opts.title or "Comment")
+
+  local done = false
+  local function finish(body, comment_type)
+    if done then
+      return
+    end
+    done = true
+    if vim.api.nvim_win_is_valid(win) then
+      pcall(vim.api.nvim_win_close, win, true)
+    end
+    cb(body, comment_type)
+  end
+
+  local function save()
+    if not vim.api.nvim_buf_is_valid(bufnr) then
+      finish(nil, nil)
+      return
+    end
+    local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+    local body = normalize_editor_body(lines)
+    if vim.trim(body) == "" then
+      Util.info("Comment body cannot be empty")
+      return
+    end
+    finish(body, active_type)
+  end
+
+  local function cancel()
+    finish(nil, nil)
+  end
+
+  local function cycle_type()
+    active_type = next_comment_type_choice(choices, active_type)
+    set_editor_winbar(win, active_type, opts.title or "Comment")
+  end
+
+  vim.keymap.set({ "n", "i" }, "<C-s>", save, { buffer = bufnr, silent = true })
+  vim.keymap.set("n", "<CR>", save, { buffer = bufnr, silent = true })
+  vim.keymap.set("n", "<Esc>", cancel, { buffer = bufnr, silent = true })
+  vim.keymap.set("n", "q", cancel, { buffer = bufnr, silent = true })
+  vim.keymap.set({ "n", "i" }, "<Tab>", cycle_type, { buffer = bufnr, silent = true })
+  vim.keymap.set("n", "<C-c>", cancel, { buffer = bufnr, silent = true })
+  -- Keep insert-mode Esc default behavior (exit insert) so users can switch
+  -- to normal mode and press Enter to save without accidental cancellation.
+
+  pcall(vim.api.nvim_buf_set_extmark, bufnr, editor_ns, 0, 0, {
+    virt_text = { { "Use Enter/C-s to save, Esc/q to cancel, Tab to cycle type", "Comment" } },
+    virt_text_pos = "eol",
+  })
+  vim.cmd("startinsert")
+end
+
 ---@param context table
 ---@return integer, integer
 local function visual_line_range(context)
@@ -1546,17 +1672,21 @@ function M.add_comment()
     return
   end
   local active_type = selected_comment_type(diff_id)
-  vim.ui.input({ prompt = ("Add %s comment: "):format(active_type) }, function(input)
-    if not input or input == "" then
+  prompt_comment_body({
+    title = "Add line comment",
+    comment_type = active_type,
+  }, function(input, comment_type)
+    if not input then
       return
     end
-    local comment, comment_err = M.new_comment(diff_id, anchor, input, { comment_type = active_type })
+    local comment, comment_err = M.new_comment(diff_id, anchor, input, { comment_type = comment_type or active_type })
     if not comment then
       Util.error(comment_err or "Failed to create comment")
       return
     end
     comment.line_content = line_text_at(context.bufnr, context.line_number)
     local dstate = diff_state(diff_id)
+    dstate.selected_comment_type = comment.comment_type
     upsert_comment(dstate, comment)
     local thread, thread_err = ensure_thread(diff_id, anchor)
     if not thread then
@@ -1590,19 +1720,21 @@ function M.add_range_comment()
     return
   end
   local active_type = selected_comment_type(diff_id)
-  local prompt = ("Add %s range comment (%d-%d): "):format(active_type, line_start, line_end)
-
-  vim.ui.input({ prompt = prompt }, function(input)
-    if not input or input == "" then
+  prompt_comment_body({
+    title = ("Add range comment (%d-%d)"):format(line_start, line_end),
+    comment_type = active_type,
+  }, function(input, comment_type)
+    if not input then
       return
     end
-    local comment, comment_err = M.new_comment(diff_id, anchor, input, { comment_type = active_type })
+    local comment, comment_err = M.new_comment(diff_id, anchor, input, { comment_type = comment_type or active_type })
     if not comment then
       Util.error(comment_err or "Failed to create range comment")
       return
     end
     comment.line_content = line_text_at(context.bufnr, line_start)
     local dstate = diff_state(diff_id)
+    dstate.selected_comment_type = comment.comment_type
     upsert_comment(dstate, comment)
     local thread, thread_err = ensure_thread(diff_id, anchor)
     if not thread then
@@ -1634,8 +1766,12 @@ function M.edit_comment()
     return
   end
   select_comment(comments, "Edit comment", function(target)
-    vim.ui.input({ prompt = "Edit comment: ", default = target.body }, function(input)
-      if not input or input == "" then
+    prompt_comment_body({
+      title = "Edit comment",
+      default = target.body,
+      comment_type = target.comment_type,
+    }, function(input, comment_type)
+      if not input then
         return
       end
       local updated, update_err = M.update_body(target, input)
@@ -1643,7 +1779,11 @@ function M.edit_comment()
         Util.error(update_err or "Failed to update comment")
         return
       end
+      if comment_type and is_valid_comment_type(comment_type) then
+        updated.comment_type = comment_type
+      end
       updated.status = nil
+      dstate.selected_comment_type = updated.comment_type
       upsert_comment(dstate, updated)
       mark_dirty(diff_id)
       render_for_context(context)
@@ -1716,6 +1856,11 @@ function M.set_comment_type()
       persist_for_view(diff_id, context.view, "Failed to persist comment")
     end)
   end)
+end
+
+---@param provider? fun(opts: table, cb: fun(body: string|nil, comment_type: string|nil))
+function M._set_input_provider_for_tests(provider)
+  input_provider_for_tests = provider
 end
 
 return M

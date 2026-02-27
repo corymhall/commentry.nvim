@@ -19,6 +19,17 @@ M.ns = vim.api.nvim_create_namespace("commentry")
 ---@field enabled boolean
 ---@field prefer string
 ---@field auto_attach boolean
+---@field comment_cards commentry.DiffviewCommentCardsConfig
+---@field comment_ranges commentry.DiffviewCommentRangesConfig
+
+---@class commentry.DiffviewCommentCardsConfig
+---@field max_width integer
+---@field max_body_lines integer
+---@field show_markers boolean
+
+---@class commentry.DiffviewCommentRangesConfig
+---@field enabled boolean
+---@field line_highlight boolean
 
 ---@class commentry.CodexAdapterConfig
 ---@field select string
@@ -60,6 +71,15 @@ local defaults = {
     enabled = true,
     prefer = "diffview.nvim",
     auto_attach = true,
+    comment_cards = {
+      max_width = 88,
+      max_body_lines = 8,
+      show_markers = true,
+    },
+    comment_ranges = {
+      enabled = true,
+      line_highlight = true,
+    },
   },
   codex = {
     enabled = false,
