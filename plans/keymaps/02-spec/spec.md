@@ -34,7 +34,7 @@ The target audience is existing Commentry users reviewing diffs in Neovim. Core 
 | 4 | Discoverability expectations? | Provide clear docs/help and command parity. | Minimal-path default |
 | 5 | Consistent across sessions/repos? | Yes, deterministic config behavior across sessions/repos. | Minimal-path default |
 | 6 | Preserve personal keybinding habits? | Yes, user overrides are first-class. | Minimal-path default |
-| 7 | Disable individual mappings? | No; remap-only in v1. | Human choice |
+| 7 | Disable individual mappings? | No; remap-only in v1 with non-empty string mappings required. Empty-string disable is not part of the v1 contract. | Human choice |
 | 8 | Behavior when mapping cannot be used? | Show actionable error/warn message; no silent failure. | Minimal-path default |
 | 9 | Distinct mappings for similar actions? | Yes for risky/semantically different actions; avoid destructive collisions. | Minimal-path default |
 | 10 | Beginner-safe and power-user efficient defaults? | Yes, preserve current concise defaults while allowing overrides. | Minimal-path default |
@@ -128,6 +128,7 @@ No persistence schema or storage format changes.
 - Invalid or conflicting user choices are not auto-resolved by this feature; users keep control.
 - If an action cannot run due to context/state, existing action-level error messaging remains authoritative.
 - Never fail silently when mapped actions are invoked and cannot complete.
+- Empty-string keymap values are treated as invalid v1 configuration for remapped functions and should raise actionable feedback rather than silently becoming disable semantics.
 
 ### Integration Points
 
@@ -143,10 +144,24 @@ No persistence schema or storage format changes.
 1. All seven supported functions are configurable through `Config.keymaps`.
 2. Default keymaps remain defined for all seven functions.
 3. Overriding one function mapping does not alter others.
-4. Remap-only behavior is preserved (no disable-via-empty-string requirement added as feature behavior).
+4. Remap-only behavior is preserved (disable-via-empty-string is explicitly out of contract for v1).
 5. Mappings attach only for commentry diffview buffers.
 6. Underlying commands remain available as fallback behavior.
 7. Documentation clearly lists configurable functions and override examples.
+8. Regression coverage verifies buffer-local attachment and default keymap preservation when no remaps are provided.
+
+## Verification Checklist
+
+1. Run `./scripts/test` after adding/adjusting keymap coverage tests.
+2. Automated checks should assert:
+   - All seven `Config.keymaps` entries remain present by default.
+   - Overriding one mapping does not mutate unrelated mappings.
+   - `maybe_attach_keymaps(bufnr)` only binds keys when `commentry_diffview` is true.
+   - Existing defaults still bind when no user remaps are provided.
+3. Manual smoke checks:
+   - Open a diffview review buffer and confirm configured mappings execute expected commands.
+   - Open a non-diffview buffer and confirm commentry keymaps are not attached.
+   - Verify command fallback (`:Commentry toggle-file-reviewed`, `:Commentry next-unreviewed`) still works when keymaps are remapped.
 
 ---
 
@@ -164,13 +179,31 @@ No persistence schema or storage format changes.
 - [ ] Should v2 add explicit per-function disable semantics in addition to remap?
 - [ ] Do we want a built-in `:Commentry help keymaps` quick-reference command?
 
+## Spec Review
+
+**Reviewed:** 2026-02-27
+**Gaps identified:** 3
+**Gaps resolved:** 3
+
+### Clarifications Added
+
+| Topic | Clarification |
+|---|---|
+| Verification mapping | Added explicit acceptance-to-verification checklist with concrete automated/manual checks. |
+| Remap-only semantics | v1 now explicitly requires non-empty string remaps; empty-string disable is out of contract. |
+| Regression guard | Added explicit regression requirement for buffer-local attach and default keymap preservation. |
+
+### Deferred Items
+
+| Item | Rationale | Revisit When |
+|---|---|---|
+| Per-function disable semantics | Keep v1 behavior narrowly scoped to remap-only. | v2 planning |
+
 ---
 
 ## Next Steps
 
-- [ ] Stage 3 questions interview and fresh-gap assessment.
 - [ ] Stage 4 multimodal spec review.
-- [ ] Incorporate selected review findings.
 - [ ] Commit reviewed spec artifacts.
 
 ---
