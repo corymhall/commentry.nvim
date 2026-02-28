@@ -209,9 +209,10 @@ describe("commentry.diffview comment cards", function()
     local Diffview = require("commentry.diffview")
     Diffview.setup()
 
-    assert.are.same(2, #autocmds)
+    assert.are.same(3, #autocmds)
     assert.are.same("User", autocmds[1].events)
     assert.are.same("User", autocmds[2].events)
+    assert.are.same("User", autocmds[3].events)
   end)
 end)
 

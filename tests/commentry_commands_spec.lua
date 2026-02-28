@@ -60,12 +60,13 @@ describe("commentry lifecycle hooks", function()
     local Diffview = require("commentry.diffview")
     Diffview.setup()
 
-    assert.are.same(2, #autocmds)
+    assert.are.same(3, #autocmds)
     autocmds[1].callback()
     autocmds[2].callback()
+    autocmds[3].callback()
 
-    assert.are.same(2, calls.load)
-    assert.are.same(2, calls.render)
+    assert.are.same(3, calls.load)
+    assert.are.same(3, calls.render)
   end)
 end)
 
@@ -265,6 +266,79 @@ describe("commentry keymap attachment", function()
     assert.are.same("gf", by_desc["Commentry toggle file reviewed"].lhs)
     assert.are.same("gn", by_desc["Commentry jump next unreviewed file"].lhs)
     assert.are.same("ms", by_desc["Commentry send to codex"].lhs)
+  end)
+
+  it("attaches keymaps when diffview marker is missing but current context matches buffer", function()
+    local autocmd
+    local mapped = {}
+    local bufnr = vim.api.nvim_get_current_buf()
+    vim.b[bufnr].commentry_diffview = nil
+    vim.b[bufnr].commentry_keymaps = nil
+
+    vim.api.nvim_create_autocmd = function(_, opts)
+      if opts.pattern == "DiffviewDiffBufWinEnter" then
+        autocmd = opts
+      end
+      return 1
+    end
+    vim.keymap.set = function(mode, lhs, _, opts)
+      mapped[#mapped + 1] = { mode = mode, lhs = lhs, desc = opts.desc, buffer = opts.buffer }
+    end
+
+    package.loaded["commentry.comments"] = {
+      add_comment = function()
+        return
+      end,
+      add_range_comment = function()
+        return
+      end,
+      edit_comment = function()
+        return
+      end,
+      delete_comment = function()
+        return
+      end,
+      set_comment_type = function()
+        return
+      end,
+      toggle_file_reviewed = function()
+        return
+      end,
+      next_unreviewed_file = function()
+        return
+      end,
+      list_comments = function()
+        return
+      end,
+      export_comments = function()
+        return
+      end,
+      render_current_buffer = function()
+        return
+      end,
+    }
+    package.loaded["commentry.config"] = {
+      augroup = 1,
+      diffview = { enabled = true },
+      keymaps = nil,
+    }
+    package.loaded["commentry.diffview"] = {
+      open = function()
+        return true
+      end,
+      current_file_context = function()
+        return { bufnr = bufnr }
+      end,
+    }
+
+    package.loaded["commentry.commands"] = nil
+    local Commands = require("commentry.commands")
+    Commands.setup()
+    autocmd.callback()
+
+    assert.are.same(8, #mapped)
+    assert.is_true(vim.b[bufnr].commentry_keymaps)
+    assert.is_true(vim.b[bufnr].commentry_diffview)
   end)
 
   it("treats empty disable as scoped to file review toggles", function()

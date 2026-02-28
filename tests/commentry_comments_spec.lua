@@ -1722,6 +1722,144 @@ describe("commentry.comments persistence", function()
     assert.are.same({ 4, 0 }, moved_cursor)
   end)
 
+  it("lists draft comments from diffview file panel and jumps after focusing file", function()
+    local moved_cursor = nil
+    local captured_items = nil
+    local focused_path = nil
+    local on_diff_buffer = false
+
+    local comments = load_with_stubs({
+      store = {
+        path_for_project = function()
+          return "/tmp/project/.commentry/commentry.json"
+        end,
+        read = function()
+          return {
+            project_root = "/tmp/project",
+            diff_id = "/tmp/project",
+            comments = {
+              {
+                id = "c-base",
+                diff_id = "/tmp/project",
+                file_path = "file.lua",
+                line_number = 2,
+                line_side = "base",
+                body = "base draft",
+                line_content = "base line",
+              },
+              {
+                id = "c-head",
+                diff_id = "/tmp/project",
+                file_path = "file.lua",
+                line_number = 4,
+                line_side = "head",
+                body = "head draft",
+                line_content = "head line",
+              },
+              {
+                id = "c-other",
+                diff_id = "/tmp/project",
+                file_path = "other.lua",
+                line_number = 8,
+                line_side = "head",
+                body = "other file draft",
+                line_content = "other line",
+              },
+            },
+            threads = {
+              {
+                id = "t-/tmp/project-file.lua|base|2",
+                diff_id = "/tmp/project",
+                file_path = "file.lua",
+                line_number = 2,
+                line_side = "base",
+                comment_ids = { "c-base" },
+              },
+              {
+                id = "t-/tmp/project-file.lua|head|4",
+                diff_id = "/tmp/project",
+                file_path = "file.lua",
+                line_number = 4,
+                line_side = "head",
+                comment_ids = { "c-head" },
+              },
+              {
+                id = "t-/tmp/project-other.lua|head|8",
+                diff_id = "/tmp/project",
+                file_path = "other.lua",
+                line_number = 8,
+                line_side = "head",
+                comment_ids = { "c-other" },
+              },
+            },
+          }
+        end,
+        write = function()
+          return true
+        end,
+      },
+      diffview = {
+        get_current_view = function()
+          return { git_root = "/tmp/project", cur_entry = { path = "file.lua" } }
+        end,
+        current_file_context = function()
+          if not on_diff_buffer then
+            return nil, "current buffer is not a diffview file buffer"
+          end
+          return {
+            file_path = "file.lua",
+            line_number = 1,
+            line_side = "head",
+            bufnr = 1,
+            view = { git_root = "/tmp/project", cur_entry = { path = "file.lua" } },
+          }
+        end,
+        focus_file = function(_, path)
+          focused_path = path
+          on_diff_buffer = true
+          return true, nil
+        end,
+        focus_file_side = function()
+          return true, nil
+        end,
+        render_comment_markers = function()
+          return
+        end,
+        render_hover_preview = function()
+          return
+        end,
+        clear_hover_preview = function()
+          return
+        end,
+      },
+    })
+
+    package.loaded["snacks"] = {
+      picker = {
+        pick = function(opts)
+          captured_items = opts.items
+          opts.confirm(nil, opts.items[2])
+        end,
+        select = function()
+          return
+        end,
+      },
+    }
+    vim.api.nvim_win_set_cursor = function(_, pos)
+      moved_cursor = pos
+    end
+
+    comments.load_for_view({ git_root = "/tmp/project", cur_entry = { path = "file.lua" } })
+    comments.list_comments()
+
+    assert.is_table(captured_items)
+    assert.are.same(2, #captured_items)
+    assert.are.same("c-base", captured_items[1].comment.id)
+    assert.are.same("c-head", captured_items[2].comment.id)
+    assert.are.same("file.lua", focused_path)
+    assert.are.same({ 4, 0 }, moved_cursor)
+  end)
+
   it("deletes selected comments via list picker action and refreshes picker", function()
     local writes = 0
     local persisted = nil

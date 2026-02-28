@@ -121,6 +121,13 @@ local function maybe_attach_keymaps(bufnr)
       is_diff = value
     end
   end
+  if not is_diff and type(Diffview.current_file_context) == "function" then
+    local context = Diffview.current_file_context()
+    if type(context) == "table" and context.bufnr == bufnr then
+      is_diff = true
+      pcall(vim.api.nvim_buf_set_var, bufnr, "commentry_diffview", true)
+    end
+  end
   if not is_diff then
     Util.debug("Skipping keymap attach: not a diffview buffer", buffer_debug_info(bufnr))
     return
@@ -325,9 +332,10 @@ function M.setup()
     pattern = "DiffviewDiffBufWinEnter",
     callback = function()
       local bufnr = vim.api.nvim_get_current_buf()
-      vim.schedule(function()
-        maybe_attach_keymaps(bufnr)
-      end)
+      if type(Diffview.mark_current_buffer) == "function" then
+        Diffview.mark_current_buffer()
+      end
+      maybe_attach_keymaps(bufnr)
     end,
   })
 end

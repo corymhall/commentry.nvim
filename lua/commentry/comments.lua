@@ -702,12 +702,12 @@ end
 local function jumpable_comments_for_context(diff_id, context)
   local dstate = diff_state(diff_id)
   local comments = {}
+  local side = type(context) == "table" and context.line_side or nil
   for _, comment in ipairs(dstate.comments) do
     if
       comment.status ~= "unresolved"
       and comment.file_path == context.file_path
-      and comment.line_side == context.line_side
-    then
+      and (side == nil or comment.line_side == side) then
       comments[#comments + 1] = comment
     end
   end
@@ -796,14 +796,45 @@ end
 ---@return boolean
 local function jump_to_comment(comment)
   local context, err = current_context()
-  if not context then
+  if context and comment.file_path == context.file_path and comment.line_side == context.line_side then
+    local line = math.max(comment.line_number, 1)
+    line = math.max(line_start_for(comment) or line, 1)
+    vim.api.nvim_win_set_cursor(0, { line, 0 })
+    return true
+  end
+
+  local view = context and context.view or nil
+  if type(view) ~= "table" and type(Diffview.get_current_view) == "function" then
+    view = Diffview.get_current_view()
+  end
+  if type(view) ~= "table" then
     Util.error(err or "No diffview context")
     return false
   end
-  if comment.file_path ~= context.file_path or comment.line_side ~= context.line_side then
+
+  if type(Diffview.focus_file) ~= "function" then
+    Util.warn("Diffview navigation helpers are unavailable")
+    return false
+  end
+  local focused, focus_err = Diffview.focus_file(view, comment.file_path)
+  if not focused then
+    Util.warn(focus_err or "Unable to focus target file in diffview")
+    return false
+  end
+  if type(Diffview.focus_file_side) == "function" then
+    Diffview.focus_file_side(view, comment.line_side)
+  end
+
+  local next_context, next_err = current_context()
+  if not next_context then
+    Util.warn(next_err or "Unable to focus target diff buffer")
+    return false
+  end
+  if comment.file_path ~= next_context.file_path or comment.line_side ~= next_context.line_side then
     Util.info("Select the target diff file/side before jumping to this comment")
     return false
   end
+
   local line = math.max(comment.line_number, 1)
   line = math.max(line_start_for(comment) or line, 1)
   vim.api.nvim_win_set_cursor(0, { line, 0 })
@@ -836,6 +867,32 @@ end
 ---@return boolean
 local function is_expected_non_file_context(err)
   return err == "current buffer is not a diffview file buffer" or err == "diffview has no active file entry"
+end
+
+---@return table|nil, string|nil
+local function context_for_list_comments()
+  local context, context_err = current_context()
+  if context then
+    return context, nil
+  end
+  if not is_expected_non_file_context(context_err) then
+    return nil, context_err
+  end
+  local view, view_err = Diffview.get_current_view()
+  if not view then
+    return nil, view_err or context_err
+  end
+  local file_path = type(view.cur_entry) == "table" and view.cur_entry.path or nil
+  if type(file_path) ~= "string" or file_path == "" then
+    return nil, "diffview has no active file entry"
+  end
+  return {
+    file_path = file_path,
+    line_number = 1,
+    line_side = nil,
+    bufnr = nil,
+    view = view,
+  }, nil
 end
 
 ---@param file_path string
@@ -1089,7 +1146,7 @@ end
 
 --- list comments.
 function M.list_comments()
-  local context, context_err = current_context()
+  local context, context_err = context_for_list_comments()
   if not context then
     Util.error(context_err or "No diffview context")
     return
@@ -1107,7 +1164,11 @@ function M.list_comments()
   end
   local comments = jumpable_comments_for_context(diff_id, context)
   if #comments == 0 then
-    Util.info("No jumpable draft comments for current diff file/side")
+    if context.line_side then
+      Util.info("No jumpable draft comments for current diff file/side")
+    else
+      Util.info("No jumpable draft comments for current diff file")
+    end
     return
   end
 

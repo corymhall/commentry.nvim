@@ -476,7 +476,15 @@ function M.setup()
     pattern = "DiffviewViewPostLayout",
     callback = function()
       mark_view_buffers()
-      vim.schedule(sync_comments_for_view)
+      sync_comments_for_view()
+    end,
+  })
+  vim.api.nvim_create_autocmd("User", {
+    group = Config.augroup,
+    pattern = "DiffviewDiffBufRead",
+    callback = function()
+      M.mark_current_buffer()
+      sync_comments_for_view()
     end,
   })
   vim.api.nvim_create_autocmd("User", {
@@ -484,7 +492,7 @@ function M.setup()
     pattern = "DiffviewDiffBufWinEnter",
     callback = function()
       M.mark_current_buffer()
-      vim.schedule(sync_comments_for_view)
+      sync_comments_for_view()
     end,
   })
 end
@@ -627,6 +635,44 @@ function M.focus_file(view, path)
   end
 
   return false, "unable_to_focus_file"
+end
+
+---@param view? table
+---@param line_side string
+---@return boolean, string|nil
+function M.focus_file_side(view, line_side)
+  if type(view) ~= "table" then
+    return false, "view_unavailable"
+  end
+  if line_side ~= "base" and line_side ~= "head" then
+    return false, "line_side_required"
+  end
+  if type(view.cur_entry) ~= "table" or type(view.cur_entry.layout) ~= "table" then
+    return false, "entry_layout_unavailable"
+  end
+
+  local side_key = line_side == "base" and "a" or "b"
+  local slot = view.cur_entry.layout[side_key]
+  if type(slot) ~= "table" then
+    return false, "target_side_unavailable"
+  end
+
+  local winid = slot.winid
+  if type(winid) == "number" and winid > 0 and vim.api.nvim_win_is_valid(winid) then
+    vim.api.nvim_set_current_win(winid)
+    return true, nil
+  end
+
+  local bufnr = slot.file and slot.file.bufnr or nil
+  if type(bufnr) == "number" and bufnr > 0 and vim.api.nvim_buf_is_valid(bufnr) then
+    local bufwin = vim.fn.bufwinid(bufnr)
+    if type(bufwin) == "number" and bufwin > 0 and vim.api.nvim_win_is_valid(bufwin) then
+      vim.api.nvim_set_current_win(bufwin)
+      return true, nil
+    end
+  end
+
+  return false, "target_window_unavailable"
 end
 
 local TYPE_LABEL = {
