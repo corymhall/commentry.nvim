@@ -1,5 +1,5 @@
-local Diffview = require("commentry.diffview")
 local Config = require("commentry.config")
+local Diffview = require("commentry.diffview")
 local Store = require("commentry.store")
 local Util = require("commentry.util")
 
@@ -591,10 +591,12 @@ local function reconcile_for_context(diff_id, context)
       local current = line_text_at(context.bufnr, anchor_line)
       mismatched = current ~= nil and current ~= comment.line_content
     end
-    if comment.file_path == context.file_path
+    if
+      comment.file_path == context.file_path
       and comment.line_side == context.line_side
       and (not in_range or mismatched)
-      and comment.status ~= "unresolved" then
+      and comment.status ~= "unresolved"
+    then
       unresolved[#unresolved + 1] = comment.id
       comment.status = "unresolved"
       comment.updated_at = timestamp()
@@ -654,9 +656,11 @@ local function render_for_context(context)
   local dstate = diff_state(diff_id)
   local comments = {}
   for _, comment in ipairs(dstate.comments) do
-    if comment.file_path == context.file_path
+    if
+      comment.file_path == context.file_path
       and comment.line_side == context.line_side
-      and comment.status ~= "unresolved" then
+      and comment.status ~= "unresolved"
+    then
       comments[#comments + 1] = comment
     end
   end
@@ -680,10 +684,12 @@ local function active_comments_for_line(context)
   local dstate = diff_state(diff_id)
   local comments = {}
   for _, comment in ipairs(dstate.comments) do
-    if comment.file_path == context.file_path
+    if
+      comment.file_path == context.file_path
       and comment.line_side == context.line_side
       and contains_line(comment, context.line_number)
-      and comment.status ~= "unresolved" then
+      and comment.status ~= "unresolved"
+    then
       comments[#comments + 1] = comment
     end
   end
@@ -697,9 +703,11 @@ local function jumpable_comments_for_context(diff_id, context)
   local dstate = diff_state(diff_id)
   local comments = {}
   for _, comment in ipairs(dstate.comments) do
-    if comment.status ~= "unresolved"
+    if
+      comment.status ~= "unresolved"
       and comment.file_path == context.file_path
-      and comment.line_side == context.line_side then
+      and comment.line_side == context.line_side
+    then
       comments[#comments + 1] = comment
     end
   end
@@ -755,6 +763,33 @@ local function list_entry_label(comment)
   end
   local comment_type = comment.comment_type or "note"
   return ("%s @ %s [%s] %s"):format(comment.file_path, comment_location_label(comment), comment_type, preview)
+end
+
+---@class commentry.ListCommentPickerItem
+---@field comment commentry.DraftComment
+---@field file string
+---@field pos integer[]
+
+---@param comments commentry.DraftComment[]
+---@return commentry.ListCommentPickerItem[]
+local function list_picker_items(comments)
+  local items = {}
+  for _, comment in ipairs(comments) do
+    local line = math.max(line_start_for(comment) or comment.line_number or 1, 1)
+    items[#items + 1] = {
+      comment = comment,
+      file = comment.file_path,
+      pos = { line, 0 },
+    }
+  end
+  return items
+end
+
+---@param item commentry.ListCommentPickerItem|commentry.DraftComment
+---@return string
+local function list_picker_label(item)
+  local comment = item.comment or item
+  return list_entry_label(comment)
 end
 
 ---@param comment commentry.DraftComment
@@ -861,7 +896,8 @@ function M.build_anchor(file_path, line_start, line_side, line_end)
     line_start = line_start,
     line_end = line_end,
     line_side = line_side,
-  }, nil
+  },
+    nil
 end
 
 ---@param anchor commentry.Anchor
@@ -1075,16 +1111,153 @@ function M.list_comments()
     return
   end
 
+  local items = list_picker_items(comments)
+  local dstate = diff_state(diff_id)
+  local root = project_root_for_view(context.view)
   local snacks = require("snacks")
-  snacks.picker.select(comments, {
-    prompt = "Commentry draft comments",
-    format_item = list_entry_label,
-  }, function(choice)
-    if not choice then
+
+  ---@param item any
+  ---@return commentry.DraftComment|nil
+  local function picker_item_comment(item)
+    local selected = item and (item.item or item) or nil
+    local target = selected and selected.comment or nil
+    if type(target) ~= "table" or type(target.id) ~= "string" then
+      return nil
+    end
+    return target
+  end
+
+  ---@param comment_id string
+  ---@return boolean
+  local function remove_picker_item(comment_id)
+    local removed = false
+    for i = #items, 1, -1 do
+      local comment = items[i].comment
+      if comment and comment.id == comment_id then
+        table.remove(items, i)
+        removed = true
+      end
+    end
+    return removed
+  end
+
+  ---@param picker any
+  ---@param targets commentry.DraftComment[]
+  local function delete_picker_comments(picker, targets)
+    if #targets == 0 then
+      Util.debug("list-comments delete skipped: no targets selected")
+      Util.info("No comments selected")
       return
     end
-    jump_to_comment(choice)
-  end)
+
+    local prompt = (#targets == 1) and ("Delete draft comment %q?"):format(targets[1].id)
+      or ("Delete %d draft comments?"):format(#targets)
+
+    snacks.picker.select({ "Yes", "No" }, {
+      prompt = prompt,
+    }, function(_, idx)
+      if idx ~= 1 then
+        Util.debug("list-comments delete cancelled by user")
+        return
+      end
+
+      local seen = {}
+      local deleted = 0
+      for _, target in ipairs(targets) do
+        if type(target) == "table" and type(target.id) == "string" and not seen[target.id] then
+          seen[target.id] = true
+          remove_comment(dstate, target.id)
+          remove_comment_from_threads(dstate, target.id)
+          if remove_picker_item(target.id) then
+            deleted = deleted + 1
+          end
+        end
+      end
+
+      if deleted == 0 then
+        Util.debug("list-comments delete skipped: no matching picker items removed", {
+          target_count = #targets,
+        })
+        return
+      end
+
+      mark_dirty(diff_id)
+      render_for_context(context)
+      persist_for_view(diff_id, context.view, "Failed to persist comment")
+
+      if #items == 0 then
+        picker:close()
+        Util.info("No jumpable draft comments for current diff file/side")
+        return
+      end
+
+      picker:refresh()
+    end)
+  end
+
+  for _, item in ipairs(items) do
+    item.text = list_picker_label(item)
+  end
+
+  snacks.picker.pick({
+    title = "Commentry draft comments",
+    items = items,
+    preview = "file",
+    layout = {
+      preset = "default",
+    },
+    cwd = root,
+    format = function(item)
+      return { { item.text or list_picker_label(item) } }
+    end,
+    actions = {
+        ["delete_comment"] = function(picker, item)
+          local selected = item or picker:selected({ fallback = true })[1]
+          local target = picker_item_comment(selected)
+          if not target then
+            Util.debug("list-comments delete action had no target", {
+              has_item = item ~= nil,
+              selected_count = #picker:selected(),
+            })
+            return
+          end
+          delete_picker_comments(picker, { target })
+        end,
+
+        ["delete_comment_selected"] = function(picker)
+          local selected = picker:selected()
+          local targets = {}
+          for _, item in ipairs(selected) do
+            local target = picker_item_comment(item)
+            if target then
+              targets[#targets + 1] = target
+            end
+          end
+          delete_picker_comments(picker, targets)
+        end,
+      },
+    win = {
+      input = {
+        keys = {
+          ["<c-d>"] = { "delete_comment", mode = { "i", "n" }, desc = "delete comment" },
+          ["<m-d>"] = { "delete_comment_selected", mode = { "i", "n" }, desc = "delete selected comments" },
+        },
+      },
+      list = {
+        keys = {
+          ["<c-d>"] = { "delete_comment", mode = { "n", "x" }, desc = "delete comment" },
+          ["<m-d>"] = { "delete_comment_selected", mode = { "n", "x" }, desc = "delete selected comments" },
+        },
+      },
+    },
+    confirm = function(_, item)
+      local choice = item and (item.item or item) or nil
+      if not choice then
+        return
+      end
+      jump_to_comment(choice.comment or choice)
+    end,
+  })
 end
 
 ---@param diff_id string
@@ -1525,10 +1698,15 @@ local function set_editor_winbar(win, comment_type, title)
   if type(win) ~= "number" or not vim.api.nvim_win_is_valid(win) then
     return
   end
-  pcall(vim.api.nvim_set_option_value, "winbar", ("%s [%s]  Enter:newline  C-s:save  q/Esc:cancel  Tab:type"):format(title, comment_type), {
-    scope = "local",
-    win = win,
-  })
+  pcall(
+    vim.api.nvim_set_option_value,
+    "winbar",
+    ("%s [%s]  Enter:newline  C-s:save  q/Esc:cancel  Tab:type"):format(title, comment_type),
+    {
+      scope = "local",
+      win = win,
+    }
+  )
 end
 
 ---@param opts table

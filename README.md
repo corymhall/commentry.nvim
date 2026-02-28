@@ -39,7 +39,7 @@ require("commentry").setup({
 `commentry.nvim` provides a `:Commentry` command with subcommands.
 
 - `:Commentry open` opens a diffview for local changes (shortcut).
-- `:Commentry list-comments` opens a picker for draft comments on the current file/side.
+- `:Commentry list-comments` opens a Snacks picker for draft comments on the current file/side, with source preview and in-picker delete (`<C-d>` current, `<M-d>` selected).
 - `:Commentry set-comment-type` sets default or per-comment type (`note`, `suggestion`, `issue`, `praise`).
 - `:Commentry toggle-file-reviewed` toggles reviewed status for the current diff file.
 - `:Commentry next-unreviewed` jumps to the next unreviewed diff file in panel order.

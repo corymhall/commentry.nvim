@@ -110,6 +110,7 @@ describe("commentry.comments persistence", function()
   local original_getpos
   local original_snacks
   local original_util
+  local original_snacks_picker_util
   local original_setreg
   local original_print
 
@@ -133,6 +134,7 @@ describe("commentry.comments persistence", function()
     original_ui_select = vim.ui.select
     original_getpos = vim.fn.getpos
     original_snacks = package.loaded["snacks"]
+    original_snacks_picker_util = package.loaded["snacks.picker.util"]
     original_util = package.loaded["commentry.util"]
     original_setreg = vim.fn.setreg
     original_print = _G.print
@@ -146,6 +148,7 @@ describe("commentry.comments persistence", function()
     vim.ui.select = original_ui_select
     vim.fn.getpos = original_getpos
     package.loaded["snacks"] = original_snacks
+    package.loaded["snacks.picker.util"] = original_snacks_picker_util
     package.loaded["commentry.util"] = original_util
     vim.fn.setreg = original_setreg
     _G.print = original_print
@@ -1678,6 +1681,11 @@ describe("commentry.comments persistence", function()
 
     package.loaded["snacks"] = {
       picker = {
+        pick = function(opts)
+          captured_items = opts.items
+          captured_opts = opts
+          opts.confirm(nil, opts.items[1])
+        end,
         select = function(items, opts, cb)
           captured_items = items
           captured_opts = opts
@@ -1694,14 +1702,301 @@ describe("commentry.comments persistence", function()
 
     assert.is_table(captured_items)
     assert.are.same(1, #captured_items)
-    assert.are.same("c1", captured_items[1].id)
-    assert.are.same("Commentry draft comments", captured_opts.prompt)
-    assert.is_true(type(captured_opts.format_item) == "function")
-    local label = captured_opts.format_item(captured_items[1])
+    assert.are.same("c1", captured_items[1].comment.id)
+    assert.are.same("file.lua", captured_items[1].file)
+    assert.are.same({ 4, 0 }, captured_items[1].pos)
+    assert.are.same("Commentry draft comments", captured_opts.title)
+    assert.is_true(type(captured_opts.format) == "function")
+    assert.are.same("file", captured_opts.preview)
+    assert.are.same("default", captured_opts.layout.preset)
+    assert.is_true(type(captured_opts.actions.delete_comment) == "function")
+    assert.is_true(type(captured_opts.actions.delete_comment_selected) == "function")
+    assert.are.same("delete_comment", captured_opts.win.list.keys["<c-d>"][1])
+    assert.are.same("delete_comment", captured_opts.win.input.keys["<c-d>"][1])
+    assert.are.same("delete_comment_selected", captured_opts.win.list.keys["<m-d>"][1])
+    assert.are.same("delete_comment_selected", captured_opts.win.input.keys["<m-d>"][1])
+    local label = captured_opts.format(captured_items[1], {})[1][1]
     assert.is_true(label:find("file.lua @ head:L4", 1, true) ~= nil)
     assert.is_true(label:find("[note]", 1, true) ~= nil)
     assert.is_true(label:find("first draft", 1, true) ~= nil)
     assert.are.same({ 4, 0 }, moved_cursor)
+  end)
+
+  it("deletes selected comments via list picker action and refreshes picker", function()
+    local writes = 0
+    local persisted = nil
+    local captured_items = nil
+    local captured_opts = nil
+
+    package.loaded["snacks"] = {
+      picker = {
+        pick = function(opts)
+          captured_items = opts.items
+          captured_opts = opts
+        end,
+        select = function(items, opts, cb)
+          if type(items) == "table" and items[1] == "Yes" and type(cb) == "function" then
+            cb(items[1], 1)
+            return
+          end
+          captured_items = items
+          captured_opts = opts
+        end,
+      },
+    }
+
+    local comments = load_with_stubs({
+      store = {
+        path_for_project = function()
+          return "/tmp/project/.commentry/commentry.json"
+        end,
+        read = function()
+          return {
+            project_root = "/tmp/project",
+            diff_id = "/tmp/project",
+            comments = {
+              {
+                id = "c1",
+                diff_id = "/tmp/project",
+                file_path = "file.lua",
+                line_number = 4,
+                line_side = "head",
+                comment_type = "note",
+                body = "first draft",
+              },
+              {
+                id = "c2",
+                diff_id = "/tmp/project",
+                file_path = "file.lua",
+                line_number = 9,
+                line_side = "head",
+                comment_type = "note",
+                body = "second draft",
+              },
+            },
+            threads = {
+              {
+                id = "t-/tmp/project-file.lua|head|4",
+                diff_id = "/tmp/project",
+                file_path = "file.lua",
+                line_number = 4,
+                line_side = "head",
+                comment_ids = { "c1" },
+              },
+              {
+                id = "t-/tmp/project-file.lua|head|9",
+                diff_id = "/tmp/project",
+                file_path = "file.lua",
+                line_number = 9,
+                line_side = "head",
+                comment_ids = { "c2" },
+              },
+            },
+          }
+        end,
+        write = function(_, store_data)
+          writes = writes + 1
+          persisted = store_data
+          return true
+        end,
+      },
+      diffview = {
+        get_current_view = function()
+          return { git_root = "/tmp/project" }
+        end,
+        current_file_context = function()
+          return {
+            file_path = "file.lua",
+            line_number = 1,
+            line_side = "head",
+            bufnr = 1,
+            view = { git_root = "/tmp/project" },
+          }
+        end,
+        render_comment_markers = function()
+          return
+        end,
+        render_hover_preview = function()
+          return
+        end,
+        clear_hover_preview = function()
+          return
+        end,
+      },
+    })
+
+    comments.load_for_view({ git_root = "/tmp/project" })
+    comments.list_comments()
+
+    local refreshed = 0
+    local closed = 0
+    local fake_picker = {
+      selected = function()
+        return {}
+      end,
+      refresh = function()
+        refreshed = refreshed + 1
+      end,
+      close = function()
+        closed = closed + 1
+      end,
+    }
+
+    captured_opts.actions.delete_comment(fake_picker, { item = captured_items[1] })
+
+    assert.is_true(writes >= 1)
+    assert.are.same(1, refreshed)
+    assert.are.same(0, closed)
+    assert.is_table(persisted)
+    assert.are.same(1, #persisted.comments)
+    assert.are.same("c2", persisted.comments[1].id)
+    assert.are.same(1, #captured_items)
+    assert.are.same("c2", captured_items[1].comment.id)
+  end)
+
+  it("deletes multi-selected comments via list picker action", function()
+    local writes = 0
+    local persisted = nil
+    local captured_items = nil
+    local captured_opts = nil
+
+    package.loaded["snacks"] = {
+      picker = {
+        pick = function(opts)
+          captured_items = opts.items
+          captured_opts = opts
+        end,
+        select = function(items, opts, cb)
+          if type(items) == "table" and items[1] == "Yes" and type(cb) == "function" then
+            cb(items[1], 1)
+            return
+          end
+          captured_items = items
+          captured_opts = opts
+        end,
+      },
+    }
+
+    local comments = load_with_stubs({
+      store = {
+        path_for_project = function()
+          return "/tmp/project/.commentry/commentry.json"
+        end,
+        read = function()
+          return {
+            project_root = "/tmp/project",
+            diff_id = "/tmp/project",
+            comments = {
+              {
+                id = "c1",
+                diff_id = "/tmp/project",
+                file_path = "file.lua",
+                line_number = 4,
+                line_side = "head",
+                comment_type = "note",
+                body = "first draft",
+              },
+              {
+                id = "c2",
+                diff_id = "/tmp/project",
+                file_path = "file.lua",
+                line_number = 9,
+                line_side = "head",
+                comment_type = "note",
+                body = "second draft",
+              },
+              {
+                id = "c3",
+                diff_id = "/tmp/project",
+                file_path = "file.lua",
+                line_number = 11,
+                line_side = "head",
+                comment_type = "note",
+                body = "third draft",
+              },
+            },
+            threads = {
+              {
+                id = "t-/tmp/project-file.lua|head|4",
+                diff_id = "/tmp/project",
+                file_path = "file.lua",
+                line_number = 4,
+                line_side = "head",
+                comment_ids = { "c1" },
+              },
+              {
+                id = "t-/tmp/project-file.lua|head|9",
+                diff_id = "/tmp/project",
+                file_path = "file.lua",
+                line_number = 9,
+                line_side = "head",
+                comment_ids = { "c2" },
+              },
+              {
+                id = "t-/tmp/project-file.lua|head|11",
+                diff_id = "/tmp/project",
+                file_path = "file.lua",
+                line_number = 11,
+                line_side = "head",
+                comment_ids = { "c3" },
+              },
+            },
+          }
+        end,
+        write = function(_, store_data)
+          writes = writes + 1
+          persisted = store_data
+          return true
+        end,
+      },
+      diffview = {
+        get_current_view = function()
+          return { git_root = "/tmp/project" }
+        end,
+        current_file_context = function()
+          return {
+            file_path = "file.lua",
+            line_number = 1,
+            line_side = "head",
+            bufnr = 1,
+            view = { git_root = "/tmp/project" },
+          }
+        end,
+        render_comment_markers = function()
+          return
+        end,
+        render_hover_preview = function()
+          return
+        end,
+        clear_hover_preview = function()
+          return
+        end,
+      },
+    })
+
+    comments.load_for_view({ git_root = "/tmp/project" })
+    comments.list_comments()
+
+    local refreshed = 0
+    local fake_picker = {
+      selected = function()
+        return { { item = captured_items[1] }, { item = captured_items[2] } }
+      end,
+      refresh = function()
+        refreshed = refreshed + 1
+      end,
+      close = function() end,
+    }
+
+    captured_opts.actions.delete_comment_selected(fake_picker)
+
+    assert.is_true(writes >= 1)
+    assert.are.same(1, refreshed)
+    assert.is_table(persisted)
+    assert.are.same(1, #persisted.comments)
+    assert.are.same("c3", persisted.comments[1].id)
+    assert.are.same(1, #captured_items)
+    assert.are.same("c3", captured_items[1].comment.id)
   end)
 
   it("generates deterministic export markdown with typed range labels", function()
