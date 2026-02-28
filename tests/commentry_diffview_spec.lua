@@ -236,8 +236,14 @@ describe("commentry review context", function()
     local Diffview = require("commentry.diffview")
 
     local working_context = Diffview.resolve_review_context(nil, { git_root = "/tmp/commentry-project" })
-    local revision_context = Diffview.resolve_review_context({ "HEAD~1..HEAD" }, { git_root = "/tmp/commentry-project" })
-    local revision_context_again = Diffview.resolve_review_context({ "HEAD~1..HEAD" }, { git_root = "/tmp/commentry-project" })
+    local revision_context = Diffview.resolve_review_context(
+      { "HEAD~1..HEAD" },
+      { git_root = "/tmp/commentry-project" }
+    )
+    local revision_context_again = Diffview.resolve_review_context(
+      { "HEAD~1..HEAD" },
+      { git_root = "/tmp/commentry-project" }
+    )
 
     assert.are.same("working_tree", working_context.mode)
     assert.are.same("commit_range", revision_context.mode)

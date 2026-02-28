@@ -68,11 +68,12 @@ describe("commentry.codex.adapter", function()
   it("normalizes timeout-like transport failures to canonical TRANSPORT_FAILED", function()
     local ok, err = Adapter.send({ prompt = "ping" }, {
       send = function()
-        return false, {
-          code = "TRANSPORT_FAILED",
-          message = "timeout after 30s",
-          retryable = false,
-        }
+        return false,
+          {
+            code = "TRANSPORT_FAILED",
+            message = "timeout after 30s",
+            retryable = false,
+          }
       end,
     })
     assert_failure_contract(ok, err, {
@@ -98,11 +99,12 @@ describe("commentry.codex.adapter", function()
   it("maps unknown backend error objects to INTERNAL_ERROR", function()
     local ok, err = Adapter.send({ prompt = "ping" }, {
       send = function()
-        return false, {
-          code = "UNMAPPED",
-          message = "provider said this should leak",
-          retryable = false,
-        }
+        return false,
+          {
+            code = "UNMAPPED",
+            message = "provider said this should leak",
+            retryable = false,
+          }
       end,
     })
     assert_failure_contract(ok, err, {

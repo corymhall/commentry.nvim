@@ -51,7 +51,8 @@ describe("commentry.store", function()
     local resolved_root = vim.uv.fs_realpath(vim.fs.normalize(root)) or vim.fs.normalize(root)
     local home = vim.fs.normalize((vim.uv and vim.uv.os_homedir and vim.uv.os_homedir()) or vim.env.HOME)
     local repo_dir = vim.fs.normalize(resolved_root):gsub("[^%w%._%-]", "_")
-    local expected = vim.fs.joinpath(home, ".commentry", "repos", repo_dir, "contexts", "ctx_feature_abc", "commentry.json")
+    local expected =
+      vim.fs.joinpath(home, ".commentry", "repos", repo_dir, "contexts", "ctx_feature_abc", "commentry.json")
     assert.are.same(expected, path)
   end)
 

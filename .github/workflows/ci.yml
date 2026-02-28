@@ -11,30 +11,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - uses: JohnnyMorganz/stylua-action@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          version: latest
-          args: --check .
-
-      - uses: NTBBloowordbath/selene-action@v1.0.0
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          args: --display-style=quiet .
+      - uses: jdx/mise-action@v3
+      - name: Run lint tasks
+        run: mise run lint
 
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - uses: rhysd/action-setup-vim@v1
-        with:
-          neovim: true
-          version: stable
-
+      - uses: jdx/mise-action@v3
       - name: Run tests
-        run: ./scripts/test
+        run: mise run test
 
       - name: Run checkhealth
-        run: nvim --headless "+checkhealth commentry" +qa
+        run: mise run health

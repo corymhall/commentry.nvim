@@ -24,7 +24,11 @@ local function codex_health(codex)
   local adapter = type(codex.adapter) == "table" and codex.adapter or {}
   local selected = adapter.select or "auto"
   if selected ~= "auto" and selected ~= "sidekick" then
-    warn(("codex enabled with unsupported adapter.select=%q; configure \"auto\"/\"sidekick\" or disable codex"):format(selected))
+    warn(
+      ('codex enabled with unsupported adapter.select=%q; configure "auto"/"sidekick" or disable codex'):format(
+        selected
+      )
+    )
     return
   end
 

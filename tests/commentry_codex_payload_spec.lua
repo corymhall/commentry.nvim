@@ -382,7 +382,8 @@ describe("commentry.codex.payload", function()
             line_number = 10,
             line_side = "head",
             view = { id = "view-mixed" },
-          }, nil
+          },
+            nil
         end,
         resolve_review_context = function()
           return vim.deepcopy(fixture.review_context), nil

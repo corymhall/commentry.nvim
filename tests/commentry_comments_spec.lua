@@ -20,7 +20,10 @@ describe("commentry.comments helpers", function()
   it("builds and validates anchors", function()
     local anchor, err = Comments.build_anchor("file.lua", 5, "head")
     assert.is_nil(err)
-    assert.are.same({ file_path = "file.lua", line_number = 5, line_start = 5, line_end = 5, line_side = "head" }, anchor)
+    assert.are.same(
+      { file_path = "file.lua", line_number = 5, line_start = 5, line_end = 5, line_side = "head" },
+      anchor
+    )
 
     local ranged, ranged_err = Comments.build_anchor("file.lua", 5, "head", 9)
     assert.is_nil(ranged_err)

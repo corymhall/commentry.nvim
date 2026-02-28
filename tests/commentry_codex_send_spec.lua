@@ -55,7 +55,8 @@ describe("commentry.codex.send", function()
             line_number = 3,
             line_side = "head",
             view = { id = "view-1" },
-          }, nil
+          },
+            nil
         end,
         resolve_review_context = function(_, view)
           seen_view = view
@@ -63,7 +64,8 @@ describe("commentry.codex.send", function()
             context_id = "ctx-diffview",
             mode = "working_tree",
             root = "/tmp/project",
-          }, nil
+          },
+            nil
         end,
       },
       comments = {
@@ -73,7 +75,14 @@ describe("commentry.codex.send", function()
         exportable_comments = function(context_id)
           seen_context_id = context_id
           return {
-            { id = "c-1", diff_id = context_id, body = "draft", file_path = "a.lua", line_number = 3, line_side = "head" },
+            {
+              id = "c-1",
+              diff_id = context_id,
+              body = "draft",
+              file_path = "a.lua",
+              line_number = 3,
+              line_side = "head",
+            },
           }
         end,
       },
@@ -137,14 +146,16 @@ describe("commentry.codex.send", function()
             line_number = 3,
             line_side = "head",
             view = { id = "view-2" },
-          }, nil
+          },
+            nil
         end,
         resolve_review_context = function()
           return {
             context_id = "ctx-2",
             mode = "working_tree",
             root = "/tmp/project",
-          }, nil
+          },
+            nil
         end,
       },
       comments = {
@@ -206,14 +217,16 @@ describe("commentry.codex.send", function()
             line_number = 3,
             line_side = "head",
             view = { id = "view-adapter-unavailable" },
-          }, nil
+          },
+            nil
         end,
         resolve_review_context = function()
           return {
             context_id = "ctx-adapter-unavailable",
             mode = "working_tree",
             root = "/tmp/project",
-          }, nil
+          },
+            nil
         end,
       },
       comments = {
@@ -278,7 +291,8 @@ describe("commentry.codex.send", function()
             context_id = "ctx-fallback",
             mode = "working_tree",
             root = "/tmp/project",
-          }, nil
+          },
+            nil
         end,
       },
       comments = {
@@ -339,14 +353,16 @@ describe("commentry.codex.send", function()
             line_number = 3,
             line_side = "head",
             view = { id = "view-3" },
-          }, nil
+          },
+            nil
         end,
         resolve_review_context = function()
           return {
             context_id = "ctx-3",
             mode = "working_tree",
             root = "/tmp/project",
-          }, nil
+          },
+            nil
         end,
       },
       comments = {
@@ -422,14 +438,16 @@ describe("commentry.codex.send", function()
             line_number = 3,
             line_side = "head",
             view = { id = "view-4" },
-          }, nil
+          },
+            nil
         end,
         resolve_review_context = function()
           return {
             context_id = "ctx-4",
             mode = "working_tree",
             root = "/tmp/project",
-          }, nil
+          },
+            nil
         end,
       },
       comments = {
@@ -453,11 +471,12 @@ describe("commentry.codex.send", function()
           return { code = "INTERNAL_ERROR", message = "Internal adapter error.", retryable = false }
         end,
         send = function()
-          return false, {
-            code = "TRANSPORT_FAILED",
-            message = "Adapter transport failed.",
-            retryable = true,
-          }
+          return false,
+            {
+              code = "TRANSPORT_FAILED",
+              message = "Adapter transport failed.",
+              retryable = true,
+            }
         end,
       },
       sidekick = {
@@ -496,14 +515,16 @@ describe("commentry.codex.send", function()
             line_number = 3,
             line_side = "head",
             view = { id = "view-ignore-opts-target" },
-          }, nil
+          },
+            nil
         end,
         resolve_review_context = function()
           return {
             context_id = "ctx-ignore-opts-target",
             mode = "working_tree",
             root = "/tmp/project",
-          }, nil
+          },
+            nil
         end,
       },
       comments = {
@@ -574,14 +595,16 @@ describe("commentry.codex.send", function()
             line_number = 3,
             line_side = "head",
             view = { id = "view-async" },
-          }, nil
+          },
+            nil
         end,
         resolve_review_context = function()
           return {
             context_id = "ctx-async",
             mode = "working_tree",
             root = "/tmp/project",
-          }, nil
+          },
+            nil
         end,
       },
       comments = {
@@ -590,7 +613,14 @@ describe("commentry.codex.send", function()
         end,
         exportable_comments = function()
           return {
-            { id = "c1", diff_id = "ctx-async", body = "draft", file_path = "a.lua", line_number = 3, line_side = "head" },
+            {
+              id = "c1",
+              diff_id = "ctx-async",
+              body = "draft",
+              file_path = "a.lua",
+              line_number = 3,
+              line_side = "head",
+            },
           }
         end,
       },
@@ -652,14 +682,16 @@ describe("commentry.codex.send", function()
             line_number = 3,
             line_side = "head",
             view = { id = "view-async-no-target" },
-          }, nil
+          },
+            nil
         end,
         resolve_review_context = function()
           return {
             context_id = "ctx-async-no-target",
             mode = "working_tree",
             root = "/tmp/project",
-          }, nil
+          },
+            nil
         end,
       },
       comments = {

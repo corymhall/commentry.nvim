@@ -55,7 +55,8 @@ local function report_send_failure(result)
     return
   end
   if code == "TRANSPORT_FAILED" then
-    local retry_hint = result.retryable and "This failure is retryable; try the command again." or "Review adapter logs before retrying."
+    local retry_hint = result.retryable and "This failure is retryable; try the command again."
+      or "Review adapter logs before retrying."
     Util.error({ base, retry_hint })
     return
   end
@@ -153,10 +154,20 @@ local function maybe_attach_keymaps(bufnr)
 
   local keymap_specs = {
     { action = "add_comment", mode = "n", desc = "Commentry add comment", handler = Comments.add_comment },
-    { action = "add_range_comment", mode = "x", desc = "Commentry add range comment", handler = Comments.add_range_comment },
+    {
+      action = "add_range_comment",
+      mode = "x",
+      desc = "Commentry add range comment",
+      handler = Comments.add_range_comment,
+    },
     { action = "edit_comment", mode = "n", desc = "Commentry edit comment", handler = Comments.edit_comment },
     { action = "delete_comment", mode = "n", desc = "Commentry delete comment", handler = Comments.delete_comment },
-    { action = "set_comment_type", mode = "n", desc = "Commentry set comment type", handler = Comments.set_comment_type },
+    {
+      action = "set_comment_type",
+      mode = "n",
+      desc = "Commentry set comment type",
+      handler = Comments.set_comment_type,
+    },
     {
       action = "toggle_file_reviewed",
       mode = "n",

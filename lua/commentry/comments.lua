@@ -707,7 +707,8 @@ local function jumpable_comments_for_context(diff_id, context)
     if
       comment.status ~= "unresolved"
       and comment.file_path == context.file_path
-      and (side == nil or comment.line_side == side) then
+      and (side == nil or comment.line_side == side)
+    then
       comments[#comments + 1] = comment
     end
   end
@@ -892,7 +893,8 @@ local function context_for_list_comments()
     line_side = nil,
     bufnr = nil,
     view = view,
-  }, nil
+  },
+    nil
 end
 
 ---@param file_path string
@@ -1272,31 +1274,31 @@ function M.list_comments()
       return { { item.text or list_picker_label(item) } }
     end,
     actions = {
-        ["delete_comment"] = function(picker, item)
-          local selected = item or picker:selected({ fallback = true })[1]
-          local target = picker_item_comment(selected)
-          if not target then
-            Util.debug("list-comments delete action had no target", {
-              has_item = item ~= nil,
-              selected_count = #picker:selected(),
-            })
-            return
-          end
-          delete_picker_comments(picker, { target })
-        end,
+      ["delete_comment"] = function(picker, item)
+        local selected = item or picker:selected({ fallback = true })[1]
+        local target = picker_item_comment(selected)
+        if not target then
+          Util.debug("list-comments delete action had no target", {
+            has_item = item ~= nil,
+            selected_count = #picker:selected(),
+          })
+          return
+        end
+        delete_picker_comments(picker, { target })
+      end,
 
-        ["delete_comment_selected"] = function(picker)
-          local selected = picker:selected()
-          local targets = {}
-          for _, item in ipairs(selected) do
-            local target = picker_item_comment(item)
-            if target then
-              targets[#targets + 1] = target
-            end
+      ["delete_comment_selected"] = function(picker)
+        local selected = picker:selected()
+        local targets = {}
+        for _, item in ipairs(selected) do
+          local target = picker_item_comment(item)
+          if target then
+            targets[#targets + 1] = target
           end
-          delete_picker_comments(picker, targets)
-        end,
-      },
+        end
+        delete_picker_comments(picker, targets)
+      end,
+    },
     win = {
       input = {
         keys = {
@@ -1859,7 +1861,12 @@ local function prompt_comment_body(opts, cb)
   vim.keymap.set("n", "<CR>", save, { buffer = bufnr, silent = true, desc = "Commentry save comment" })
   vim.keymap.set("n", "<Esc>", cancel, { buffer = bufnr, silent = true, desc = "Commentry cancel comment" })
   vim.keymap.set("n", "q", cancel, { buffer = bufnr, silent = true, desc = "Commentry cancel comment" })
-  vim.keymap.set({ "n", "i" }, "<Tab>", cycle_type, { buffer = bufnr, silent = true, desc = "Commentry cycle comment type" })
+  vim.keymap.set(
+    { "n", "i" },
+    "<Tab>",
+    cycle_type,
+    { buffer = bufnr, silent = true, desc = "Commentry cycle comment type" }
+  )
   vim.keymap.set("n", "<C-c>", cancel, { buffer = bufnr, silent = true, desc = "Commentry cancel comment" })
   -- Keep insert-mode Esc default behavior (exit insert) so users can switch
   -- to normal mode and press Enter to save without accidental cancellation.

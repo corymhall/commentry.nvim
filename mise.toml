@@ -1,0 +1,36 @@
+[tools]
+neovim = "stable"
+stylua = "latest"
+"cargo:selene" = "latest"
+
+[tasks.test]
+description = "Run mini.test suite"
+run = "./scripts/test"
+
+[tasks.docs]
+description = "Generate docs"
+run = "./scripts/docs"
+
+[tasks.format]
+description = "Format Lua sources"
+run = "stylua lua tests plugin repro.lua"
+
+[tasks.lint_stylua]
+description = "Check formatting with StyLua"
+run = "stylua --check lua tests plugin repro.lua"
+
+[tasks.lint_selene]
+description = "Lint Lua with Selene"
+run = "selene --display-style=quiet --allow-warnings lua plugin"
+
+[tasks.lint]
+description = "Run all lint checks"
+depends = ["lint_stylua", "lint_selene"]
+
+[tasks.health]
+description = "Run commentry checkhealth"
+run = "nvim --headless \"+checkhealth commentry\" +qa"
+
+[tasks.ci]
+description = "Run CI task set"
+depends = ["lint", "test", "health"]

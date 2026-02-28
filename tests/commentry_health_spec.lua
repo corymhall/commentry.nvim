@@ -154,7 +154,12 @@ describe("commentry.health", function()
     local health = require("commentry.health")
     health.check()
 
-    assert.is_true(vim.tbl_contains(seen.warn, "codex enabled but sidekick adapter is unavailable; install sidekick integration or set codex.enabled=false"))
+    assert.is_true(
+      vim.tbl_contains(
+        seen.warn,
+        "codex enabled but sidekick adapter is unavailable; install sidekick integration or set codex.enabled=false"
+      )
+    )
   end)
 
   it("warns when codex is enabled but sidekick runtime is unavailable", function()
@@ -190,7 +195,12 @@ describe("commentry.health", function()
     local health = require("commentry.health")
     health.check()
 
-    assert.is_true(vim.tbl_contains(seen.warn, "codex enabled but sidekick adapter runtime is unavailable; check sidekick install and active target session"))
+    assert.is_true(
+      vim.tbl_contains(
+        seen.warn,
+        "codex enabled but sidekick adapter runtime is unavailable; check sidekick install and active target session"
+      )
+    )
   end)
 
   it("reports codex adapter readiness when enabled and available", function()
@@ -226,7 +236,12 @@ describe("commentry.health", function()
     local health = require("commentry.health")
     health.check()
 
-    assert.is_true(vim.tbl_contains(seen.ok, "codex adapter ready (sidekick transport available); :Commentry send-to-codex uses attached session target"))
+    assert.is_true(
+      vim.tbl_contains(
+        seen.ok,
+        "codex adapter ready (sidekick transport available); :Commentry send-to-codex uses attached session target"
+      )
+    )
     assert.are.same(0, #seen.warn)
   end)
 end)

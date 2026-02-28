@@ -255,17 +255,20 @@ local function normalize_config(current)
   end
   current.comment_types = valid_comment_types
   if not vim.tbl_contains(current.comment_types, current.default_comment_type) then
-    Util.warn(("commentry setup: default_comment_type=%s is not present in comment_types; using %q"):format(
-      vim.inspect(current.default_comment_type),
-      current.comment_types[1]
-    ))
+    Util.warn(
+      ("commentry setup: default_comment_type=%s is not present in comment_types; using %q"):format(
+        vim.inspect(current.default_comment_type),
+        current.comment_types[1]
+      )
+    )
     current.default_comment_type = current.comment_types[1]
   end
 
   current.store.filename = normalize_scalar(current.store.filename, "string", defaults.store.filename, "store.filename")
   current.diffview.enabled =
     normalize_scalar(current.diffview.enabled, "boolean", defaults.diffview.enabled, "diffview.enabled")
-  current.diffview.prefer = normalize_scalar(current.diffview.prefer, "string", defaults.diffview.prefer, "diffview.prefer")
+  current.diffview.prefer =
+    normalize_scalar(current.diffview.prefer, "string", defaults.diffview.prefer, "diffview.prefer")
   current.diffview.auto_attach =
     normalize_scalar(current.diffview.auto_attach, "boolean", defaults.diffview.auto_attach, "diffview.auto_attach")
   current.diffview.comment_cards.max_width = normalize_scalar(
@@ -343,11 +346,16 @@ local function normalize_keymaps(keymaps)
     if value ~= nil then
       local allow_empty = keymap_empty_allowed[key] == true
       local expected_shape = allow_empty and 'string (use "" to disable)' or "non-empty string"
-      if type(value) ~= "string" then
-        warn_keymap_validation(key, value, expected_shape)
-      elseif value == "" and not allow_empty then
-        warn_keymap_validation(key, value, expected_shape)
-      elseif value ~= "" and not is_valid_keymap_format(value) then
+      local valid = type(value) == "string"
+      if valid then
+        if value == "" then
+          valid = allow_empty
+        else
+          valid = is_valid_keymap_format(value)
+        end
+      end
+
+      if not valid then
         warn_keymap_validation(key, value, expected_shape)
       else
         normalized[key] = value

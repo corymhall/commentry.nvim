@@ -170,9 +170,10 @@ local function resolve_sender()
         return false, Adapter.error("TRANSPORT_FAILED")
       end
 
-      return true, {
-        dispatched_items = type(payload) == "table" and type(payload.items) == "table" and #payload.items or nil,
-      }
+      return true,
+        {
+          dispatched_items = type(payload) == "table" and type(payload.items) == "table" and #payload.items or nil,
+        }
     end
   end
 

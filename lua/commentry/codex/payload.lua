@@ -93,7 +93,9 @@ end
 ---@param context table
 ---@return table
 local function normalize_provenance(provenance, context)
-  local root = normalize_root(provenance.repo_root or provenance.root or provenance.project_root or context.root or context.git_root)
+  local root = normalize_root(
+    provenance.repo_root or provenance.root or provenance.project_root or context.root or context.git_root
+  )
   local normalized = {}
 
   local function copy_value(key, value)

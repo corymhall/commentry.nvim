@@ -208,7 +208,10 @@ function M.send_current_review(opts)
   local target, adapter_name, target_err = resolve_target(opts)
   if target == nil then
     if target_err == "ADAPTER_UNAVAILABLE" then
-      return fail("ADAPTER_UNAVAILABLE", "Codex adapter is unavailable. Ensure Sidekick runtime is installed and loaded.")
+      return fail(
+        "ADAPTER_UNAVAILABLE",
+        "Codex adapter is unavailable. Ensure Sidekick runtime is installed and loaded."
+      )
     end
     return fail("NO_TARGET", "No attached Codex session target available. Attach a Sidekick session and retry.")
   end
@@ -241,10 +244,20 @@ function M.send_current_review_async(opts, cb)
   resolve_target_async(opts, function(target, adapter_name, target_err, target_message)
     if target == nil then
       if target_err == "ADAPTER_UNAVAILABLE" then
-        cb(fail("ADAPTER_UNAVAILABLE", target_message or "Codex adapter is unavailable. Ensure Sidekick runtime is installed and loaded."))
+        cb(
+          fail(
+            "ADAPTER_UNAVAILABLE",
+            target_message or "Codex adapter is unavailable. Ensure Sidekick runtime is installed and loaded."
+          )
+        )
         return
       end
-      cb(fail("NO_TARGET", target_message or "No attached Codex session target available. Attach a Sidekick session and retry."))
+      cb(
+        fail(
+          "NO_TARGET",
+          target_message or "No attached Codex session target available. Attach a Sidekick session and retry."
+        )
+      )
       return
     end
 

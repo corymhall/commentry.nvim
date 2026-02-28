@@ -706,7 +706,7 @@ local TYPE_PRIORITY = {
 
 ---@return table
 local function comment_card_config()
-  local cfg = (((Config.diffview or {}).comment_cards) or {})
+  local cfg = ((Config.diffview or {}).comment_cards or {})
   return {
     max_width = math.max(24, tonumber(cfg.max_width) or 88),
     max_body_lines = math.max(1, tonumber(cfg.max_body_lines) or 8),
@@ -716,7 +716,7 @@ end
 
 ---@return table
 local function comment_range_config()
-  local cfg = (((Config.diffview or {}).comment_ranges) or {})
+  local cfg = ((Config.diffview or {}).comment_ranges or {})
   return {
     enabled = cfg.enabled ~= false,
     line_highlight = cfg.line_highlight ~= false,

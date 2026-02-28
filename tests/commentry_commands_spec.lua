@@ -165,7 +165,11 @@ describe("commentry keymap attachment", function()
         send_to_codex = "gs",
       },
     }
-    package.loaded["commentry.diffview"] = { open = function() return true end }
+    package.loaded["commentry.diffview"] = {
+      open = function()
+        return true
+      end,
+    }
 
     package.loaded["commentry.commands"] = nil
     local Commands = require("commentry.commands")
@@ -241,7 +245,11 @@ describe("commentry keymap attachment", function()
         next_unreviewed_file = "gn",
       },
     }
-    package.loaded["commentry.diffview"] = { open = function() return true end }
+    package.loaded["commentry.diffview"] = {
+      open = function()
+        return true
+      end,
+    }
 
     package.loaded["commentry.commands"] = nil
     local Commands = require("commentry.commands")
@@ -409,7 +417,11 @@ describe("commentry keymap attachment", function()
         list_comments = "",
       },
     }
-    package.loaded["commentry.diffview"] = { open = function() return true end }
+    package.loaded["commentry.diffview"] = {
+      open = function()
+        return true
+      end,
+    }
 
     package.loaded["commentry.commands"] = nil
     local Commands = require("commentry.commands")
@@ -489,7 +501,11 @@ describe("commentry keymap attachment", function()
       diffview = { enabled = true },
       keymaps = nil,
     }
-    package.loaded["commentry.diffview"] = { open = function() return true end }
+    package.loaded["commentry.diffview"] = {
+      open = function()
+        return true
+      end,
+    }
 
     package.loaded["commentry.commands"] = nil
     local Commands = require("commentry.commands")
