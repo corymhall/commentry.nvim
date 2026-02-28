@@ -203,10 +203,14 @@ local function sanitize_known_keys(provided, defaults_table, prefix)
       end
     end
   end
-  for key, _ in pairs(known_nullable_keys) do
-    local exact = ("%s%s"):format(prefix, "fallback")
-    if key == exact and provided.fallback ~= nil then
-      sanitized.fallback = provided.fallback
+  for full_path, _ in pairs(known_nullable_keys) do
+    -- Match nullable keys whose full path starts with the current prefix.
+    if vim.startswith(full_path, prefix) then
+      local leaf = full_path:sub(#prefix + 1)
+      -- Only apply at the correct nesting level (leaf has no dots).
+      if not leaf:find(".", 1, true) and provided[leaf] ~= nil then
+        sanitized[leaf] = provided[leaf]
+      end
     end
   end
   return sanitized
@@ -356,7 +360,9 @@ end
 
 local state_dir = vim.fn.stdpath("state") .. "/commentry"
 local config = vim.deepcopy(defaults) --[[@as commentry.Config]]
-M.augroup = vim.api.nvim_create_augroup("commentry", { clear = true })
+-- Create the augroup once. Subsequent require() calls reuse the existing group
+-- without clearing autocmds that setup() registered.
+M.augroup = M.augroup or vim.api.nvim_create_augroup("commentry", { clear = true })
 
 ---@param name string
 function M.state(name)
@@ -372,16 +378,19 @@ function M.setup(opts)
   config = normalize_config(config)
   config.keymaps = normalize_keymaps(config.keymaps)
 
-  vim.api.nvim_create_user_command("Commentry", function(args)
-    require("commentry.commands").cmd(args)
-  end, {
-    range = true,
-    nargs = "?",
-    desc = "Commentry",
-    complete = function(_, line)
-      return require("commentry.commands").complete(line)
-    end,
-  })
+  -- Register the command if the plugin/ entrypoint hasn't already done so.
+  if vim.fn.exists(":Commentry") ~= 2 then
+    vim.api.nvim_create_user_command("Commentry", function(args)
+      require("commentry.commands").cmd(args)
+    end, {
+      range = true,
+      nargs = "?",
+      desc = "Commentry",
+      complete = function(_, line)
+        return require("commentry.commands").complete(line)
+      end,
+    })
+  end
 
   vim.schedule(function()
     vim.fn.mkdir(state_dir, "p")

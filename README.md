@@ -139,6 +139,16 @@ require("commentry").setup({
   and reports success/failure in Neovim messages.
 - v1 does not persist send history, delivery receipts, retries, or any outbound queue state.
 
+## Bug Reports
+
+Use the minimal repro config to isolate issues:
+
+```bash
+nvim --clean -u repro.lua
+```
+
+This bootstraps a clean Neovim with only commentry + diffview loaded.
+
 ## Troubleshooting
 
 - Draft store file does not exist yet:
