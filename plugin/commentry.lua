@@ -4,7 +4,6 @@ end
 vim.g.loaded_commentry = true
 
 vim.api.nvim_create_user_command("Commentry", function(args)
-  require("commentry").setup()
   require("commentry.commands").cmd(args)
 end, {
   range = true,
