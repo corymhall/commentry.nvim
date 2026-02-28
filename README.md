@@ -64,7 +64,7 @@ require("commentry").setup({
 
 ## Keymap Configuration
 
-Commentry supports seven configurable diffview-local keymap actions:
+Commentry supports nine configurable diffview-local keymap actions:
 
 | Action | Default | Mode | Empty-string disable (`""`) | Command fallback |
 | --- | --- | --- | --- | --- |
@@ -76,12 +76,13 @@ Commentry supports seven configurable diffview-local keymap actions:
 | `toggle_file_reviewed` | `mr` | Normal | Yes | `:Commentry toggle-file-reviewed` |
 | `next_unreviewed_file` | `]r` | Normal | Yes | `:Commentry next-unreviewed` |
 | `send_to_codex` | `ms` | Normal | No | `:Commentry send-to-codex` |
+| `list_comments` | `ml` | Normal | No | `:Commentry list-comments` |
 
 Notes:
 
 - Keymaps attach only in buffers marked as Commentry diffview buffers.
 - Empty-string disable is intentionally scoped to `toggle_file_reviewed` and `next_unreviewed_file`.
-- For remap-only actions (`add_comment`, `add_range_comment`, `edit_comment`, `delete_comment`, `set_comment_type`, `send_to_codex`), `""` is invalid and setup warns, then default/effective mapping remains active.
+- For remap-only actions (`add_comment`, `add_range_comment`, `edit_comment`, `delete_comment`, `set_comment_type`, `send_to_codex`, `list_comments`), `""` is invalid and setup warns, then default/effective mapping remains active.
 - `add_range_comment` mapping normally uses its configured/default value from setup normalization. The fallback chain to resolved `add_comment` (then `mc`) is a defensive runtime path when `Config.keymaps` is missing or bypasses normalization.
 
 Example override (partial remap + selective disable):
@@ -95,6 +96,7 @@ require("commentry").setup({
     delete_comment = "gd",
     set_comment_type = "gt",
     send_to_codex = "gs",
+    list_comments = "gl",
     toggle_file_reviewed = "",
     next_unreviewed_file = "]u",
   },

@@ -15,6 +15,7 @@ local fallback_keymap_defaults = {
   toggle_file_reviewed = "mr",
   next_unreviewed_file = "]r",
   send_to_codex = "ms",
+  list_comments = "ml",
 }
 
 local keymap_defaults = vim.deepcopy(Config.default_keymaps or fallback_keymap_defaults)
@@ -173,6 +174,12 @@ local function maybe_attach_keymaps(bufnr)
       mode = "n",
       desc = "Commentry send to codex",
       handler = send_to_codex_keymap,
+    },
+    {
+      action = "list_comments",
+      mode = "n",
+      desc = "Commentry list comments",
+      handler = Comments.list_comments,
     },
   }
 

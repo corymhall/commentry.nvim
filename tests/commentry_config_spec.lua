@@ -71,6 +71,7 @@ describe("commentry config", function()
       toggle_file_reviewed = "mr",
       next_unreviewed_file = "]r",
       send_to_codex = "ms",
+      list_comments = "ml",
     }
 
     for key, value in pairs(expected) do
@@ -95,6 +96,7 @@ describe("commentry config", function()
     assert.are.same("mr", Config.keymaps.toggle_file_reviewed)
     assert.are.same("]r", Config.keymaps.next_unreviewed_file)
     assert.are.same("ms", Config.keymaps.send_to_codex)
+    assert.are.same("ml", Config.keymaps.list_comments)
   end)
 
   it("normalizes malformed keymaps overrides back to defaults", function()
@@ -112,6 +114,7 @@ describe("commentry config", function()
       toggle_file_reviewed = "mr",
       next_unreviewed_file = "]r",
       send_to_codex = "ms",
+      list_comments = "ml",
     }, Config.keymaps)
   end)
 

@@ -176,7 +176,7 @@ describe("commentry keymap attachment", function()
     assert.is_nil(vim.b[bufnr].commentry_keymaps)
   end)
 
-  it("attaches eight action keymaps once with add_range fallback", function()
+  it("attaches nine action keymaps once with add_range fallback", function()
     local autocmd
     local mapped = {}
     local render_calls = 0
@@ -249,7 +249,7 @@ describe("commentry keymap attachment", function()
     autocmd.callback()
     autocmd.callback()
 
-    assert.are.same(8, #mapped)
+    assert.are.same(9, #mapped)
     assert.are.same(2, render_calls)
     assert.is_true(vim.b[bufnr].commentry_keymaps)
 
@@ -266,6 +266,7 @@ describe("commentry keymap attachment", function()
     assert.are.same("gf", by_desc["Commentry toggle file reviewed"].lhs)
     assert.are.same("gn", by_desc["Commentry jump next unreviewed file"].lhs)
     assert.are.same("ms", by_desc["Commentry send to codex"].lhs)
+    assert.are.same("ml", by_desc["Commentry list comments"].lhs)
   end)
 
   it("attaches keymaps when diffview marker is missing but current context matches buffer", function()
@@ -336,7 +337,7 @@ describe("commentry keymap attachment", function()
     Commands.setup()
     autocmd.callback()
 
-    assert.are.same(8, #mapped)
+    assert.are.same(9, #mapped)
     assert.is_true(vim.b[bufnr].commentry_keymaps)
     assert.is_true(vim.b[bufnr].commentry_diffview)
   end)
@@ -405,6 +406,7 @@ describe("commentry keymap attachment", function()
         toggle_file_reviewed = "",
         next_unreviewed_file = "",
         send_to_codex = "",
+        list_comments = "",
       },
     }
     package.loaded["commentry.diffview"] = { open = function() return true end }
@@ -414,7 +416,7 @@ describe("commentry keymap attachment", function()
     Commands.setup()
     autocmd.callback()
 
-    assert.are.same(6, #mapped)
+    assert.are.same(7, #mapped)
     local lhs_by_desc = {}
     for _, mapping in ipairs(mapped) do
       lhs_by_desc[mapping.desc] = mapping.lhs
@@ -425,6 +427,7 @@ describe("commentry keymap attachment", function()
     assert.are.same("md", lhs_by_desc["Commentry delete comment"])
     assert.are.same("mt", lhs_by_desc["Commentry set comment type"])
     assert.are.same("ms", lhs_by_desc["Commentry send to codex"])
+    assert.are.same("ml", lhs_by_desc["Commentry list comments"])
     assert.is_nil(lhs_by_desc["Commentry toggle file reviewed"])
     assert.is_nil(lhs_by_desc["Commentry jump next unreviewed file"])
   end)
@@ -493,7 +496,7 @@ describe("commentry keymap attachment", function()
     Commands.setup()
     autocmd.callback()
 
-    assert.are.same(8, #mapped)
+    assert.are.same(9, #mapped)
     local by_desc = {}
     for _, mapping in ipairs(mapped) do
       by_desc[mapping.desc] = mapping
@@ -507,6 +510,7 @@ describe("commentry keymap attachment", function()
     assert.are.same("mr", by_desc["Commentry toggle file reviewed"].lhs)
     assert.are.same("]r", by_desc["Commentry jump next unreviewed file"].lhs)
     assert.are.same("ms", by_desc["Commentry send to codex"].lhs)
+    assert.are.same("ml", by_desc["Commentry list comments"].lhs)
   end)
 end)
 
