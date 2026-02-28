@@ -15,6 +15,7 @@ Using lazy.nvim:
 ```
 
 `diffview.nvim` is required for the diff UI.
+Neovim `0.10+` is required.
 
 ## Setup
 

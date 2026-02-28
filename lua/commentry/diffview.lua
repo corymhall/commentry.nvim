@@ -5,6 +5,7 @@ local file_review_ns = vim.api.nvim_create_namespace("commentry-file-review")
 local uv = vim.uv or vim.loop
 local ROOT_CANDIDATE_KEYS = { "git_root", "toplevel", "root", "cwd", "path" }
 local view_context_by_tabpage = {}
+local setup_done = false
 
 --- mark buffer.
 local function mark_buffer(bufnr)
@@ -467,13 +468,18 @@ end
 
 --- setup.
 function M.setup()
+  if setup_done then
+    return
+  end
   if not Config.diffview.auto_attach then
     return
   end
+  setup_done = true
   M.ensure_highlights()
   vim.api.nvim_create_autocmd("User", {
     group = Config.augroup,
     pattern = "DiffviewViewPostLayout",
+    desc = "Commentry sync comments after diffview layout",
     callback = function()
       mark_view_buffers()
       sync_comments_for_view()
@@ -482,6 +488,7 @@ function M.setup()
   vim.api.nvim_create_autocmd("User", {
     group = Config.augroup,
     pattern = "DiffviewDiffBufRead",
+    desc = "Commentry mark/sync on diff buffer read",
     callback = function()
       M.mark_current_buffer()
       sync_comments_for_view()
@@ -490,6 +497,7 @@ function M.setup()
   vim.api.nvim_create_autocmd("User", {
     group = Config.augroup,
     pattern = "DiffviewDiffBufWinEnter",
+    desc = "Commentry mark/sync on diff buffer enter",
     callback = function()
       M.mark_current_buffer()
       sync_comments_for_view()

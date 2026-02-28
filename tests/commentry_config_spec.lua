@@ -253,4 +253,26 @@ describe("commentry config", function()
     assert.is_truthy(warns[1]:find("keymaps.set_comment_type", 1, true))
     assert.is_truthy(warns[1]:find("non%-empty string"))
   end)
+
+  it("warns on unknown config keys and ignores them", function()
+    local warns = {}
+    package.loaded["commentry.util"] = {
+      warn = function(msg)
+        warns[#warns + 1] = msg
+      end,
+    }
+
+    local Config = require("commentry.config")
+    Config.setup({
+      typo_option = true,
+      codex = {
+        mystery = "value",
+      },
+    })
+
+    assert.is_nil(Config.typo_option)
+    assert.is_false(vim.tbl_contains(warns, ""))
+    assert.is_truthy(vim.tbl_contains(warns, "commentry setup: unknown config key: typo_option"))
+    assert.is_truthy(vim.tbl_contains(warns, "commentry setup: unknown config key: codex.mystery"))
+  end)
 end)

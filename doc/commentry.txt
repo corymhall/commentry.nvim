@@ -5,6 +5,7 @@ INTRODUCTION                                     *commentry*
 commentry.nvim is a Neovim plugin scaffold intended for building
 PR-style review workflows for AI-generated code. This doc is minimal
 and will expand as features are added.
+Minimum Neovim version: 0.10+.
 
 SETUP                                             *commentry.setup*
 
@@ -37,6 +38,7 @@ Action matrix:
   toggle_file_reviewed    mr        Normal   Yes (`""`)      :Commentry toggle-file-reviewed
   next_unreviewed_file    ]r        Normal   Yes (`""`)      :Commentry next-unreviewed
   send_to_codex           ms        Normal   No              :Commentry send-to-codex
+  list_comments           ml        Normal   No              :Commentry list-comments
 
 Behavior notes:
 - Empty-string disable is intentionally supported only for
@@ -60,6 +62,7 @@ Example (partial remap + selective disable):
       delete_comment = "gd",
       set_comment_type = "gt",
       send_to_codex = "gs",
+      list_comments = "gl",
       toggle_file_reviewed = "",
       next_unreviewed_file = "]u",
     },

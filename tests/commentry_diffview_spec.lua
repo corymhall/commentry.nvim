@@ -208,11 +208,15 @@ describe("commentry.diffview comment cards", function()
     package.loaded["commentry.diffview"] = nil
     local Diffview = require("commentry.diffview")
     Diffview.setup()
+    Diffview.setup()
 
     assert.are.same(3, #autocmds)
     assert.are.same("User", autocmds[1].events)
     assert.are.same("User", autocmds[2].events)
     assert.are.same("User", autocmds[3].events)
+    assert.are.same("Commentry sync comments after diffview layout", autocmds[1].opts.desc)
+    assert.are.same("Commentry mark/sync on diff buffer read", autocmds[2].opts.desc)
+    assert.are.same("Commentry mark/sync on diff buffer enter", autocmds[3].opts.desc)
   end)
 end)
 

@@ -118,6 +118,195 @@ local keymap_empty_allowed = {
   next_unreviewed_file = true,
 }
 
+local known_nullable_keys = {
+  ["codex.adapter.fallback"] = true,
+}
+
+---@param tbl table
+---@return boolean
+local function is_list_table(tbl)
+  if vim.islist then
+    return vim.islist(tbl)
+  end
+  if vim.tbl_islist then
+    return vim.tbl_islist(tbl)
+  end
+  local max = 0
+  for key, _ in pairs(tbl) do
+    if type(key) ~= "number" or key < 1 or key % 1 ~= 0 then
+      return false
+    end
+    if key > max then
+      max = key
+    end
+  end
+  return max == #tbl
+end
+
+---@param defaults_table table
+---@param key any
+---@param prefix string
+---@return boolean
+local function has_declared_key(defaults_table, key, prefix)
+  if defaults_table[key] ~= nil then
+    return true
+  end
+  return known_nullable_keys[("%s%s"):format(prefix, tostring(key))] == true
+end
+
+---@param path string
+---@param value any
+---@param expected string
+local function warn_invalid_type(path, value, expected)
+  Util.warn(("commentry setup: %s=%s is invalid; expected %s"):format(path, vim.inspect(value), expected))
+end
+
+---@param provided table
+---@param defaults_table table
+---@param prefix string
+local function warn_unknown_keys(provided, defaults_table, prefix)
+  if type(provided) ~= "table" then
+    return
+  end
+  for key, value in pairs(provided) do
+    if not has_declared_key(defaults_table, key, prefix) then
+      Util.warn(("commentry setup: unknown config key: %s%s"):format(prefix, tostring(key)))
+    else
+      local default_value = defaults_table[key]
+      if type(default_value) == "table" and type(value) == "table" and not is_list_table(default_value) then
+        warn_unknown_keys(value, default_value, ("%s%s."):format(prefix, tostring(key)))
+      end
+    end
+  end
+end
+
+---@param provided table
+---@param defaults_table table
+---@param prefix string
+---@return table
+local function sanitize_known_keys(provided, defaults_table, prefix)
+  local sanitized = {}
+  if type(provided) ~= "table" then
+    return sanitized
+  end
+  for key, default_value in pairs(defaults_table) do
+    local value = provided[key]
+    if value ~= nil then
+      if type(default_value) == "table" and not is_list_table(default_value) then
+        if type(value) ~= "table" then
+          warn_invalid_type(("%s%s"):format(prefix, key), value, "table")
+        else
+          sanitized[key] = sanitize_known_keys(value, default_value, ("%s%s."):format(prefix, key))
+        end
+      else
+        sanitized[key] = value
+      end
+    end
+  end
+  for key, _ in pairs(known_nullable_keys) do
+    local exact = ("%s%s"):format(prefix, "fallback")
+    if key == exact and provided.fallback ~= nil then
+      sanitized.fallback = provided.fallback
+    end
+  end
+  return sanitized
+end
+
+---@param value any
+---@param expected string
+---@param fallback any
+---@param path string
+---@return any
+local function normalize_scalar(value, expected, fallback, path)
+  if type(value) == expected then
+    return value
+  end
+  warn_invalid_type(path, value, expected)
+  return fallback
+end
+
+---@param current commentry.Config
+---@return commentry.Config
+local function normalize_config(current)
+  current.debug = normalize_scalar(current.debug, "boolean", defaults.debug, "debug")
+  current.default_comment_type =
+    normalize_scalar(current.default_comment_type, "string", defaults.default_comment_type, "default_comment_type")
+
+  if type(current.comment_types) ~= "table" then
+    warn_invalid_type("comment_types", current.comment_types, "table")
+    current.comment_types = vim.deepcopy(defaults.comment_types)
+  end
+
+  local valid_comment_types = {}
+  for _, value in ipairs(current.comment_types) do
+    if type(value) == "string" and value ~= "" then
+      valid_comment_types[#valid_comment_types + 1] = value
+    else
+      warn_invalid_type("comment_types[]", value, "non-empty string")
+    end
+  end
+  if #valid_comment_types == 0 then
+    Util.warn("commentry setup: comment_types must include at least one non-empty string; using defaults")
+    valid_comment_types = vim.deepcopy(defaults.comment_types)
+  end
+  current.comment_types = valid_comment_types
+  if not vim.tbl_contains(current.comment_types, current.default_comment_type) then
+    Util.warn(("commentry setup: default_comment_type=%s is not present in comment_types; using %q"):format(
+      vim.inspect(current.default_comment_type),
+      current.comment_types[1]
+    ))
+    current.default_comment_type = current.comment_types[1]
+  end
+
+  current.store.filename = normalize_scalar(current.store.filename, "string", defaults.store.filename, "store.filename")
+  current.diffview.enabled =
+    normalize_scalar(current.diffview.enabled, "boolean", defaults.diffview.enabled, "diffview.enabled")
+  current.diffview.prefer = normalize_scalar(current.diffview.prefer, "string", defaults.diffview.prefer, "diffview.prefer")
+  current.diffview.auto_attach =
+    normalize_scalar(current.diffview.auto_attach, "boolean", defaults.diffview.auto_attach, "diffview.auto_attach")
+  current.diffview.comment_cards.max_width = normalize_scalar(
+    current.diffview.comment_cards.max_width,
+    "number",
+    defaults.diffview.comment_cards.max_width,
+    "diffview.comment_cards.max_width"
+  )
+  current.diffview.comment_cards.max_body_lines = normalize_scalar(
+    current.diffview.comment_cards.max_body_lines,
+    "number",
+    defaults.diffview.comment_cards.max_body_lines,
+    "diffview.comment_cards.max_body_lines"
+  )
+  current.diffview.comment_cards.show_markers = normalize_scalar(
+    current.diffview.comment_cards.show_markers,
+    "boolean",
+    defaults.diffview.comment_cards.show_markers,
+    "diffview.comment_cards.show_markers"
+  )
+  current.diffview.comment_ranges.enabled = normalize_scalar(
+    current.diffview.comment_ranges.enabled,
+    "boolean",
+    defaults.diffview.comment_ranges.enabled,
+    "diffview.comment_ranges.enabled"
+  )
+  current.diffview.comment_ranges.line_highlight = normalize_scalar(
+    current.diffview.comment_ranges.line_highlight,
+    "boolean",
+    defaults.diffview.comment_ranges.line_highlight,
+    "diffview.comment_ranges.line_highlight"
+  )
+  current.codex.enabled = normalize_scalar(current.codex.enabled, "boolean", defaults.codex.enabled, "codex.enabled")
+  current.codex.adapter.select =
+    normalize_scalar(current.codex.adapter.select, "string", defaults.codex.adapter.select, "codex.adapter.select")
+  if current.codex.adapter.fallback ~= nil and type(current.codex.adapter.fallback) ~= "string" then
+    warn_invalid_type("codex.adapter.fallback", current.codex.adapter.fallback, "string|nil")
+    current.codex.adapter.fallback = defaults.codex.adapter.fallback
+  end
+  current.codex.behavior.open =
+    normalize_scalar(current.codex.behavior.open, "string", defaults.codex.behavior.open, "codex.behavior.open")
+
+  return current
+end
+
 ---@param value string
 ---@return boolean
 local function is_valid_keymap_format(value)
@@ -176,7 +365,11 @@ end
 
 ---@param opts? commentry.Config
 function M.setup(opts)
-  config = vim.tbl_deep_extend("force", {}, vim.deepcopy(defaults), opts or {})
+  local provided = opts or {}
+  warn_unknown_keys(provided, defaults, "")
+  local sanitized = sanitize_known_keys(provided, defaults, "")
+  config = vim.tbl_deep_extend("force", {}, vim.deepcopy(defaults), sanitized)
+  config = normalize_config(config)
   config.keymaps = normalize_keymaps(config.keymaps)
 
   vim.api.nvim_create_user_command("Commentry", function(args)

@@ -6,6 +6,8 @@ describe("commentry.health", function()
   local original_snacks
   local original_config
   local original_sidekick
+  local original_fn_has
+  local original_fn_exists
 
   before_each(function()
     original_health = vim.health
@@ -13,6 +15,20 @@ describe("commentry.health", function()
     original_snacks = package.loaded["snacks"]
     original_config = package.loaded["commentry.config"]
     original_sidekick = package.loaded["commentry.codex.adapters.sidekick"]
+    original_fn_has = vim.fn.has
+    original_fn_exists = vim.fn.exists
+    vim.fn.has = function(feature)
+      if feature == "nvim-0.10" then
+        return 1
+      end
+      return original_fn_has(feature)
+    end
+    vim.fn.exists = function(expr)
+      if expr == ":Commentry" then
+        return 2
+      end
+      return original_fn_exists(expr)
+    end
   end)
 
   after_each(function()
@@ -21,6 +37,8 @@ describe("commentry.health", function()
     package.loaded["snacks"] = original_snacks
     package.loaded["commentry.config"] = original_config
     package.loaded["commentry.codex.adapters.sidekick"] = original_sidekick
+    vim.fn.has = original_fn_has
+    vim.fn.exists = original_fn_exists
     package.loaded["commentry.health"] = nil
   end)
 
@@ -49,6 +67,9 @@ describe("commentry.health", function()
     local health = require("commentry.health")
     health.check()
 
+    assert.is_true(vim.tbl_contains(seen.ok, "Neovim version is supported (>= 0.10)"))
+    assert.is_true(vim.tbl_contains(seen.ok, ":Commentry command is registered"))
+    assert.is_true(vim.tbl_contains(seen.ok, "commentry.config is loaded"))
     assert.is_true(vim.tbl_contains(seen.ok, "diffview.nvim is installed"))
     assert.is_true(vim.tbl_contains(seen.ok, "snacks.nvim picker.select is available for :Commentry list-comments"))
     assert.is_true(vim.tbl_contains(seen.ok, "codex integration disabled: :Commentry send-to-codex is inactive"))

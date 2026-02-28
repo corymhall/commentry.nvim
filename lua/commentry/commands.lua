@@ -337,6 +337,7 @@ function M.setup()
   vim.api.nvim_create_autocmd("User", {
     group = Config.augroup,
     pattern = "DiffviewDiffBufWinEnter",
+    desc = "Commentry attach diffview-local keymaps",
     callback = function()
       local bufnr = vim.api.nvim_get_current_buf()
       if type(Diffview.mark_current_buffer) == "function" then

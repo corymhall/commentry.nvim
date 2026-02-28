@@ -1855,12 +1855,12 @@ local function prompt_comment_body(opts, cb)
     set_editor_winbar(win, active_type, opts.title or "Comment")
   end
 
-  vim.keymap.set({ "n", "i" }, "<C-s>", save, { buffer = bufnr, silent = true })
-  vim.keymap.set("n", "<CR>", save, { buffer = bufnr, silent = true })
-  vim.keymap.set("n", "<Esc>", cancel, { buffer = bufnr, silent = true })
-  vim.keymap.set("n", "q", cancel, { buffer = bufnr, silent = true })
-  vim.keymap.set({ "n", "i" }, "<Tab>", cycle_type, { buffer = bufnr, silent = true })
-  vim.keymap.set("n", "<C-c>", cancel, { buffer = bufnr, silent = true })
+  vim.keymap.set({ "n", "i" }, "<C-s>", save, { buffer = bufnr, silent = true, desc = "Commentry save comment" })
+  vim.keymap.set("n", "<CR>", save, { buffer = bufnr, silent = true, desc = "Commentry save comment" })
+  vim.keymap.set("n", "<Esc>", cancel, { buffer = bufnr, silent = true, desc = "Commentry cancel comment" })
+  vim.keymap.set("n", "q", cancel, { buffer = bufnr, silent = true, desc = "Commentry cancel comment" })
+  vim.keymap.set({ "n", "i" }, "<Tab>", cycle_type, { buffer = bufnr, silent = true, desc = "Commentry cycle comment type" })
+  vim.keymap.set("n", "<C-c>", cancel, { buffer = bufnr, silent = true, desc = "Commentry cancel comment" })
   -- Keep insert-mode Esc default behavior (exit insert) so users can switch
   -- to normal mode and press Enter to save without accidental cancellation.
 

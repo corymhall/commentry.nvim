@@ -47,9 +47,33 @@ local function codex_health(codex)
   ok("codex adapter ready (sidekick transport available); :Commentry send-to-codex uses attached session target")
 end
 
+local function version_health()
+  if vim.fn.has("nvim-0.10") == 1 then
+    ok("Neovim version is supported (>= 0.10)")
+  else
+    error("Neovim >= 0.10 is required by commentry.nvim")
+  end
+end
+
+local function setup_health()
+  if vim.fn.exists(":Commentry") == 2 then
+    ok(":Commentry command is registered")
+  else
+    warn(":Commentry command is not registered; run require('commentry').setup()")
+  end
+
+  if package.loaded["commentry.config"] then
+    ok("commentry.config is loaded")
+  else
+    warn("commentry.config is not loaded; setup may not have run in this session")
+  end
+end
+
 --- check.
 function M.check()
   start("commentry")
+  version_health()
+  setup_health()
   if pcall(require, "diffview") then
     ok("diffview.nvim is installed")
   else
