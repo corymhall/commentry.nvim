@@ -51,6 +51,9 @@ M.ns = vim.api.nvim_create_namespace("commentry")
 ---@field sink "notify"|"echo"|"file"
 ---@field file string|nil
 
+---@class commentry.DiagnosticsConfig
+---@field open_style "split"|"vsplit"|"float"
+
 ---@class commentry.Config
 ---@field debug boolean
 ---@field keymaps commentry.Keymaps
@@ -60,6 +63,7 @@ M.ns = vim.api.nvim_create_namespace("commentry")
 ---@field diffview commentry.DiffviewConfig
 ---@field codex commentry.CodexConfig
 ---@field log commentry.LogConfig
+---@field diagnostics commentry.DiagnosticsConfig
 local defaults = {
   debug = false,
   keymaps = {
@@ -107,6 +111,9 @@ local defaults = {
     sink = "notify",
     file = nil,
   },
+  diagnostics = {
+    open_style = "split",
+  },
 }
 
 -- Canonical defaults shared across setup normalization and runtime fallback.
@@ -140,6 +147,12 @@ local log_sinks = {
   notify = true,
   echo = true,
   file = true,
+}
+
+local diagnostics_open_styles = {
+  split = true,
+  vsplit = true,
+  float = true,
 }
 
 local known_nullable_keys = {
@@ -356,6 +369,20 @@ local function normalize_config(current)
   if current.log.file ~= nil and type(current.log.file) ~= "string" then
     warn_invalid_type("log.file", current.log.file, "string|nil")
     current.log.file = defaults.log.file
+  end
+  current.diagnostics.open_style = normalize_scalar(
+    current.diagnostics.open_style,
+    "string",
+    defaults.diagnostics.open_style,
+    "diagnostics.open_style"
+  )
+  if not diagnostics_open_styles[current.diagnostics.open_style] then
+    Util.warn(
+      ("commentry setup: diagnostics.open_style=%s is invalid; expected one of split|vsplit|float"):format(
+        vim.inspect(current.diagnostics.open_style)
+      )
+    )
+    current.diagnostics.open_style = defaults.diagnostics.open_style
   end
 
   return current

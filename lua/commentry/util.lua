@@ -1,10 +1,17 @@
 local M = {}
-local Log = require("commentry.log")
 
 ---@param msg string|string[]
 ---@param level? vim.log.levels
 function M.notify(msg, level)
-  Log.notify_message(msg, level or vim.log.levels.INFO)
+  local log_loaded, Log = pcall(require, "commentry.log")
+  if log_loaded and type(Log) == "table" and type(Log.notify_message) == "function" then
+    Log.notify_message(msg, level or vim.log.levels.INFO)
+    return
+  end
+  msg = type(msg) == "table" and table.concat(msg, "\n") or msg
+  vim.schedule(function()
+    vim.notify(msg, level or vim.log.levels.INFO, { title = "Commentry" })
+  end)
 end
 
 ---@param msg string|string[]

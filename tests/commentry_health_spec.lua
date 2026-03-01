@@ -8,6 +8,7 @@ describe("commentry.health", function()
   local original_sidekick
   local original_fn_has
   local original_fn_exists
+  local original_fn_isdirectory
   local original_io_open
 
   before_each(function()
@@ -18,6 +19,7 @@ describe("commentry.health", function()
     original_sidekick = package.loaded["commentry.codex.adapters.sidekick"]
     original_fn_has = vim.fn.has
     original_fn_exists = vim.fn.exists
+    original_fn_isdirectory = vim.fn.isdirectory
     original_io_open = io.open
     vim.fn.has = function(feature)
       if feature == "nvim-0.10" then
@@ -41,6 +43,7 @@ describe("commentry.health", function()
     package.loaded["commentry.codex.adapters.sidekick"] = original_sidekick
     vim.fn.has = original_fn_has
     vim.fn.exists = original_fn_exists
+    vim.fn.isdirectory = original_fn_isdirectory
     io.open = original_io_open
     package.loaded["commentry.health"] = nil
   end)
@@ -313,6 +316,44 @@ describe("commentry.health", function()
     local found = false
     for _, message in ipairs(seen.warn) do
       if message:find("log file sink is not writable:", 1, true) then
+        found = true
+      end
+    end
+    assert.is_true(found)
+  end)
+
+  it("does not create store directory during health checks", function()
+    local seen = { ok = {} }
+    vim.health = {
+      start = function() end,
+      ok = function(msg)
+        seen.ok[#seen.ok + 1] = msg
+      end,
+      warn = function() end,
+      error = function() end,
+    }
+    vim.fn.isdirectory = function(path)
+      if type(path) == "string" and path:find(".commentry", 1, true) then
+        return 0
+      end
+      return original_fn_isdirectory(path)
+    end
+
+    package.loaded["diffview"] = {}
+    package.loaded["snacks"] = { picker = { select = function() end } }
+    package.loaded["commentry.config"] = {
+      codex = {
+        enabled = false,
+        adapter = { select = "auto" },
+      },
+    }
+
+    local health = require("commentry.health")
+    health.check()
+
+    local found = false
+    for _, message in ipairs(seen.ok) do
+      if message:find("comment store directory does not exist yet", 1, true) then
         found = true
       end
     end

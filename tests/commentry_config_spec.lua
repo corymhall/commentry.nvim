@@ -42,6 +42,7 @@ describe("commentry config", function()
     assert.are.same("warn", Config.log.level)
     assert.are.same("notify", Config.log.sink)
     assert.is_nil(Config.log.file)
+    assert.are.same("split", Config.diagnostics.open_style)
   end)
 
   it("deep-merges codex config deterministically", function()
@@ -320,5 +321,29 @@ describe("commentry config", function()
       vim.tbl_contains(warns, 'commentry setup: log.sink="stdout" is invalid; expected one of notify|echo|file')
     )
     assert.is_true(vim.tbl_contains(warns, "commentry setup: log.file=false is invalid; expected string|nil"))
+  end)
+
+  it("warns and restores default for invalid diagnostics open style", function()
+    local warns = {}
+    package.loaded["commentry.util"] = {
+      warn = function(msg)
+        warns[#warns + 1] = msg
+      end,
+    }
+
+    local Config = require("commentry.config")
+    Config.setup({
+      diagnostics = {
+        open_style = "tab",
+      },
+    })
+
+    assert.are.same("split", Config.diagnostics.open_style)
+    assert.is_true(
+      vim.tbl_contains(
+        warns,
+        'commentry setup: diagnostics.open_style="tab" is invalid; expected one of split|vsplit|float'
+      )
+    )
   end)
 end)

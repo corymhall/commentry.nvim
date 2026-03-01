@@ -16,7 +16,6 @@ end
 function M.dump()
   local Config = safe_require("commentry.config")
   local Comments = safe_require("commentry.comments")
-  local Store = safe_require("commentry.store")
   local Diffview = safe_require("commentry.diffview")
 
   local lines = {}
@@ -41,13 +40,6 @@ function M.dump()
     end
   end
 
-  if type(Store) == "table" and type(Store.debug_state) == "function" then
-    local state = Store.debug_state()
-    if type(state) == "table" then
-      lines[#lines + 1] = ("store.home=%s"):format(state.home or "nil")
-    end
-  end
-
   if type(Diffview) == "table" and type(Diffview.debug_state) == "function" then
     local state = Diffview.debug_state()
     if type(state) == "table" then
@@ -65,8 +57,39 @@ end
 
 function M.open()
   local text = M.dump()
-  vim.cmd("new")
-  local bufnr = vim.api.nvim_get_current_buf()
+  local Config = safe_require("commentry.config")
+  local style = "split"
+  if
+    type(Config) == "table"
+    and type(Config.diagnostics) == "table"
+    and type(Config.diagnostics.open_style) == "string"
+  then
+    style = Config.diagnostics.open_style
+  end
+
+  local bufnr = nil
+  if style == "float" then
+    bufnr = vim.api.nvim_create_buf(false, true)
+    local width = math.max(60, math.floor(vim.o.columns * 0.7))
+    local height = math.max(10, math.floor(vim.o.lines * 0.6))
+    local row = math.floor((vim.o.lines - height) / 2)
+    local col = math.floor((vim.o.columns - width) / 2)
+    vim.api.nvim_open_win(bufnr, true, {
+      relative = "editor",
+      width = width,
+      height = height,
+      row = row,
+      col = col,
+      style = "minimal",
+      border = "rounded",
+      title = " Commentry Diagnostics ",
+      title_pos = "center",
+    })
+  else
+    vim.cmd(style == "vsplit" and "vnew" or "new")
+    bufnr = vim.api.nvim_get_current_buf()
+  end
+
   vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, vim.split(text, "\n"))
   vim.bo[bufnr].buftype = "nofile"
   vim.bo[bufnr].swapfile = false

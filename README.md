@@ -26,6 +26,9 @@ require("commentry").setup({
     sink = "notify", -- notify|echo|file
     file = nil, -- path when sink == "file"
   },
+  diagnostics = {
+    open_style = "split", -- split|vsplit|float
+  },
   diffview = {
     comment_cards = {
       max_width = 88,

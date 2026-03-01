@@ -128,9 +128,8 @@ local function store_writable_health()
     return
   end
   local base = vim.fs.joinpath(vim.fs.normalize(home), ".commentry")
-  local mkdir_ok = pcall(vim.fn.mkdir, base, "p")
-  if not mkdir_ok then
-    warn(("comment store directory is not writable: %s"):format(base))
+  if vim.fn.isdirectory(base) ~= 1 then
+    ok(("comment store directory does not exist yet (created on first write): %s"):format(base))
     return
   end
   local probe = vim.fs.joinpath(base, ".health-write-test")
