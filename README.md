@@ -21,6 +21,11 @@ Neovim `0.10+` is required.
 
 ```lua
 require("commentry").setup({
+  log = {
+    level = "warn", -- error|warn|info|debug
+    sink = "notify", -- notify|echo|file
+    file = nil, -- path when sink == "file"
+  },
   diffview = {
     comment_cards = {
       max_width = 88,
@@ -48,6 +53,7 @@ require("commentry").setup({
 - `:Commentry export register` writes markdown to the unnamed register.
 - `:Commentry export register:<name>` writes markdown to a specific register (for example `register:a`).
 - `:Commentry debug-store` prints the active review context and the exact on-disk store path.
+- `:Commentry diagnostics` opens a scratch buffer with runtime diagnostics (config/log/store/diffview state).
 - `:Commentry send-to-codex` sends the current review payload to Codex using the attached Sidekick session target.
 
 If you open diffview directly (for example `:DiffviewOpen main`), Commentry will

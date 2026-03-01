@@ -12,6 +12,11 @@ SETUP                                             *commentry.setup*
 Use the Lua API to configure the plugin:
 >
   require("commentry").setup({
+    log = {
+      level = "warn",  -- error|warn|info|debug
+      sink = "notify", -- notify|echo|file
+      file = nil,      -- path when sink == "file"
+    },
     diffview = {
       comment_cards = {
         max_width = 88,
@@ -112,6 +117,14 @@ COMMANDS                                          *commentry.commands*
   - store path
   - whether the store file exists
   Useful when troubleshooting persistence across sessions/contexts.
+
+:Commentry diagnostics
+  Open a scratch diagnostics buffer containing:
+  - Neovim version
+  - active logger config
+  - codex enabled state
+  - resolved store/context metadata
+  - diffview attach/buffer state
 
 :Commentry send-to-codex
   Send current review payload to Codex.

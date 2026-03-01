@@ -539,6 +539,7 @@ describe("commentry command routing", function()
   local original_util
   local original_orchestrator
   local original_codex_preload
+  local original_diagnostics
 
   before_each(function()
     original_comments = package.loaded["commentry.comments"]
@@ -549,6 +550,7 @@ describe("commentry command routing", function()
     original_util = package.loaded["commentry.util"]
     original_orchestrator = package.loaded["commentry.codex.orchestrator"]
     original_codex_preload = package.preload["commentry.codex"]
+    original_diagnostics = package.loaded["commentry.diagnostics"]
   end)
 
   after_each(function()
@@ -558,6 +560,7 @@ describe("commentry command routing", function()
     package.loaded["commentry.commands"] = original_commands
     package.loaded["commentry.util"] = original_util
     package.loaded["commentry.codex.orchestrator"] = original_orchestrator
+    package.loaded["commentry.diagnostics"] = original_diagnostics
     vim.api.nvim_create_autocmd = original_create_autocmd
     package.preload["commentry.codex"] = original_codex_preload
   end)
@@ -709,6 +712,35 @@ describe("commentry command routing", function()
     assert.is_true(vim.tbl_contains(matches, "send-to-codex"))
   end)
 
+  it("includes diagnostics in command completion", function()
+    vim.api.nvim_create_autocmd = function()
+      return 1
+    end
+    package.loaded["commentry.comments"] = {
+      list_comments = function() end,
+      set_comment_type = function() end,
+      export_comments = function() end,
+      render_current_buffer = function() end,
+    }
+    package.loaded["commentry.config"] = {
+      augroup = 1,
+      codex = { enabled = false },
+      diffview = { enabled = true },
+      keymaps = { add_comment = "mc", edit_comment = "me", delete_comment = "md", set_comment_type = "mt" },
+    }
+    package.loaded["commentry.diffview"] = {
+      open = function()
+        return true
+      end,
+    }
+
+    package.loaded["commentry.commands"] = nil
+    local Commands = require("commentry.commands")
+    local matches = Commands.complete("Commentry dia")
+
+    assert.is_true(vim.tbl_contains(matches, "diagnostics"))
+  end)
+
   it("keeps existing command completion unaffected when codex is disabled", function()
     vim.api.nvim_create_autocmd = function()
       return 1
@@ -784,6 +816,41 @@ describe("commentry command routing", function()
     package.loaded["commentry.commands"] = nil
     local Commands = require("commentry.commands")
     Commands.cmd({ args = "set-comment-type" })
+
+    assert.are.same(1, called)
+  end)
+
+  it("routes :Commentry diagnostics to diagnostics.open", function()
+    local called = 0
+    vim.api.nvim_create_autocmd = function()
+      return 1
+    end
+
+    package.loaded["commentry.comments"] = {
+      list_comments = function() end,
+      set_comment_type = function() end,
+      export_comments = function() end,
+      render_current_buffer = function() end,
+    }
+    package.loaded["commentry.config"] = {
+      augroup = 1,
+      diffview = { enabled = true },
+      keymaps = { add_comment = "mc", edit_comment = "me", delete_comment = "md", set_comment_type = "mt" },
+    }
+    package.loaded["commentry.diffview"] = {
+      open = function()
+        return true
+      end,
+    }
+    package.loaded["commentry.diagnostics"] = {
+      open = function()
+        called = called + 1
+      end,
+    }
+
+    package.loaded["commentry.commands"] = nil
+    local Commands = require("commentry.commands")
+    Commands.cmd({ args = "diagnostics" })
 
     assert.are.same(1, called)
   end)

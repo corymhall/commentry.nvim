@@ -39,6 +39,9 @@ describe("commentry config", function()
     assert.are.same(true, Config.diffview.comment_cards.show_markers)
     assert.are.same(true, Config.diffview.comment_ranges.enabled)
     assert.are.same(true, Config.diffview.comment_ranges.line_highlight)
+    assert.are.same("warn", Config.log.level)
+    assert.are.same("notify", Config.log.sink)
+    assert.is_nil(Config.log.file)
   end)
 
   it("deep-merges codex config deterministically", function()
@@ -56,6 +59,20 @@ describe("commentry config", function()
     assert.are.same("snacks", Config.codex.adapter.select)
     assert.is_nil(Config.codex.adapter.fallback)
     assert.are.same("reuse", Config.codex.behavior.open)
+  end)
+
+  it("deep-merges log config deterministically", function()
+    local Config = require("commentry.config")
+    Config.setup({
+      log = {
+        level = "debug",
+        sink = "echo",
+      },
+    })
+
+    assert.are.same("debug", Config.log.level)
+    assert.are.same("echo", Config.log.sink)
+    assert.is_nil(Config.log.file)
   end)
 
   it("defines explicit defaults for all supported keymap actions after setup({})", function()
@@ -274,5 +291,34 @@ describe("commentry config", function()
     assert.is_false(vim.tbl_contains(warns, ""))
     assert.is_truthy(vim.tbl_contains(warns, "commentry setup: unknown config key: typo_option"))
     assert.is_truthy(vim.tbl_contains(warns, "commentry setup: unknown config key: codex.mystery"))
+  end)
+
+  it("warns and restores defaults for invalid log config values", function()
+    local warns = {}
+    package.loaded["commentry.util"] = {
+      warn = function(msg)
+        warns[#warns + 1] = msg
+      end,
+    }
+
+    local Config = require("commentry.config")
+    Config.setup({
+      log = {
+        level = "trace",
+        sink = "stdout",
+        file = false,
+      },
+    })
+
+    assert.are.same("warn", Config.log.level)
+    assert.are.same("notify", Config.log.sink)
+    assert.is_nil(Config.log.file)
+    assert.is_true(
+      vim.tbl_contains(warns, 'commentry setup: log.level="trace" is invalid; expected one of error|warn|info|debug')
+    )
+    assert.is_true(
+      vim.tbl_contains(warns, 'commentry setup: log.sink="stdout" is invalid; expected one of notify|echo|file')
+    )
+    assert.is_true(vim.tbl_contains(warns, "commentry setup: log.file=false is invalid; expected string|nil"))
   end)
 end)

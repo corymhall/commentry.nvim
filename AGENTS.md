@@ -1,50 +1,79 @@
-# Agent Cheat Sheet
+# AI Agent Contract
 
-This repository contains `commentry.nvim`, a Neovim plugin scaffolded from `folke/sidekick.nvim`.
-The core structure, scripts, and tests are copied from that repo to serve as a starting point.
+This file defines the operating contract for humans and AI agents working in this repository.
 
-## Project Overview
+## Ground Truth
 
-- Core modules currently live under `lua/commentry/` (rename as the plugin evolves).
-- Tests are written with `mini.test` and live in `tests/`.
-- Docs are currently stubbed via `./scripts/docs` and `lua/commentry/docs.lua`.
-- Code style uses `stylua` / `selene` configs copied from the base (add or adjust as needed).
+- Project: `commentry.nvim` Neovim plugin.
+- Runtime target: Neovim `0.10+`.
+- Primary language: Lua.
+- Test framework: `mini.test`.
+- Task runner: `mise` (`mise run <task>` is canonical).
+- Current docs status: `lua/commentry/docs.lua` is still a stub implementation and is not yet a complete docs generator.
 
-## Everyday Commands
+## Start Here Module Map
 
-- `./scripts/test` – runs the `mini.test` suite using the Lazy.nvim harness; set `LAZY_OFFLINE=1` to skip bootstrap downloads.
-- `./scripts/docs` – regenerates docs in `README.md` from the snippets in `tests/readme.lua`.
-- `stylua lua tests` – format Lua source and tests when needed.
-- `selene` – lint Lua files (if selene is installed in the environment).
+- `plugin/commentry.lua`: Neovim plugin entrypoint.
+- `lua/commentry/init.lua`: public Lua module entrypoint.
+- `lua/commentry/config.lua`: user-facing configuration surface and defaults.
+- `lua/commentry/docs.lua`: docs generation hook (currently stubbed).
+- `tests/`: `mini.test` test suite.
+- `tests/minit.lua`: test harness/bootstrap.
+- `scripts/test`: local test runner wrapper.
+- `scripts/docs`: docs runner wrapper.
 
-## Adding Features
+## Command Canon (Use These)
 
-- Add new config options in `lua/commentry/config.lua` and update docs as they evolve.
-- Prefer table-driven tests for combinatorial cases.
-- If you rename the module namespace, keep tests and docs aligned with the new path.
+Run commands from repo root.
 
-## Writing Tests
+- Format code: `mise run format`
+- Lint code: `mise run lint`
+- Run tests: `mise run test`
+- Generate docs: `mise run docs` (currently executes stub path)
+- Run health checks: `mise run health`
+- Full local gate: `mise run ci` (runs lint + test + health)
 
-- Use `mini.test` assertions (`assert.are.same`, `assert.is_true`, etc.).
-- Stub Neovim APIs carefully and restore them in `after_each` hooks.
-- For upvalue-based helpers, use `debug.setupvalue`.
+## Key Invariants
 
-## Things to Watch
+- Draft store format (`commentry.json`) must remain backwards-compatible. Existing stores must still load after changes to `lua/commentry/store.lua`.
+- Review context identity is branch-scoped (`<root>::review::branch::<branch>`). Do not change the identity scheme without migrating existing stores.
+- Comment types are `note`, `suggestion`, `issue`, `praise`. Do not add types without updating config validation, store schema, and export formatting.
+- `:Commentry` must remain the single user-facing command entrypoint.
+- `config.lua` validates and normalizes all user input; setup must be idempotent.
+- Keep module namespace aligned (`commentry`) across `plugin/`, `lua/`, `tests/`, and docs.
+- Keep changes deterministic and offline-safe for CI/headless runs.
+- Keep README/docs claims aligned with actual behavior.
+- Preserve ASCII unless a file already requires Unicode.
 
-- The repo may run in headless CI where network calls are blocked; avoid external fetches in tests.
-- Docs generation is currently a stub; update `lua/commentry/docs.lua` as needed.
-- Maintain ASCII unless the surrounding context already uses Unicode.
+## Forbidden Actions
 
-## Useful Paths
+- Do not add network-dependent behavior to tests.
+- Do not silently change public API shape without updating tests and docs.
+- Do not edit unrelated files for task-local changes.
+- Do not bypass `mise` task canon in CI/PR guidance unless a task is missing.
+- Do not claim docs generation is complete while `lua/commentry/docs.lua` remains stubbed.
 
-- Core module tree: `lua/commentry/`
-- Tests entry point: `tests/minit.lua`
+## Escalation Triggers
 
-Keep this sheet handy when automating changes or onboarding new agents.
+Stop and ask for direction when any of these occur:
 
-## Active Technologies
-- Lua (Neovim 0.9+) + Neovim runtime, `mini.test` (tests), optional (001-diff-line-comments)
-- Local filesystem (project-scoped draft comment store) (001-diff-line-comments)
+- Behavior change requires breaking config/API compatibility.
+- Conflicting expected behavior between tests, README, and implementation.
+- A task needs new dependencies or external tooling not in `mise.toml`.
+- CI/headless constraints force tradeoffs not documented in repo.
+- You detect unrelated, concurrent edits that create merge-risk in touched files.
 
-## Recent Changes
-- 001-diff-line-comments: Added Lua (Neovim 0.9+) + Neovim runtime, `mini.test` (tests), optional
+## If You Change X, Verify Y
+
+- If you change formatting/style config or broad Lua edits, run: `mise run format` then `mise run lint`.
+- If you change runtime/plugin behavior, run: `mise run test`.
+- If you change docs/readme generation paths, run: `mise run docs`.
+- If you change plugin wiring/health surfaces, run: `mise run health`.
+- Before handoff, report exact commands run and pass/fail results.
+
+## PR Hygiene Expectations
+
+- Keep PRs scoped and reversible.
+- Include risk and rollback notes for behavior changes.
+- Prefer adding/updating tests in the same PR as behavior changes.
+- Include command output summary for `format`, `lint`, `test`, and `health`.

@@ -8,6 +8,7 @@ describe("commentry.health", function()
   local original_sidekick
   local original_fn_has
   local original_fn_exists
+  local original_io_open
 
   before_each(function()
     original_health = vim.health
@@ -17,6 +18,7 @@ describe("commentry.health", function()
     original_sidekick = package.loaded["commentry.codex.adapters.sidekick"]
     original_fn_has = vim.fn.has
     original_fn_exists = vim.fn.exists
+    original_io_open = io.open
     vim.fn.has = function(feature)
       if feature == "nvim-0.10" then
         return 1
@@ -39,6 +41,7 @@ describe("commentry.health", function()
     package.loaded["commentry.codex.adapters.sidekick"] = original_sidekick
     vim.fn.has = original_fn_has
     vim.fn.exists = original_fn_exists
+    io.open = original_io_open
     package.loaded["commentry.health"] = nil
   end)
 
@@ -77,12 +80,12 @@ describe("commentry.health", function()
   end)
 
   it("warns when snacks is unavailable", function()
-    local seen_warn = nil
+    local seen_warn = {}
     vim.health = {
       start = function() end,
       ok = function() end,
       warn = function(msg)
-        seen_warn = msg
+        seen_warn[#seen_warn + 1] = msg
       end,
       error = function() end,
     }
@@ -99,16 +102,16 @@ describe("commentry.health", function()
     local health = require("commentry.health")
     health.check()
 
-    assert.are.same("snacks.nvim not installed: :Commentry list-comments is unavailable", seen_warn)
+    assert.is_true(vim.tbl_contains(seen_warn, "snacks.nvim not installed: :Commentry list-comments is unavailable"))
   end)
 
   it("warns when snacks picker.select is unavailable", function()
-    local seen_warn = nil
+    local seen_warn = {}
     vim.health = {
       start = function() end,
       ok = function() end,
       warn = function(msg)
-        seen_warn = msg
+        seen_warn[#seen_warn + 1] = msg
       end,
       error = function() end,
     }
@@ -125,7 +128,7 @@ describe("commentry.health", function()
     local health = require("commentry.health")
     health.check()
 
-    assert.are.same("snacks.nvim installed but picker.select is unavailable", seen_warn)
+    assert.is_true(vim.tbl_contains(seen_warn, "snacks.nvim installed but picker.select is unavailable"))
   end)
 
   it("warns when codex is enabled and sidekick adapter is unavailable", function()
@@ -243,5 +246,76 @@ describe("commentry.health", function()
       )
     )
     assert.are.same(0, #seen.warn)
+  end)
+
+  it("warns when logger config values are invalid", function()
+    local seen = { warn = {} }
+    vim.health = {
+      start = function() end,
+      ok = function() end,
+      warn = function(msg)
+        seen.warn[#seen.warn + 1] = msg
+      end,
+      error = function() end,
+    }
+
+    package.loaded["diffview"] = {}
+    package.loaded["snacks"] = { picker = { select = function() end } }
+    package.loaded["commentry.config"] = {
+      codex = {
+        enabled = false,
+        adapter = { select = "auto" },
+      },
+      log = {
+        level = "trace",
+        sink = "stdout",
+      },
+    }
+
+    local health = require("commentry.health")
+    health.check()
+
+    assert.is_true(vim.tbl_contains(seen.warn, 'log.level="trace" is invalid; expected one of error|warn|info|debug'))
+    assert.is_true(vim.tbl_contains(seen.warn, 'log.sink="stdout" is invalid; expected one of notify|echo|file'))
+  end)
+
+  it("warns when file sink path is not writable", function()
+    local seen = { warn = {} }
+    vim.health = {
+      start = function() end,
+      ok = function() end,
+      warn = function(msg)
+        seen.warn[#seen.warn + 1] = msg
+      end,
+      error = function() end,
+    }
+    io.open = function()
+      return nil
+    end
+
+    package.loaded["diffview"] = {}
+    package.loaded["snacks"] = { picker = { select = function() end } }
+    package.loaded["commentry.config"] = {
+      codex = {
+        enabled = false,
+        adapter = { select = "auto" },
+      },
+      log = {
+        level = "info",
+        sink = "file",
+        file = vim.fn.tempname() .. "/commentry.log",
+      },
+    }
+
+    local health = require("commentry.health")
+    health.check()
+
+    local found = false
+    for _, message in ipairs(seen.warn) do
+      if message:find("log file sink is not writable:", 1, true) then
+        found = true
+      end
+    end
+    assert.is_true(found)
   end)
 end)

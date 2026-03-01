@@ -12,6 +12,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: jdx/mise-action@v3
+      - name: Check format drift
+        run: |
+          mise run format
+          git diff --exit-code || {
+            echo "Formatting drift detected. Run 'mise run format' locally and commit the result."
+            exit 1
+          }
       - name: Run lint tasks
         run: mise run lint
 
@@ -29,3 +36,11 @@ jobs:
 
       - name: Run checkhealth
         run: mise run health
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v3
+      - name: Run docs command
+        run: mise run docs

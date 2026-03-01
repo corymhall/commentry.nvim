@@ -285,6 +285,15 @@ function M.setup()
     Util.info(vim.inspect(info))
   end)
 
+  M.register("diagnostics", function()
+    local ok, diagnostics = pcall(require, "commentry.diagnostics")
+    if not ok or type(diagnostics) ~= "table" or type(diagnostics.open) ~= "function" then
+      Util.error("Diagnostics helper unavailable.")
+      return
+    end
+    diagnostics.open()
+  end)
+
   M.register("send-to-codex", function(_, _cmd_args)
     if not (Config.codex and Config.codex.enabled) then
       Util.error({

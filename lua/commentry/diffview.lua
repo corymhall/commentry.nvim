@@ -555,6 +555,29 @@ function M.current_file_context()
     nil
 end
 
+---@return table
+function M.debug_state()
+  local context, err = M.current_file_context()
+  if context then
+    local review_context = nil
+    if type(M.review_context_for_view) == "function" then
+      review_context = M.review_context_for_view(context.view)
+    end
+    return {
+      attached = true,
+      bufnr = context.bufnr,
+      context_id = review_context and review_context.context_id or nil,
+      error = nil,
+    }
+  end
+  return {
+    attached = false,
+    bufnr = vim.api.nvim_get_current_buf(),
+    context_id = nil,
+    error = err,
+  }
+end
+
 ---@param view? table
 ---@return string[]
 function M.list_view_files(view)

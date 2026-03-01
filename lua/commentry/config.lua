@@ -46,6 +46,11 @@ M.ns = vim.api.nvim_create_namespace("commentry")
 ---@field adapter commentry.CodexAdapterConfig
 ---@field behavior commentry.CodexBehaviorConfig
 
+---@class commentry.LogConfig
+---@field level "error"|"warn"|"info"|"debug"
+---@field sink "notify"|"echo"|"file"
+---@field file string|nil
+
 ---@class commentry.Config
 ---@field debug boolean
 ---@field keymaps commentry.Keymaps
@@ -54,6 +59,7 @@ M.ns = vim.api.nvim_create_namespace("commentry")
 ---@field store commentry.StoreConfig
 ---@field diffview commentry.DiffviewConfig
 ---@field codex commentry.CodexConfig
+---@field log commentry.LogConfig
 local defaults = {
   debug = false,
   keymaps = {
@@ -96,6 +102,11 @@ local defaults = {
       open = "reuse",
     },
   },
+  log = {
+    level = "warn",
+    sink = "notify",
+    file = nil,
+  },
 }
 
 -- Canonical defaults shared across setup normalization and runtime fallback.
@@ -118,8 +129,22 @@ local keymap_empty_allowed = {
   next_unreviewed_file = true,
 }
 
+local log_levels = {
+  error = true,
+  warn = true,
+  info = true,
+  debug = true,
+}
+
+local log_sinks = {
+  notify = true,
+  echo = true,
+  file = true,
+}
+
 local known_nullable_keys = {
   ["codex.adapter.fallback"] = true,
+  ["log.file"] = true,
 }
 
 ---@param tbl table
@@ -310,6 +335,28 @@ local function normalize_config(current)
   end
   current.codex.behavior.open =
     normalize_scalar(current.codex.behavior.open, "string", defaults.codex.behavior.open, "codex.behavior.open")
+  current.log.level = normalize_scalar(current.log.level, "string", defaults.log.level, "log.level")
+  current.log.sink = normalize_scalar(current.log.sink, "string", defaults.log.sink, "log.sink")
+  if not log_levels[current.log.level] then
+    Util.warn(
+      ("commentry setup: log.level=%s is invalid; expected one of error|warn|info|debug"):format(
+        vim.inspect(current.log.level)
+      )
+    )
+    current.log.level = defaults.log.level
+  end
+  if not log_sinks[current.log.sink] then
+    Util.warn(
+      ("commentry setup: log.sink=%s is invalid; expected one of notify|echo|file"):format(
+        vim.inspect(current.log.sink)
+      )
+    )
+    current.log.sink = defaults.log.sink
+  end
+  if current.log.file ~= nil and type(current.log.file) ~= "string" then
+    warn_invalid_type("log.file", current.log.file, "string|nil")
+    current.log.file = defaults.log.file
+  end
 
   return current
 end

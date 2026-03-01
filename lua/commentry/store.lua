@@ -326,4 +326,20 @@ function M.write(path, store)
   return true, nil
 end
 
+---@param project_root? string
+---@param context_id? string
+---@return table
+function M.debug_state(project_root, context_id)
+  local state = {
+    home = home_dir(),
+    context_id = context_id,
+    path = nil,
+  }
+  if type(project_root) == "string" and project_root ~= "" and type(context_id) == "string" and context_id ~= "" then
+    local path = M.path_for_context(project_root, context_id)
+    state.path = path
+  end
+  return state
+end
+
 return M
