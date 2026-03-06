@@ -1,6 +1,14 @@
 # commentry.nvim
 
-Neovim plugin scaffold for code review workflows on AI-generated changes.
+Neovim plugin for local diff review workflows, draft persistence, and optional
+Codex handoff from inside Neovim.
+
+## Preview
+
+Commentry inside Diffview with draft comments, type labels, and review context
+visible in-place:
+
+![Commentry diff review workflow](docs/images/commentry-diffview-overview.png)
 
 ## Install
 
@@ -9,13 +17,22 @@ Using lazy.nvim:
 ```lua
 {
   "commentry/commentry.nvim",
-  dependencies = { "sindrets/diffview.nvim" },
+  dependencies = {
+    "sindrets/diffview.nvim",
+  },
   opts = {},
 }
 ```
 
-`diffview.nvim` is required for the diff UI.
-Neovim `0.10+` is required.
+Required:
+
+- Neovim `0.10+`
+- `sindrets/diffview.nvim` for the diff UI
+
+Optional integrations:
+
+- `folke/snacks.nvim` for `:Commentry list-comments`
+- a Sidekick runtime for `:Commentry send-to-codex`
 
 ## Setup
 
@@ -30,6 +47,7 @@ require("commentry").setup({
     open_style = "split", -- split|vsplit|float
   },
   diffview = {
+    auto_attach = true,
     comment_cards = {
       max_width = 88,
       max_body_lines = 8,
@@ -48,7 +66,8 @@ require("commentry").setup({
 `commentry.nvim` provides a `:Commentry` command with subcommands.
 
 - `:Commentry open` opens a diffview for local changes (shortcut).
-- `:Commentry list-comments` opens a Snacks picker for draft comments on the current file/side, with source preview and in-picker delete (`<C-d>` current, `<M-d>` selected).
+- `:Commentry add-range-comment` creates a range comment from the current visual selection.
+- `:Commentry list-comments` opens a Snacks picker for draft comments on the current file/side, with source preview and in-picker delete (`<C-d>` current, `<M-d>` selected). Requires `snacks.nvim`.
 - `:Commentry set-comment-type` sets default or per-comment type (`note`, `suggestion`, `issue`, `praise`).
 - `:Commentry toggle-file-reviewed` toggles reviewed status for the current diff file.
 - `:Commentry next-unreviewed` jumps to the next unreviewed diff file in panel order.
@@ -57,7 +76,7 @@ require("commentry").setup({
 - `:Commentry export register:<name>` writes markdown to a specific register (for example `register:a`).
 - `:Commentry debug-store` prints the active review context and the exact on-disk store path.
 - `:Commentry diagnostics` opens a scratch buffer with runtime diagnostics (config/log/store/diffview state).
-- `:Commentry send-to-codex` sends the current review payload to Codex using the attached Sidekick session target.
+- `:Commentry send-to-codex` sends the current review payload to Codex using the attached Sidekick session target. Requires `codex.enabled = true` and an available Sidekick runtime.
 
 If you open diffview directly (for example `:DiffviewOpen main`), Commentry will
 auto-attach to diff buffers by default.
@@ -126,7 +145,8 @@ require("commentry").setup({
 ## Development
 
 - Run tests: `./scripts/test`
-- Generate docs (stub): `./scripts/docs`
+- Validate docs: `./scripts/docs`
+- First release checklist: `docs/release-checklist.md`
 - Canonical feature/design plans: `docs/plans/`
 - Legacy Speckit archive (read-only history): `docs/archive/speckit/`
 
@@ -163,6 +183,8 @@ This bootstraps a clean Neovim with only commentry + diffview loaded.
 - Draft store file does not exist yet:
   Commentry creates `~/.commentry/repos/<repo>/contexts/<context-id>/commentry.json` lazily on first successful write
   (add/edit/delete comment, set type, toggle reviewed). If no writes happened in that context yet, the file is absent.
+- `:Commentry list-comments` is unavailable:
+  install `snacks.nvim`, then rerun `:checkhealth commentry` to confirm `picker.select` support.
 - Wrong context:
   review context is branch-scoped (`<root>::review::branch::<branch-name>`) and shared across diff ranges on that branch.
   Comments become stale/outdated

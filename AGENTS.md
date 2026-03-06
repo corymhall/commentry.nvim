@@ -9,14 +9,14 @@ This file defines the operating contract for humans and AI agents working in thi
 - Primary language: Lua.
 - Test framework: `mini.test`.
 - Task runner: `mise` (`mise run <task>` is canonical).
-- Current docs status: `lua/commentry/docs.lua` is still a stub implementation and is not yet a complete docs generator.
+- Docs are maintained manually; `lua/commentry/docs.lua` validates README/vimdoc/help parity for release-facing surfaces.
 
 ## Start Here Module Map
 
 - `plugin/commentry.lua`: Neovim plugin entrypoint.
 - `lua/commentry/init.lua`: public Lua module entrypoint.
 - `lua/commentry/config.lua`: user-facing configuration surface and defaults.
-- `lua/commentry/docs.lua`: docs generation hook (currently stubbed).
+- `lua/commentry/docs.lua`: docs validation hook for README/vimdoc/help tags.
 - `tests/`: `mini.test` test suite.
 - `tests/minit.lua`: test harness/bootstrap.
 - `scripts/test`: local test runner wrapper.
@@ -29,9 +29,9 @@ Run commands from repo root.
 - Format code: `mise run format`
 - Lint code: `mise run lint`
 - Run tests: `mise run test`
-- Generate docs: `mise run docs` (currently executes stub path)
+- Validate docs: `mise run docs`
 - Run health checks: `mise run health`
-- Full local gate: `mise run ci` (runs lint + test + health)
+- Full local gate: `mise run ci` (runs lint + test + health + docs)
 
 ## Key Invariants
 
@@ -51,7 +51,7 @@ Run commands from repo root.
 - Do not silently change public API shape without updating tests and docs.
 - Do not edit unrelated files for task-local changes.
 - Do not bypass `mise` task canon in CI/PR guidance unless a task is missing.
-- Do not claim docs generation is complete while `lua/commentry/docs.lua` remains stubbed.
+- Do not claim docs are generated from source; `mise run docs` is a validator for manually maintained release docs.
 
 ## Escalation Triggers
 

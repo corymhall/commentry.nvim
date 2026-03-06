@@ -8,7 +8,7 @@ description = "Run mini.test suite"
 run = "./scripts/test"
 
 [tasks.docs]
-description = "Generate docs"
+description = "Validate README and vimdoc release docs"
 run = "./scripts/docs"
 
 [tasks.format]
@@ -33,4 +33,4 @@ run = "nvim --headless \"+checkhealth commentry\" +qa"
 
 [tasks.ci]
 description = "Run CI task set"
-depends = ["lint", "test", "health"]
+depends = ["lint", "test", "health", "docs"]

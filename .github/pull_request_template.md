@@ -6,6 +6,7 @@
 - [ ] `mise run format` (no diff)
 - [ ] `mise run lint` (clean)
 - [ ] `mise run test` (all pass)
+- [ ] `mise run docs` (release docs validated)
 - [ ] `mise run health` (all OK)
 
 ```text

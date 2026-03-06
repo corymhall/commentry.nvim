@@ -20,4 +20,7 @@
 
 ## Docs Note
 
-`mise run docs` currently executes a stub path via `lua/commentry/docs.lua`. Treat docs automation as partial until that module is fully implemented.
+`mise run docs` validates the manually maintained release docs surface
+(`README.md` + `doc/commentry.txt` help tags/public command coverage). If a
+change affects user-facing behavior, update those docs directly and rerun the
+docs task.

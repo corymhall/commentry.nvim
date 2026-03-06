@@ -1,11 +1,21 @@
-*commentry.txt*  AI review scaffolding for Neovim
+*commentry.txt*  Local diff review workflows for Neovim
 
 INTRODUCTION                                     *commentry*
 
-commentry.nvim is a Neovim plugin scaffold intended for building
-PR-style review workflows for AI-generated code. This doc is minimal
-and will expand as features are added.
+commentry.nvim provides local diff review workflows inside Neovim with
+draft persistence, typed/range comments, reviewed-file tracking, and an
+optional Codex handoff path.
 Minimum Neovim version: 0.10+.
+
+INSTALL                                           *commentry.install*
+
+Required dependencies:
+- Neovim 0.10+
+- `diffview.nvim` for the diff UI
+
+Optional integrations:                           *commentry.dependencies*
+- `snacks.nvim` for `:Commentry list-comments`
+- Sidekick runtime for `:Commentry send-to-codex`
 
 SETUP                                             *commentry.setup*
 
@@ -21,10 +31,15 @@ Use the Lua API to configure the plugin:
       open_style = "split", -- split|vsplit|float
     },
     diffview = {
+      auto_attach = true,
       comment_cards = {
         max_width = 88,
         max_body_lines = 8,
         show_markers = true,
+      },
+      comment_ranges = {
+        enabled = true,
+        line_highlight = true,
       },
     },
   })
@@ -52,7 +67,8 @@ Behavior notes:
 - Empty-string disable is intentionally supported only for
   `toggle_file_reviewed` and `next_unreviewed_file`.
 - For remap-only actions (`add_comment`, `add_range_comment`, `edit_comment`,
-  `delete_comment`, `set_comment_type`, `send_to_codex`), `""` is invalid.
+  `delete_comment`, `set_comment_type`, `send_to_codex`, `list_comments`),
+  `""` is invalid.
   Setup warns and
   the effective mapping remains active.
 - `add_range_comment` normally uses its configured/default value from setup
@@ -95,8 +111,12 @@ COMMANDS                                          *commentry.commands*
 :Commentry open
   Open diffview for local changes.
 
+:Commentry add-range-comment
+  Create a range comment from the current visual selection.
+
 :Commentry list-comments
   List jumpable active draft comments for the current diff file/side.
+  Requires `snacks.nvim`.
 
 :Commentry set-comment-type
   Set default or per-comment type.
@@ -133,6 +153,7 @@ COMMANDS                                          *commentry.commands*
   Send current review payload to Codex.
   Requires:
   - codex integration enabled in setup (`codex.enabled = true`)
+  - available Sidekick runtime/session target
   - active attached review context (for example via `:Commentry open` or diffview auto-attach)
   Adapter behavior:
   - v1 adapter selection is global/implicit from config
@@ -171,6 +192,14 @@ PERSISTENCE NOTES                                 *commentry.persistence*
 - Comment bodies render as persistent boxed virtual cards on commented lines;
   they stay visible when moving the cursor.
 - Use `:Commentry debug-store` to verify the active context/path when comments seem missing.
+
+TROUBLESHOOTING                               *commentry.troubleshooting*
+
+- `:Commentry list-comments` is unavailable:
+  install `snacks.nvim`, then rerun `:checkhealth commentry`.
+- `:Commentry send-to-codex` has no target:
+  ensure a Sidekick session is attached, then retry from an attached review
+  buffer/context.
 
 =============================================================================
 vim:tw=78:ts=2:sw=2:et:ft=help

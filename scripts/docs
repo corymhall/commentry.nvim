@@ -1,3 +1,6 @@
 #!/usr/bin/env bash
 
-nvim -u tests/minit.lua -l lua/commentry/docs.lua
+nvim --headless -u NONE \
+  "+lua vim.opt.rtp:prepend(vim.fn.getcwd())" \
+  "+lua require('commentry.docs').check()" \
+  +qa

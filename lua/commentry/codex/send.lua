@@ -58,9 +58,8 @@ local function load_adapter(name)
   return nil
 end
 
----@param opts table
 ---@return table|nil, string|nil, "NO_TARGET"|"ADAPTER_UNAVAILABLE"|nil
-local function resolve_target(opts)
+local function resolve_target()
   local configured = Config.codex and Config.codex.adapter or {}
   local selected = configured.select or "auto"
   if selected ~= "auto" and selected ~= "sidekick" then
@@ -86,9 +85,8 @@ local function resolve_target(opts)
   return target, "sidekick", nil
 end
 
----@param opts table
 ---@param cb fun(target:table|nil, adapter_name:string|nil, err_code:string|nil, err_message:string|nil)
-local function resolve_target_async(opts, cb)
+local function resolve_target_async(cb)
   local configured = Config.codex and Config.codex.adapter or {}
   local selected = configured.select or "auto"
   if selected ~= "auto" and selected ~= "sidekick" then
@@ -205,7 +203,7 @@ function M.send_current_review(opts)
     return prep_err
   end
 
-  local target, adapter_name, target_err = resolve_target(opts)
+  local target, adapter_name, target_err = resolve_target()
   if target == nil then
     if target_err == "ADAPTER_UNAVAILABLE" then
       return fail(
@@ -241,7 +239,7 @@ function M.send_current_review_async(opts, cb)
     return
   end
 
-  resolve_target_async(opts, function(target, adapter_name, target_err, target_message)
+  resolve_target_async(function(target, adapter_name, target_err, target_message)
     if target == nil then
       if target_err == "ADAPTER_UNAVAILABLE" then
         cb(

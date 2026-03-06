@@ -1190,6 +1190,17 @@ function M.list_comments()
     return target
   end
 
+  ---@param action string
+  ---@param mode string[]
+  ---@param desc string
+  ---@return table
+  local function picker_key(action, mode, desc)
+    local spec = { action }
+    spec.mode = mode
+    spec.desc = desc
+    return spec
+  end
+
   ---@param comment_id string
   ---@return boolean
   local function remove_picker_item(comment_id)
@@ -1302,14 +1313,14 @@ function M.list_comments()
     win = {
       input = {
         keys = {
-          ["<c-d>"] = { "delete_comment", mode = { "i", "n" }, desc = "delete comment" },
-          ["<m-d>"] = { "delete_comment_selected", mode = { "i", "n" }, desc = "delete selected comments" },
+          ["<c-d>"] = picker_key("delete_comment", { "i", "n" }, "delete comment"),
+          ["<m-d>"] = picker_key("delete_comment_selected", { "i", "n" }, "delete selected comments"),
         },
       },
       list = {
         keys = {
-          ["<c-d>"] = { "delete_comment", mode = { "n", "x" }, desc = "delete comment" },
-          ["<m-d>"] = { "delete_comment_selected", mode = { "n", "x" }, desc = "delete selected comments" },
+          ["<c-d>"] = picker_key("delete_comment", { "n", "x" }, "delete comment"),
+          ["<m-d>"] = picker_key("delete_comment_selected", { "n", "x" }, "delete selected comments"),
         },
       },
     },
