@@ -2,11 +2,28 @@
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+CACHE_ROOT="$ROOT/tmp/ui-cache"
+NVIM_CACHE="$CACHE_ROOT/nvim"
 OUT_DIR="$ROOT/tmp/ui-capture-rpc"
-CACHE_DIR="$ROOT/tmp/ui-cache/nvim"
+PRESET=${COMMENTRY_UI_PRESET:-laptop-small}
+COMMENTRY_UI_COLUMNS=${COMMENTRY_UI_COLUMNS:-}
+COMMENTRY_UI_LINES=${COMMENTRY_UI_LINES:-}
+COLUMNS_OVERRIDE=0
+LINES_OVERRIDE=0
+ALL_PRESETS=0
+SINGLE_SCENARIO=""
 CWD=""
-SCENARIO="popup"
-PRESET="laptop-small"
+CLEANUP_REPO=""
+
+SCENARIOS=(popup card range)
+
+cleanup() {
+  if [[ -n ${CLEANUP_REPO:-} && -d ${CLEANUP_REPO:-} ]]; then
+    rm -rf "$CLEANUP_REPO"
+  fi
+}
+
+trap cleanup EXIT
 
 resolve_preset() {
   case "$1" in
@@ -18,9 +35,244 @@ resolve_preset() {
       ;;
     *)
       echo "Unknown preset: $1" >&2
+      echo "Known presets: laptop-small, desktop-wide" >&2
       exit 1
       ;;
   esac
+}
+
+scenario_name() {
+  case "$1" in
+    popup)
+      printf '%s\n' "rpc-comment-popup"
+      ;;
+    card)
+      printf '%s\n' "rpc-comment-card"
+      ;;
+    range)
+      printf '%s\n' "rpc-range-comment"
+      ;;
+    *)
+      echo "Unknown scenario: $1" >&2
+      exit 1
+      ;;
+  esac
+}
+
+scenario_title() {
+  case "$1" in
+    popup)
+      printf '%s\n' "RPC Popup"
+      ;;
+    card)
+      printf '%s\n' "RPC Saved Card"
+      ;;
+    range)
+      printf '%s\n' "RPC Range Comment"
+      ;;
+    *)
+      echo "Unknown scenario: $1" >&2
+      exit 1
+      ;;
+  esac
+}
+
+scenario_caption() {
+  case "$1" in
+    popup)
+      printf '%s\n' "Rendered from Neovim multigrid redraw events while the Commentry floating editor is open."
+      ;;
+    card)
+      printf '%s\n' "Rendered from Neovim multigrid redraw events after saving an inline suggestion comment."
+      ;;
+    range)
+      printf '%s\n' "Rendered from Neovim multigrid redraw events after saving a multi-line issue comment."
+      ;;
+    *)
+      echo "Unknown scenario: $1" >&2
+      exit 1
+      ;;
+  esac
+}
+
+create_repo() {
+  local repo=$1
+  mkdir -p "$repo"
+  (
+    cd "$repo"
+    git init -q
+    printf 'local value = 1\nlocal name = "commentry"\nreturn value\n' > demo.lua
+    git add demo.lua
+    git -c user.name='Commentry UI' -c user.email='ui@example.com' commit -qm 'init'
+    printf 'local value = 2\nlocal name = "commentry"\nlocal extra = true\nreturn value\n' > demo.lua
+  )
+}
+
+render_gallery() {
+  local out_dir=$1
+  local entries_path=$2
+
+  node - "$out_dir" "$entries_path" <<'EOF'
+const fs = require("node:fs");
+const path = require("node:path");
+
+const outDir = process.argv[2];
+const entriesPath = process.argv[3];
+
+const escape = (text) =>
+  String(text)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&apos;");
+
+const entries = fs
+  .readFileSync(entriesPath, "utf8")
+  .trim()
+  .split("\n")
+  .filter(Boolean)
+  .map((line) => {
+    const [title, caption, image] = line.split("\t");
+    return { title, caption, image };
+  });
+
+const cards = entries
+  .map(
+    (entry) => `<section class="card">
+<h2>${escape(entry.title)}</h2>
+<p>${escape(entry.caption)}</p>
+<img src="${escape(entry.image)}" alt="${escape(entry.title)}" />
+</section>`
+  )
+  .join("\n");
+
+const html = `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Commentry RPC UI Gallery</title>
+<style>
+body { background: #0f1419; color: #d7dee7; font-family: 'Avenir Next', ui-sans-serif, sans-serif; margin: 0; padding: 32px; }
+h1 { margin: 0 0 8px; font-size: 32px; }
+p.lead { margin: 0 0 28px; color: #97a9bb; max-width: 72ch; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(520px, 1fr)); gap: 24px; }
+.card { background: #171d24; border: 1px solid #28323d; border-radius: 18px; padding: 18px; box-shadow: 0 18px 40px rgba(0, 0, 0, 0.24); }
+.card h2 { margin: 0 0 6px; font-size: 20px; }
+.card p { margin: 0 0 14px; color: #97a9bb; }
+.card img { width: 100%; border-radius: 12px; border: 1px solid #2f3b47; background: #11161b; image-rendering: crisp-edges; }
+</style>
+</head>
+<body>
+<h1>Commentry RPC UI Capture</h1>
+<p class="lead">These images are rendered from Neovim&apos;s real multigrid redraw events via an embedded RPC client. They are closer to the actual editor than the earlier reconstructed screenshots.</p>
+<div class="grid">
+${cards}
+</div>
+</body>
+</html>`;
+
+fs.writeFileSync(path.join(outDir, "index.html"), html);
+EOF
+}
+
+render_preset_index() {
+  local out_dir=$1
+  shift
+
+  node - "$out_dir" "$@" <<'EOF'
+const fs = require("node:fs");
+const path = require("node:path");
+
+const outDir = process.argv[2];
+const presets = process.argv.slice(3);
+
+const links = presets
+  .map((preset) => `<li><a href="${preset}/index.html">${preset}</a></li>`)
+  .join("\n");
+
+const html = `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Commentry RPC UI Presets</title>
+<style>
+body { background: #0f1419; color: #d7dee7; font-family: 'Avenir Next', ui-sans-serif, sans-serif; margin: 0; padding: 32px; }
+h1 { margin: 0 0 8px; font-size: 32px; }
+p { color: #97a9bb; max-width: 72ch; }
+ul { padding-left: 20px; }
+li { margin: 10px 0; }
+a { color: #8fd3ff; text-decoration: none; font-weight: 600; }
+a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<h1>Commentry RPC UI Presets</h1>
+<p>Generated galleries for multiple viewport presets using the multigrid RPC capture path.</p>
+<ul>
+${links}
+</ul>
+</body>
+</html>`;
+
+fs.writeFileSync(path.join(outDir, "index.html"), html);
+EOF
+}
+
+run_capture_set() {
+  local target_out_dir=$1
+  local run_columns=$2
+  local run_lines=$3
+
+  mkdir -p "$target_out_dir" "$NVIM_CACHE"
+  local entries_json="$target_out_dir/.gallery-entries.jsonl"
+  : > "$entries_json"
+
+  local scenarios=("${SCENARIOS[@]}")
+  if [[ -n ${SINGLE_SCENARIO:-} ]]; then
+    scenarios=("$SINGLE_SCENARIO")
+  fi
+
+  for scenario in "${scenarios[@]}"; do
+    local scenario_dir="$target_out_dir/$scenario"
+    local cwd_to_use="$CWD"
+    mkdir -p "$scenario_dir"
+
+    if [[ -z $cwd_to_use ]]; then
+      cwd_to_use=$(mktemp -d "$CACHE_ROOT/rpc-repo.XXXXXX")
+      CLEANUP_REPO=$cwd_to_use
+      create_repo "$cwd_to_use"
+    fi
+
+    COMMENTRY_REPO_ROOT="$ROOT" \
+    COMMENTRY_UI_CACHE="$NVIM_CACHE" \
+    COMMENTRY_UI_CWD="$cwd_to_use" \
+    COMMENTRY_UI_OUT_DIR="$scenario_dir" \
+    COMMENTRY_UI_SCENARIO="$scenario" \
+    COMMENTRY_UI_COLUMNS="$run_columns" \
+    COMMENTRY_UI_LINES="$run_lines" \
+      nvim --clean --headless -u NONE -l "$ROOT/scripts/ui-capture-rpc.lua"
+
+    local name
+    name=$(scenario_name "$scenario")
+    if [[ ! -f $scenario_dir/$name.svg ]]; then
+      echo "Scenario did not produce $scenario_dir/$name.svg" >&2
+      exit 1
+    fi
+
+    rsvg-convert -o "$scenario_dir/$name.png" "$scenario_dir/$name.svg"
+    printf '%s\t%s\t%s\n' \
+      "$(scenario_title "$scenario")" \
+      "$(scenario_caption "$scenario")" \
+      "$scenario/$name.png" >> "$entries_json"
+
+    if [[ -z $CWD ]]; then
+      rm -rf "$cwd_to_use"
+      CLEANUP_REPO=""
+    fi
+  done
+
+  render_gallery "$target_out_dir" "$entries_json"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -29,8 +281,22 @@ while [[ $# -gt 0 ]]; do
       PRESET=$2
       shift 2
       ;;
+    --all-presets)
+      ALL_PRESETS=1
+      shift
+      ;;
     --scenario)
-      SCENARIO=$2
+      SINGLE_SCENARIO=$2
+      shift 2
+      ;;
+    --columns)
+      COMMENTRY_UI_COLUMNS=$2
+      COLUMNS_OVERRIDE=1
+      shift 2
+      ;;
+    --lines)
+      COMMENTRY_UI_LINES=$2
+      LINES_OVERRIDE=1
       shift 2
       ;;
     --cwd)
@@ -52,46 +318,28 @@ if [[ $OUT_DIR != /* ]]; then
   OUT_DIR="$ROOT/$OUT_DIR"
 fi
 
-if [[ -z $CWD ]]; then
-  CWD=$(mktemp -d "$ROOT/tmp/ui-cache/rpc-repo.XXXXXX")
-  trap 'rm -rf "$CWD"' EXIT
-  (
-    cd "$CWD"
-    git init -q
-    printf 'local value = 1\nlocal name = "commentry"\nreturn value\n' > demo.lua
-    git add demo.lua
-    git -c user.name='Commentry UI' -c user.email='ui@example.com' commit -qm 'init'
-    printf 'local value = 2\nlocal name = "commentry"\nlocal extra = true\nreturn value\n' > demo.lua
-  )
+if [[ $COLUMNS_OVERRIDE -eq 0 || $LINES_OVERRIDE -eq 0 ]]; then
+  read -r preset_columns preset_lines < <(resolve_preset "$PRESET")
+  if [[ $COLUMNS_OVERRIDE -eq 0 ]]; then
+    COMMENTRY_UI_COLUMNS=$preset_columns
+  fi
+  if [[ $LINES_OVERRIDE -eq 0 ]]; then
+    COMMENTRY_UI_LINES=$preset_lines
+  fi
 fi
 
-read -r COLUMNS LINES < <(resolve_preset "$PRESET")
-mkdir -p "$OUT_DIR" "$CACHE_DIR"
+if [[ $ALL_PRESETS -eq 1 ]]; then
+  mkdir -p "$OUT_DIR"
+  PRESET_NAMES=(laptop-small desktop-wide)
+  for preset_name in "${PRESET_NAMES[@]}"; do
+    read -r preset_columns preset_lines < <(resolve_preset "$preset_name")
+    run_capture_set "$OUT_DIR/$preset_name" "$preset_columns" "$preset_lines"
+  done
+  render_preset_index "$OUT_DIR" "${PRESET_NAMES[@]}"
+  printf 'Wrote RPC preset galleries to %s/index.html\n' "$OUT_DIR"
+  exit 0
+fi
 
-COMMENTRY_REPO_ROOT="$ROOT" \
-COMMENTRY_UI_CACHE="$CACHE_DIR" \
-COMMENTRY_UI_CWD="$CWD" \
-COMMENTRY_UI_OUT_DIR="$OUT_DIR" \
-COMMENTRY_UI_SCENARIO="$SCENARIO" \
-COMMENTRY_UI_COLUMNS="$COLUMNS" \
-COMMENTRY_UI_LINES="$LINES" \
-  nvim --clean --headless -u NONE -l "$ROOT/scripts/ui-capture-rpc.lua"
-
-case "$SCENARIO" in
-  popup)
-    name="rpc-comment-popup"
-    ;;
-  card)
-    name="rpc-comment-card"
-    ;;
-  range)
-    name="rpc-range-comment"
-    ;;
-  *)
-    echo "Unknown scenario: $SCENARIO" >&2
-    exit 1
-    ;;
-esac
-
-rsvg-convert -o "$OUT_DIR/$name.png" "$OUT_DIR/$name.svg"
-printf 'Wrote %s/%s.png\n' "$OUT_DIR" "$name"
+run_capture_set "$OUT_DIR" "$COMMENTRY_UI_COLUMNS" "$COMMENTRY_UI_LINES"
+printf 'Wrote RPC gallery to %s/index.html (%sx%s, preset=%s)\n' \
+  "$OUT_DIR" "$COMMENTRY_UI_COLUMNS" "$COMMENTRY_UI_LINES" "$PRESET"
