@@ -43,6 +43,14 @@ local function read_env(name, default)
   return value
 end
 
+local function read_env_number(name, default)
+  local value = tonumber(read_env(name, ""))
+  if type(value) ~= "number" or value <= 0 then
+    return default
+  end
+  return math.floor(value)
+end
+
 local function escape_xml(text)
   return tostring(text):gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;"):gsub('"', "&quot;"):gsub("'", "&apos;")
 end
@@ -685,7 +693,9 @@ local function scenario_range(out_dir)
 end
 
 function M.run()
-  vim.cmd("set columns=140 lines=42")
+  local columns = read_env_number("COMMENTRY_UI_COLUMNS", 140)
+  local lines = read_env_number("COMMENTRY_UI_LINES", 42)
+  vim.cmd(("set columns=%d lines=%d"):format(columns, lines))
   vim.cmd("Commentry open")
 
   local scenario = read_env("COMMENTRY_UI_SCENARIO", "popup")

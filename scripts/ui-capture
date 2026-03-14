@@ -2,9 +2,38 @@
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-OUT_DIR=${1:-"$ROOT/tmp/ui-capture"}
+OUT_DIR="$ROOT/tmp/ui-capture"
 CACHE_DIR="$ROOT/tmp/ui-cache"
 SCENARIOS=(popup card range)
+COLUMNS=${COMMENTRY_UI_COLUMNS:-140}
+LINES=${COMMENTRY_UI_LINES:-42}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --columns)
+      COLUMNS=$2
+      shift 2
+      ;;
+    --lines)
+      LINES=$2
+      shift 2
+      ;;
+    --out-dir)
+      OUT_DIR=$2
+      shift 2
+      ;;
+    *)
+      if [[ -z ${out_dir_set:-} && $1 != --* ]]; then
+        OUT_DIR=$1
+        out_dir_set=1
+        shift
+      else
+        echo "Unknown argument: $1" >&2
+        exit 1
+      fi
+      ;;
+  esac
+done
 
 mkdir -p "$OUT_DIR" "$CACHE_DIR"
 
@@ -19,17 +48,6 @@ create_repo() {
     git -c user.name='Commentry UI' -c user.email='ui@example.com' commit -qm 'init'
     printf 'local value = 2\nlocal name = "commentry"\nlocal extra = true\nreturn value\n' > demo.lua
   )
-}
-
-gallery_html() {
-  local html_path=$1
-  node - "$ROOT" "$html_path" <<'EOF'
-const fs = require("node:fs");
-const path = require("node:path");
-const root = process.argv[2];
-const htmlPath = process.argv[3];
-const capture = require(path.join(root, "lua/commentry/dev/ui_capture.lua"));
-EOF
 }
 
 entries_json="$OUT_DIR/.gallery-entries.jsonl"
@@ -48,6 +66,8 @@ for scenario in "${SCENARIOS[@]}"; do
     COMMENTRY_UI_CACHE="$CACHE_DIR/nvim" \
     COMMENTRY_UI_OUT_DIR="$scenario_dir" \
     COMMENTRY_UI_SCENARIO="$scenario" \
+    COMMENTRY_UI_COLUMNS="$COLUMNS" \
+    COMMENTRY_UI_LINES="$LINES" \
       nvim --clean --headless -u "$ROOT/scripts/ui-init.lua" \
       "+lua require('commentry.dev.ui_capture').run()"
   )
