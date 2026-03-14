@@ -5,98 +5,46 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 OUT_DIR="$ROOT/tmp/ui-capture"
 CACHE_DIR="$ROOT/tmp/ui-cache"
 SCENARIOS=(popup card range)
+PRESET=${COMMENTRY_UI_PRESET:-default}
 COLUMNS=${COMMENTRY_UI_COLUMNS:-140}
 LINES=${COMMENTRY_UI_LINES:-42}
+ALL_PRESETS=0
+COLUMNS_OVERRIDE=0
+LINES_OVERRIDE=0
+CLEANUP_REPO=""
 
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --columns)
-      COLUMNS=$2
-      shift 2
-      ;;
-    --lines)
-      LINES=$2
-      shift 2
-      ;;
-    --out-dir)
-      OUT_DIR=$2
-      shift 2
-      ;;
-    *)
-      if [[ -z ${out_dir_set:-} && $1 != --* ]]; then
-        OUT_DIR=$1
-        out_dir_set=1
-        shift
-      else
-        echo "Unknown argument: $1" >&2
-        exit 1
-      fi
-      ;;
-  esac
-done
-
-mkdir -p "$OUT_DIR" "$CACHE_DIR"
-
-create_repo() {
-  local repo=$1
-  mkdir -p "$repo"
-  (
-    cd "$repo"
-    git init -q
-    printf 'local value = 1\nlocal name = "commentry"\nreturn value\n' > demo.lua
-    git add demo.lua
-    git -c user.name='Commentry UI' -c user.email='ui@example.com' commit -qm 'init'
-    printf 'local value = 2\nlocal name = "commentry"\nlocal extra = true\nreturn value\n' > demo.lua
-  )
+cleanup() {
+  if [[ -n ${CLEANUP_REPO:-} && -d ${CLEANUP_REPO:-} ]]; then
+    rm -rf "$CLEANUP_REPO"
+  fi
 }
 
-entries_json="$OUT_DIR/.gallery-entries.jsonl"
-: > "$entries_json"
+trap cleanup EXIT
 
-for scenario in "${SCENARIOS[@]}"; do
-  scenario_dir="$OUT_DIR/$scenario"
-  mkdir -p "$scenario_dir"
-  repo=$(mktemp -d "$CACHE_DIR/repo.XXXXXX")
-  trap 'rm -rf "$repo"' EXIT
-  create_repo "$repo"
-
-  (
-    cd "$repo"
-    COMMENTRY_REPO_ROOT="$ROOT" \
-    COMMENTRY_UI_CACHE="$CACHE_DIR/nvim" \
-    COMMENTRY_UI_OUT_DIR="$scenario_dir" \
-    COMMENTRY_UI_SCENARIO="$scenario" \
-    COMMENTRY_UI_COLUMNS="$COLUMNS" \
-    COMMENTRY_UI_LINES="$LINES" \
-      nvim --clean --headless -u "$ROOT/scripts/ui-init.lua" \
-      "+lua require('commentry.dev.ui_capture').run()"
-  )
-
-  case "$scenario" in
-    popup)
-      name="comment-popup"
-      title="Comment Popup"
-      caption="Triggered from the diff buffer using Commentry's local keymap, then captured while the floating editor is open."
+resolve_preset() {
+  case "$1" in
+    default)
+      printf '%s\n' "140 42"
       ;;
-    card)
-      name="comment-card"
-      title="Rendered Comment Card"
-      caption="A saved inline suggestion showing the persistent card treatment and end-of-line marker."
+    laptop-small)
+      printf '%s\n' "220 18"
       ;;
-    range)
-      name="range-comment"
-      title="Range Comment"
-      caption="A multi-line issue comment showing the gutter rail and stacked draft card."
+    desktop-wide)
+      printf '%s\n' "320 54"
+      ;;
+    *)
+      echo "Unknown preset: $1" >&2
+      echo "Known presets: default, laptop-small, desktop-wide" >&2
+      exit 1
       ;;
   esac
+}
 
-  rsvg-convert -o "$scenario_dir/$name.png" "$scenario_dir/$name.svg"
-  printf '%s\t%s\t%s\t%s\n' "$title" "$caption" "$scenario/$name.png" "$scenario/$name.svg" >> "$entries_json"
-  rm -rf "$repo"
-  trap - EXIT
-done
+render_gallery() {
+  local gallery_out_dir=$1
+  local entries_path=$2
 
-node - "$ROOT" "$OUT_DIR" "$entries_json" <<'EOF'
+  node - "$ROOT" "$gallery_out_dir" "$entries_path" <<'EOF'
 const fs = require("node:fs");
 const path = require("node:path");
 
@@ -171,5 +119,191 @@ ${cards}
 
 fs.writeFileSync(path.join(outDir, "index.html"), html);
 EOF
+}
 
-printf 'Wrote gallery to %s/index.html\n' "$OUT_DIR"
+render_preset_index() {
+  local root_out_dir=$1
+  shift
+
+  node - "$root_out_dir" "$@" <<'EOF'
+const fs = require("node:fs");
+const path = require("node:path");
+
+const outDir = process.argv[2];
+const presets = process.argv.slice(3);
+
+const links = presets
+  .map(
+    (preset) => `<li><a href="${preset}/index.html">${preset}</a></li>`
+  )
+  .join("\n");
+
+const html = `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Commentry UI Presets</title>
+<style>
+body { background: #f4efe7; color: #2a2118; font-family: 'Avenir Next', ui-sans-serif, sans-serif; margin: 0; padding: 32px; }
+h1 { margin: 0 0 8px; font-size: 32px; }
+p { color: #6d5d4b; max-width: 70ch; }
+ul { padding-left: 20px; }
+li { margin: 10px 0; }
+a { color: #8a4b08; text-decoration: none; font-weight: 600; }
+a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<h1>Commentry UI Capture Presets</h1>
+<p>Generated galleries for multiple viewport presets.</p>
+<ul>
+${links}
+</ul>
+</body>
+</html>`;
+
+fs.writeFileSync(path.join(outDir, "index.html"), html);
+EOF
+}
+
+run_capture_set() {
+  local target_out_dir=$1
+  local run_columns=$2
+  local run_lines=$3
+
+  mkdir -p "$target_out_dir" "$CACHE_DIR"
+  local entries_json="$target_out_dir/.gallery-entries.jsonl"
+  : > "$entries_json"
+
+  for scenario in "${SCENARIOS[@]}"; do
+    local scenario_dir="$target_out_dir/$scenario"
+    mkdir -p "$scenario_dir"
+    local repo
+    repo=$(mktemp -d "$CACHE_DIR/repo.XXXXXX")
+    CLEANUP_REPO=$repo
+    create_repo "$repo"
+
+    (
+      cd "$repo"
+      COMMENTRY_REPO_ROOT="$ROOT" \
+      COMMENTRY_UI_CACHE="$CACHE_DIR/nvim" \
+      COMMENTRY_UI_OUT_DIR="$scenario_dir" \
+      COMMENTRY_UI_SCENARIO="$scenario" \
+      COMMENTRY_UI_COLUMNS="$run_columns" \
+      COMMENTRY_UI_LINES="$run_lines" \
+        nvim --clean --headless -u "$ROOT/scripts/ui-init.lua" \
+        "+lua require('commentry.dev.ui_capture').run()"
+    )
+
+    local name
+    local title
+    local caption
+    case "$scenario" in
+      popup)
+        name="comment-popup"
+        title="Comment Popup"
+        caption="Triggered from the diff buffer using Commentry's local keymap, then captured while the floating editor is open."
+        ;;
+      card)
+        name="comment-card"
+        title="Rendered Comment Card"
+        caption="A saved inline suggestion showing the persistent card treatment and end-of-line marker."
+        ;;
+      range)
+        name="range-comment"
+        title="Range Comment"
+        caption="A multi-line issue comment showing the gutter rail and stacked draft card."
+        ;;
+    esac
+
+    if [[ ! -f "$scenario_dir/$name.svg" ]]; then
+      echo "Scenario did not produce $scenario_dir/$name.svg" >&2
+      exit 1
+    fi
+    rsvg-convert -o "$scenario_dir/$name.png" "$scenario_dir/$name.svg"
+    printf '%s\t%s\t%s\t%s\n' "$title" "$caption" "$scenario/$name.png" "$scenario/$name.svg" >> "$entries_json"
+    rm -rf "$repo"
+    CLEANUP_REPO=""
+  done
+
+  render_gallery "$target_out_dir" "$entries_json"
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --preset)
+      PRESET=$2
+      shift 2
+      ;;
+    --all-presets)
+      ALL_PRESETS=1
+      shift
+      ;;
+    --columns)
+      COLUMNS=$2
+      COLUMNS_OVERRIDE=1
+      shift 2
+      ;;
+    --lines)
+      LINES=$2
+      LINES_OVERRIDE=1
+      shift 2
+      ;;
+    --out-dir)
+      OUT_DIR=$2
+      shift 2
+      ;;
+    *)
+      if [[ -z ${out_dir_set:-} && $1 != --* ]]; then
+        OUT_DIR=$1
+        out_dir_set=1
+        shift
+      else
+        echo "Unknown argument: $1" >&2
+        exit 1
+      fi
+      ;;
+  esac
+done
+
+if [[ $OUT_DIR != /* ]]; then
+  OUT_DIR="$ROOT/$OUT_DIR"
+fi
+
+create_repo() {
+  local repo=$1
+  mkdir -p "$repo"
+  (
+    cd "$repo"
+    git init -q
+    printf 'local value = 1\nlocal name = "commentry"\nreturn value\n' > demo.lua
+    git add demo.lua
+    git -c user.name='Commentry UI' -c user.email='ui@example.com' commit -qm 'init'
+    printf 'local value = 2\nlocal name = "commentry"\nlocal extra = true\nreturn value\n' > demo.lua
+  )
+}
+
+if [[ $COLUMNS_OVERRIDE -eq 0 || $LINES_OVERRIDE -eq 0 ]]; then
+  read -r PRESET_COLUMNS PRESET_LINES < <(resolve_preset "$PRESET")
+  if [[ $COLUMNS_OVERRIDE -eq 0 && -z ${COMMENTRY_UI_COLUMNS:-} ]]; then
+    COLUMNS=$PRESET_COLUMNS
+  fi
+  if [[ $LINES_OVERRIDE -eq 0 && -z ${COMMENTRY_UI_LINES:-} ]]; then
+    LINES=$PRESET_LINES
+  fi
+fi
+
+if [[ $ALL_PRESETS -eq 1 ]]; then
+  mkdir -p "$OUT_DIR"
+  PRESET_NAMES=(laptop-small desktop-wide)
+  for preset_name in "${PRESET_NAMES[@]}"; do
+    read -r preset_columns preset_lines < <(resolve_preset "$preset_name")
+    run_capture_set "$OUT_DIR/$preset_name" "$preset_columns" "$preset_lines"
+  done
+  render_preset_index "$OUT_DIR" "${PRESET_NAMES[@]}"
+  printf 'Wrote preset galleries to %s/index.html\n' "$OUT_DIR"
+  exit 0
+fi
+
+run_capture_set "$OUT_DIR" "$COLUMNS" "$LINES"
+printf 'Wrote gallery to %s/index.html (%sx%s, preset=%s)\n' "$OUT_DIR" "$COLUMNS" "$LINES" "$PRESET"
