@@ -191,6 +191,10 @@ const links = presets
   .map((preset) => `<li><a href="${preset}/index.html">${preset}</a></li>`)
   .join("\n");
 
+const compareLinks = ["popup", "card", "range"]
+  .map((scenario) => `<li><a href="compare/${scenario}.html">compare ${scenario}</a></li>`)
+  .join("\n");
+
 const html = `<!doctype html>
 <html>
 <head>
@@ -209,6 +213,11 @@ a:hover { text-decoration: underline; }
 <body>
 <h1>Commentry RPC UI Presets</h1>
 <p>Generated galleries for multiple viewport presets using the multigrid RPC capture path.</p>
+<h2>Compare Views</h2>
+<ul>
+${compareLinks}
+</ul>
+<h2>Preset Galleries</h2>
 <ul>
 ${links}
 </ul>
@@ -216,6 +225,91 @@ ${links}
 </html>`;
 
 fs.writeFileSync(path.join(outDir, "index.html"), html);
+EOF
+}
+
+render_compare_pages() {
+  local out_dir=$1
+  shift
+
+  mkdir -p "$out_dir/compare"
+
+  node - "$out_dir" "$@" <<'EOF'
+const fs = require("node:fs");
+const path = require("node:path");
+
+const outDir = process.argv[2];
+const presets = process.argv.slice(3);
+
+const scenarios = [
+  {
+    key: "popup",
+    title: "Popup Comparison",
+    image: "rpc-comment-popup.png",
+    caption: "Floating comment editor rendered from real multigrid UI events.",
+  },
+  {
+    key: "card",
+    title: "Saved Card Comparison",
+    image: "rpc-comment-card.png",
+    caption: "Inline saved comment card rendered from real multigrid UI events.",
+  },
+  {
+    key: "range",
+    title: "Range Comment Comparison",
+    image: "rpc-range-comment.png",
+    caption: "Multi-line range comment rendered from real multigrid UI events.",
+  },
+];
+
+const escape = (text) =>
+  String(text)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&apos;");
+
+for (const scenario of scenarios) {
+  const sections = presets
+    .map((preset) => {
+      const imagePath = `../${preset}/${scenario.key}/${scenario.image}`;
+      return `<section class="card">
+<h2>${escape(preset)}</h2>
+<img src="${escape(imagePath)}" alt="${escape(`${preset} ${scenario.key}`)}" />
+</section>`;
+    })
+    .join("\n");
+
+  const html = `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>${escape(scenario.title)}</title>
+<style>
+body { background: #0f1419; color: #d7dee7; font-family: 'Avenir Next', ui-sans-serif, sans-serif; margin: 0; padding: 32px; }
+h1 { margin: 0 0 8px; font-size: 32px; }
+p.lead { margin: 0 0 28px; color: #97a9bb; max-width: 72ch; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(720px, 1fr)); gap: 24px; align-items: start; }
+.card { background: #171d24; border: 1px solid #28323d; border-radius: 18px; padding: 18px; box-shadow: 0 18px 40px rgba(0, 0, 0, 0.24); }
+.card h2 { margin: 0 0 12px; font-size: 20px; text-transform: capitalize; }
+.card img { width: 100%; border-radius: 12px; border: 1px solid #2f3b47; background: #11161b; image-rendering: crisp-edges; }
+a { color: #8fd3ff; text-decoration: none; }
+a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<p><a href="../index.html">Back to preset index</a></p>
+<h1>${escape(scenario.title)}</h1>
+<p class="lead">${escape(scenario.caption)}</p>
+<div class="grid">
+${sections}
+</div>
+</body>
+</html>`;
+
+  fs.writeFileSync(path.join(outDir, "compare", `${scenario.key}.html`), html);
+}
 EOF
 }
 
@@ -335,6 +429,7 @@ if [[ $ALL_PRESETS -eq 1 ]]; then
     read -r preset_columns preset_lines < <(resolve_preset "$preset_name")
     run_capture_set "$OUT_DIR/$preset_name" "$preset_columns" "$preset_lines"
   done
+  render_compare_pages "$OUT_DIR" "${PRESET_NAMES[@]}"
   render_preset_index "$OUT_DIR" "${PRESET_NAMES[@]}"
   printf 'Wrote RPC preset galleries to %s/index.html\n' "$OUT_DIR"
   exit 0
