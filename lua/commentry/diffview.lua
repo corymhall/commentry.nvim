@@ -829,11 +829,11 @@ end
 local function card_lines_for_comment(comment, cfg)
   local comment_type = comment.comment_type or "note"
   local hl = type_hl(comment_type)
-  local max_body_width = math.max(12, cfg.max_width - 6)
+  local max_body_width = math.max(12, cfg.max_width - 10)
   local range = line_label(comment)
-  local header = ("[%s] %s"):format(type_label(comment_type), range)
+  local header = ("%s · %s"):format(type_label(comment_type), range)
   local lines = {
-    { { "  ╭─ ", hl.border }, { header, hl.tag } },
+    { { "  ┌ ", hl.border }, { type_label(comment_type), hl.tag }, { " · " .. range, "CommentryBody" } },
   }
 
   local body_lines = vim.split(comment.body or "", "\n", { plain = true })
@@ -846,7 +846,7 @@ local function card_lines_for_comment(comment, cfg)
       if rendered >= cfg.max_body_lines then
         break
       end
-      lines[#lines + 1] = { { "  │ ", hl.border }, { segment, "CommentryBody" } }
+      lines[#lines + 1] = { { "  ┆ ", hl.border }, { segment, "CommentryBody" } }
       rendered = rendered + 1
     end
     if rendered >= cfg.max_body_lines then
@@ -854,10 +854,11 @@ local function card_lines_for_comment(comment, cfg)
     end
   end
   if rendered == cfg.max_body_lines and #body_lines > 0 then
-    lines[#lines + 1] = { { "  │ ", hl.border }, { "...", "CommentryBody" } }
+    lines[#lines + 1] = { { "  ┆ ", hl.border }, { "…", "CommentryBody" } }
   end
 
-  lines[#lines + 1] = { { "  ╰" .. string.rep("─", math.max(10, #header + 1)), hl.border } }
+  lines[#lines + 1] =
+    { { "  └" .. string.rep("─", math.max(8, math.min(cfg.max_width - 2, #header + 2))), hl.border } }
   return lines
 end
 
@@ -908,9 +909,9 @@ local function range_sign_text(kind)
     return "╰"
   end
   if kind == "single" then
-    return "●"
+    return "•"
   end
-  return "│"
+  return "┆"
 end
 
 ---@param existing table|nil

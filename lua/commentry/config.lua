@@ -87,8 +87,8 @@ local defaults = {
     prefer = "diffview.nvim",
     auto_attach = true,
     comment_cards = {
-      max_width = 88,
-      max_body_lines = 8,
+      max_width = 76,
+      max_body_lines = 6,
       show_markers = true,
     },
     comment_ranges = {

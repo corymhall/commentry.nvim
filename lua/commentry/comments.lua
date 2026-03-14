@@ -16,7 +16,6 @@ local current_context
 
 local ROOT_CANDIDATE_KEYS = { "git_root", "toplevel", "root", "cwd", "path" }
 local DEFAULT_COMMENT_TYPES = { "note", "suggestion", "issue", "praise" }
-local editor_ns = vim.api.nvim_create_namespace("commentry-comment-editor")
 
 ---@param root string
 ---@return string|nil
@@ -1768,19 +1767,22 @@ end
 ---@param win integer
 ---@param comment_type string
 ---@param title string
-local function set_editor_winbar(win, comment_type, title)
+local function set_editor_chrome(win, comment_type, title)
   if type(win) ~= "number" or not vim.api.nvim_win_is_valid(win) then
     return
   end
-  pcall(
-    vim.api.nvim_set_option_value,
-    "winbar",
-    ("%s [%s]  Enter:newline  C-s:save  q/Esc:cancel  Tab:type"):format(title, comment_type),
-    {
-      scope = "local",
-      win = win,
-    }
-  )
+  local label = ("%s · %s"):format(title, comment_type:upper())
+  local footer = " Type freely  ·  <C-s> save  ·  <Esc>/q cancel  ·  <Tab> cycle type "
+  pcall(vim.api.nvim_win_set_config, win, {
+    title = label,
+    title_pos = "center",
+    footer = footer,
+    footer_pos = "center",
+  })
+  pcall(vim.api.nvim_set_option_value, "winbar", "", {
+    scope = "local",
+    win = win,
+  })
 end
 
 ---@param opts table
@@ -1804,8 +1806,8 @@ local function prompt_comment_body(opts, cb)
     body_lines = { "" }
   end
 
-  local width = math.max(70, math.floor(vim.o.columns * 0.60))
-  local height = math.max(10, math.floor(vim.o.lines * 0.30))
+  local width = math.min(math.max(64, math.floor(vim.o.columns * 0.54)), math.max(64, vim.o.columns - 8))
+  local height = math.max(8, math.floor(vim.o.lines * 0.24))
   local row = math.max(1, math.floor((vim.o.lines - height) / 2 - 1))
   local col = math.max(0, math.floor((vim.o.columns - width) / 2))
 
@@ -1824,14 +1826,18 @@ local function prompt_comment_body(opts, cb)
     height = height,
     row = row,
     col = col,
-    title = " Commentry Comment ",
+    title = "Commentry",
     title_pos = "center",
+    footer = " Type freely  ·  <C-s> save  ·  <Esc>/q cancel  ·  <Tab> cycle type ",
+    footer_pos = "center",
   })
   vim.wo[win].wrap = true
   vim.wo[win].number = false
   vim.wo[win].relativenumber = false
   vim.wo[win].cursorline = false
-  set_editor_winbar(win, active_type, opts.title or "Comment")
+  vim.wo[win].signcolumn = "no"
+  vim.wo[win].spell = false
+  set_editor_chrome(win, active_type, opts.title or "Comment")
 
   local done = false
   local function finish(body, comment_type)
@@ -1865,7 +1871,7 @@ local function prompt_comment_body(opts, cb)
 
   local function cycle_type()
     active_type = next_comment_type_choice(choices, active_type)
-    set_editor_winbar(win, active_type, opts.title or "Comment")
+    set_editor_chrome(win, active_type, opts.title or "Comment")
   end
 
   vim.keymap.set({ "n", "i" }, "<C-s>", save, { buffer = bufnr, silent = true, desc = "Commentry save comment" })
@@ -1882,10 +1888,6 @@ local function prompt_comment_body(opts, cb)
   -- Keep insert-mode Esc default behavior (exit insert) so users can switch
   -- to normal mode and press Enter to save without accidental cancellation.
 
-  pcall(vim.api.nvim_buf_set_extmark, bufnr, editor_ns, 0, 0, {
-    virt_text = { { "Use Enter/C-s to save, Esc/q to cancel, Tab to cycle type", "Comment" } },
-    virt_text_pos = "eol",
-  })
   vim.cmd("startinsert")
 end
 

@@ -51,8 +51,8 @@ describe("commentry.dev.ui_capture", function()
           width = 48,
           height = 12,
           relative = "editor+float",
-          title = " Commentry Comment ",
-          winbar = "Add line comment [note]  Enter:newline  C-s:save  q/Esc:cancel  Tab:type",
+          title = "Commentry",
+          winbar = "",
           buffer = {
             name = "",
             filetype = "markdown",
@@ -72,8 +72,7 @@ describe("commentry.dev.ui_capture", function()
       },
     })
 
-    assert.is_truthy(svg:find("Commentry Comment", 1, true) ~= nil)
-    assert.is_truthy(svg:find("Add line comment", 1, true) ~= nil)
+    assert.is_truthy(svg:find("Commentry", 1, true) ~= nil)
     assert.is_truthy(svg:find("%[suggestion%]") ~= nil)
     assert.is_truthy(svg:find("╭─ %[%SUGGESTION%] L2") ~= nil)
   end)
