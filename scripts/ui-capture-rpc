@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+OUT_DIR="$ROOT/tmp/ui-capture-rpc"
+CACHE_DIR="$ROOT/tmp/ui-cache/nvim"
+CWD=""
+SCENARIO="popup"
+PRESET="laptop-small"
+
+resolve_preset() {
+  case "$1" in
+    laptop-small)
+      printf '%s\n' "220 18"
+      ;;
+    desktop-wide)
+      printf '%s\n' "320 54"
+      ;;
+    *)
+      echo "Unknown preset: $1" >&2
+      exit 1
+      ;;
+  esac
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --preset)
+      PRESET=$2
+      shift 2
+      ;;
+    --scenario)
+      SCENARIO=$2
+      shift 2
+      ;;
+    --cwd)
+      CWD=$2
+      shift 2
+      ;;
+    --out-dir)
+      OUT_DIR=$2
+      shift 2
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      exit 1
+      ;;
+  esac
+done
+
+if [[ $OUT_DIR != /* ]]; then
+  OUT_DIR="$ROOT/$OUT_DIR"
+fi
+
+if [[ -z $CWD ]]; then
+  CWD=$(mktemp -d "$ROOT/tmp/ui-cache/rpc-repo.XXXXXX")
+  trap 'rm -rf "$CWD"' EXIT
+  (
+    cd "$CWD"
+    git init -q
+    printf 'local value = 1\nlocal name = "commentry"\nreturn value\n' > demo.lua
+    git add demo.lua
+    git -c user.name='Commentry UI' -c user.email='ui@example.com' commit -qm 'init'
+    printf 'local value = 2\nlocal name = "commentry"\nlocal extra = true\nreturn value\n' > demo.lua
+  )
+fi
+
+read -r COLUMNS LINES < <(resolve_preset "$PRESET")
+mkdir -p "$OUT_DIR" "$CACHE_DIR"
+
+COMMENTRY_REPO_ROOT="$ROOT" \
+COMMENTRY_UI_CACHE="$CACHE_DIR" \
+COMMENTRY_UI_CWD="$CWD" \
+COMMENTRY_UI_OUT_DIR="$OUT_DIR" \
+COMMENTRY_UI_SCENARIO="$SCENARIO" \
+COMMENTRY_UI_COLUMNS="$COLUMNS" \
+COMMENTRY_UI_LINES="$LINES" \
+  nvim --clean --headless -u NONE -l "$ROOT/scripts/ui-capture-rpc.lua"
+
+case "$SCENARIO" in
+  popup)
+    name="rpc-comment-popup"
+    ;;
+  card)
+    name="rpc-comment-card"
+    ;;
+  range)
+    name="rpc-range-comment"
+    ;;
+  *)
+    echo "Unknown scenario: $SCENARIO" >&2
+    exit 1
+    ;;
+esac
+
+rsvg-convert -o "$OUT_DIR/$name.png" "$OUT_DIR/$name.svg"
+printf 'Wrote %s/%s.png\n' "$OUT_DIR" "$name"
