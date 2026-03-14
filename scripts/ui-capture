@@ -1,0 +1,155 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+OUT_DIR=${1:-"$ROOT/tmp/ui-capture"}
+CACHE_DIR="$ROOT/tmp/ui-cache"
+SCENARIOS=(popup card range)
+
+mkdir -p "$OUT_DIR" "$CACHE_DIR"
+
+create_repo() {
+  local repo=$1
+  mkdir -p "$repo"
+  (
+    cd "$repo"
+    git init -q
+    printf 'local value = 1\nlocal name = "commentry"\nreturn value\n' > demo.lua
+    git add demo.lua
+    git -c user.name='Commentry UI' -c user.email='ui@example.com' commit -qm 'init'
+    printf 'local value = 2\nlocal name = "commentry"\nlocal extra = true\nreturn value\n' > demo.lua
+  )
+}
+
+gallery_html() {
+  local html_path=$1
+  node - "$ROOT" "$html_path" <<'EOF'
+const fs = require("node:fs");
+const path = require("node:path");
+const root = process.argv[2];
+const htmlPath = process.argv[3];
+const capture = require(path.join(root, "lua/commentry/dev/ui_capture.lua"));
+EOF
+}
+
+entries_json="$OUT_DIR/.gallery-entries.jsonl"
+: > "$entries_json"
+
+for scenario in "${SCENARIOS[@]}"; do
+  scenario_dir="$OUT_DIR/$scenario"
+  mkdir -p "$scenario_dir"
+  repo=$(mktemp -d "$CACHE_DIR/repo.XXXXXX")
+  trap 'rm -rf "$repo"' EXIT
+  create_repo "$repo"
+
+  (
+    cd "$repo"
+    COMMENTRY_REPO_ROOT="$ROOT" \
+    COMMENTRY_UI_CACHE="$CACHE_DIR/nvim" \
+    COMMENTRY_UI_OUT_DIR="$scenario_dir" \
+    COMMENTRY_UI_SCENARIO="$scenario" \
+      nvim --clean --headless -u "$ROOT/scripts/ui-init.lua" \
+      "+lua require('commentry.dev.ui_capture').run()"
+  )
+
+  case "$scenario" in
+    popup)
+      name="comment-popup"
+      title="Comment Popup"
+      caption="Triggered from the diff buffer using Commentry's local keymap, then captured while the floating editor is open."
+      ;;
+    card)
+      name="comment-card"
+      title="Rendered Comment Card"
+      caption="A saved inline suggestion showing the persistent card treatment and end-of-line marker."
+      ;;
+    range)
+      name="range-comment"
+      title="Range Comment"
+      caption="A multi-line issue comment showing the gutter rail and stacked draft card."
+      ;;
+  esac
+
+  rsvg-convert -o "$scenario_dir/$name.png" "$scenario_dir/$name.svg"
+  printf '%s\t%s\t%s\t%s\n' "$title" "$caption" "$scenario/$name.png" "$scenario/$name.svg" >> "$entries_json"
+  rm -rf "$repo"
+  trap - EXIT
+done
+
+node - "$ROOT" "$OUT_DIR" "$entries_json" <<'EOF'
+const fs = require("node:fs");
+const path = require("node:path");
+
+const root = process.argv[2];
+const outDir = process.argv[3];
+const entriesPath = process.argv[4];
+
+const source = fs.readFileSync(path.join(root, "lua/commentry/dev/ui_capture.lua"), "utf8");
+const marker = "function M.render_gallery(entries)";
+const start = source.indexOf(marker);
+if (start === -1) {
+  throw new Error("render_gallery not found");
+}
+const bodyStart = source.indexOf("return table.concat({", start);
+const bodyEnd = source.indexOf("end\n\nlocal function capture_to_disk", bodyStart);
+if (bodyStart === -1 || bodyEnd === -1) {
+  throw new Error("render_gallery body not found");
+}
+
+const entries = fs
+  .readFileSync(entriesPath, "utf8")
+  .trim()
+  .split("\n")
+  .filter(Boolean)
+  .map((line) => {
+    const [title, caption, image] = line.split("\t");
+    return { title, caption, image };
+  });
+
+const escape = (text) =>
+  String(text)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&apos;");
+
+const cards = entries
+  .map(
+    (entry) => `<section class="card">
+<h2>${escape(entry.title)}</h2>
+<p>${escape(entry.caption)}</p>
+<img src="${escape(entry.image)}" alt="${escape(entry.title)}" />
+</section>`
+  )
+  .join("\n");
+
+const html = `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Commentry UI Gallery</title>
+<style>
+body { background: #f4efe7; color: #2a2118; font-family: 'Avenir Next', ui-sans-serif, sans-serif; margin: 0; padding: 32px; }
+h1 { margin: 0 0 8px; font-size: 32px; }
+p.lead { margin: 0 0 28px; color: #6d5d4b; max-width: 70ch; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 24px; }
+.card { background: #fffdfa; border: 1px solid #d8c6ad; border-radius: 20px; padding: 18px; box-shadow: 0 14px 40px rgba(95, 67, 31, 0.08); }
+.card h2 { margin: 0 0 6px; font-size: 20px; }
+.card p { margin: 0 0 16px; color: #6d5d4b; }
+.card img { width: 100%; border-radius: 14px; border: 1px solid #eadcca; background: #fbf7f2; }
+</style>
+</head>
+<body>
+<h1>Commentry UI Capture</h1>
+<p class="lead">Live Neovim scenarios rendered from a headless Commentry session. Each card is generated from buffer/window/extmark state so an agent can inspect the JSON, while humans can review the PNG gallery.</p>
+<div class="grid">
+${cards}
+</div>
+</body>
+</html>`;
+
+fs.writeFileSync(path.join(outDir, "index.html"), html);
+EOF
+
+printf 'Wrote gallery to %s/index.html\n' "$OUT_DIR"
