@@ -9,8 +9,77 @@ local SCENE_BG = "#11161b"
 local DEFAULT_BG = "#202830"
 local DEFAULT_FG = "#d7dee7"
 local FLOAT_SHADOW = "rgba(0,0,0,0.28)"
-local WINDOW_STROKE = "#3a4a58"
 local TITLE_COLOR = "#8fa7bd"
+local FLOAT_BACKDROP = "rgba(7,10,14,0.92)"
+
+---@param value integer|nil
+---@return integer, integer, integer
+local function hex_to_rgb(value)
+  local normalized = type(value) == "number" and value or tonumber(tostring(value):gsub("^#", ""), 16) or 0
+  local r = math.floor(normalized / 0x10000) % 0x100
+  local g = math.floor(normalized / 0x100) % 0x100
+  local b = normalized % 0x100
+  return r, g, b
+end
+
+---@param color string
+---@param fallback string
+---@return integer, integer, integer
+local function color_components(color, fallback)
+  local value = color
+  if type(value) ~= "string" or value == "" then
+    value = fallback
+  end
+  if value:sub(1, 1) == "#" then
+    return hex_to_rgb(value)
+  end
+  return hex_to_rgb(fallback)
+end
+
+---@param color string
+---@param fallback string
+---@param alpha number
+---@return string
+local function rgba(color, fallback, alpha)
+  local r, g, b = color_components(color, fallback)
+  return ("rgba(%d,%d,%d,%.3f)"):format(r, g, b, alpha)
+end
+
+---@param base string
+---@param accent string
+---@param amount number
+---@return string
+local function mix_colors(base, accent, amount)
+  local base_r, base_g, base_b = color_components(base, DEFAULT_BG)
+  local accent_r, accent_g, accent_b = color_components(accent, DEFAULT_FG)
+  local t = math.max(0, math.min(1, amount))
+  local function mix_channel(a, b)
+    return math.floor((a * (1 - t)) + (b * t) + 0.5)
+  end
+  return ("#%02x%02x%02x"):format(
+    mix_channel(base_r, accent_r),
+    mix_channel(base_g, accent_g),
+    mix_channel(base_b, accent_b)
+  )
+end
+
+---@param text string
+---@return string
+local function trim(text)
+  return vim.trim(type(text) == "string" and text or "")
+end
+
+---@param text string
+---@return boolean
+local function is_border_text(text)
+  return trim(text):match("^[╭╮╰╯│─]+$") ~= nil
+end
+
+---@param text string
+---@return boolean
+local function is_chip_text(text)
+  return trim(text):match("^%[[^%]]+%]$") ~= nil
+end
 
 ---@param value integer|nil
 ---@param fallback string
@@ -78,6 +147,11 @@ function M.new_screen_state(width, height)
       grid = 1,
       row = 0,
       col = 0,
+    },
+    mode = {
+      name = "normal",
+      index = 0,
+      info = {},
     },
     flushes = 0,
   }
@@ -244,6 +318,17 @@ function M.new_screen_state(width, height)
       return
     end
 
+    if event == "mode_info_set" then
+      self.mode.info = args[2] or {}
+      return
+    end
+
+    if event == "mode_change" then
+      self.mode.name = args[1] or self.mode.name
+      self.mode.index = args[2] or self.mode.index
+      return
+    end
+
     if event == "win_pos" then
       self.windows[args[1]] = {
         grid = args[1],
@@ -320,6 +405,20 @@ function M.new_screen_state(width, height)
       bg = bg,
       bold = attr.bold == true,
       italic = attr.italic == true,
+      blend = math.max(0, math.min(100, tonumber(attr.blend) or 0)),
+    }
+  end
+
+  ---@return table
+  function state:cursor_style()
+    local index = (tonumber(self.mode.index) or 0) + 1
+    local mode_info = self.mode.info[index] or {}
+    return {
+      mode = self.mode.name,
+      shape = mode_info.cursor_shape or "block",
+      cell_percentage = tonumber(mode_info.cell_percentage) or 100,
+      blinkwait = tonumber(mode_info.blinkwait) or 0,
+      hl_id = tonumber(mode_info.attr_id),
     }
   end
 
@@ -423,6 +522,7 @@ function M.new_screen_state(width, height)
       lines = root.height,
       default_colors = self.default_colors,
       cursor = vim.deepcopy(self.cursor),
+      cursor_style = self:cursor_style(),
       windows = windows,
     }
   end
@@ -467,16 +567,13 @@ function M.render_svg(snapshot)
         window_height,
         FLOAT_SHADOW
       )
-    end
-
-    if window.kind ~= "editor" then
-      parts[#parts + 1] = ('<rect x="%d" y="%d" width="%d" height="%d" fill="none" stroke="%s" stroke-width="1" rx="%d" />'):format(
+      parts[#parts + 1] = ('<rect x="%d" y="%d" width="%d" height="%d" rx="%d" fill="%s" />'):format(
         x,
         y,
         window_width,
         window_height,
-        WINDOW_STROKE,
-        window.kind == "float" and 8 or 0
+        10,
+        FLOAT_BACKDROP
       )
     end
 
@@ -485,13 +582,50 @@ function M.render_svg(snapshot)
       local cursor_on_row = cursor_window == window and snapshot.cursor.row == (row_index - 1)
       if cursor_on_row then
         local cursor_x = x + (snapshot.cursor.col * CELL_WIDTH)
-        parts[#parts + 1] = ('<rect x="%d" y="%d" width="%d" height="%d" fill="%s" fill-opacity="0.55" />'):format(
-          cursor_x,
-          row_y + 3,
-          CELL_WIDTH,
-          CELL_HEIGHT - 2,
-          TITLE_COLOR
-        )
+        local style = snapshot.cursor_style or {}
+        local shape = style.shape or "block"
+        local cell_percentage = math.max(1, math.min(100, tonumber(style.cell_percentage) or 100))
+        local cursor_highlight = nil
+        if snapshot.highlight_resolver and type(style.hl_id) == "number" then
+          cursor_highlight = snapshot.highlight_resolver(style.hl_id)
+        end
+        local cursor_fill = TITLE_COLOR
+        if cursor_highlight then
+          if shape == "block" then
+            cursor_fill = cursor_highlight.bg ~= snapshot.default_colors.background and cursor_highlight.bg
+              or cursor_highlight.fg
+          else
+            cursor_fill = cursor_highlight.fg
+          end
+        end
+
+        if shape == "vertical" then
+          local cursor_width = math.max(2, math.floor((CELL_WIDTH * cell_percentage) / 100))
+          parts[#parts + 1] = ('<rect x="%d" y="%d" width="%d" height="%d" rx="1" fill="%s" />'):format(
+            cursor_x,
+            row_y + 2,
+            cursor_width,
+            CELL_HEIGHT - 4,
+            cursor_fill
+          )
+        elseif shape == "horizontal" then
+          local cursor_height = math.max(2, math.floor((CELL_HEIGHT * cell_percentage) / 100))
+          parts[#parts + 1] = ('<rect x="%d" y="%d" width="%d" height="%d" rx="1" fill="%s" />'):format(
+            cursor_x,
+            row_y + CELL_HEIGHT - cursor_height,
+            CELL_WIDTH,
+            cursor_height,
+            cursor_fill
+          )
+        else
+          parts[#parts + 1] = ('<rect x="%d" y="%d" width="%d" height="%d" rx="2" fill="%s" fill-opacity="0.40" />'):format(
+            cursor_x,
+            row_y + 2,
+            CELL_WIDTH,
+            CELL_HEIGHT - 4,
+            cursor_fill
+          )
+        end
       end
 
       local col_x = x
@@ -499,15 +633,45 @@ function M.render_svg(snapshot)
         local highlight = snapshot.highlight_resolver and snapshot.highlight_resolver(segment.hl_id) or nil
         local fg = highlight and highlight.fg or snapshot.default_colors.foreground
         local bg = highlight and highlight.bg or snapshot.default_colors.background
+        local bg_opacity = highlight and (1 - (highlight.blend / 100)) or 1
         local font_weight = highlight and highlight.bold and "700" or "400"
         local font_style = highlight and highlight.italic and "italic" or "normal"
-        parts[#parts + 1] = ('<rect x="%d" y="%d" width="%d" height="%d" fill="%s" />'):format(
+        parts[#parts + 1] = ('<rect x="%d" y="%d" width="%d" height="%d" fill="%s" fill-opacity="%.3f" />'):format(
           col_x,
           row_y,
           segment.width * CELL_WIDTH,
           CELL_HEIGHT,
-          bg
+          bg,
+          bg_opacity
         )
+
+        local trimmed = trim(segment.text)
+        local float_chrome = window.kind == "float"
+          and (row_index == 1 or row_index == #window.rows)
+          and trimmed ~= ""
+          and not is_border_text(segment.text)
+        if float_chrome then
+          parts[#parts + 1] = ('<rect x="%d" y="%d" width="%d" height="%d" rx="8" fill="%s" stroke="%s" stroke-width="1" />'):format(
+            col_x + 3,
+            row_y + 2,
+            math.max(8, (segment.width * CELL_WIDTH) - 6),
+            CELL_HEIGHT - 4,
+            mix_colors(bg, fg, 0.12),
+            rgba(fg, DEFAULT_FG, 0.35)
+          )
+          font_weight = "700"
+        elseif is_chip_text(segment.text) then
+          parts[#parts + 1] = ('<rect x="%d" y="%d" width="%d" height="%d" rx="8" fill="%s" stroke="%s" stroke-width="1" />'):format(
+            col_x + 2,
+            row_y + 3,
+            math.max(12, (segment.width * CELL_WIDTH) - 4),
+            CELL_HEIGHT - 6,
+            mix_colors(bg, fg, 0.10),
+            rgba(fg, DEFAULT_FG, 0.25)
+          )
+          font_weight = "700"
+        end
+
         parts[#parts + 1] = ('<text x="%d" y="%d" fill="%s" font-size="13" font-family="Iosevka, SFMono-Regular, Menlo, monospace" font-weight="%s" font-style="%s">%s</text>'):format(
           col_x,
           row_y + 15,
