@@ -33,6 +33,14 @@ Run commands from repo root.
 - Run health checks: `mise run health`
 - Full local gate: `mise run ci` (runs lint + test + health + docs)
 
+## Visual Validation
+
+- When validating Neovim UI changes, prefer the embedded RPC capture workflow over reasoning from code alone.
+- Use the repo-local skill at `.codex/skills/neovim-ui-capture/SKILL.md` when the task involves Commentry appearance or interaction.
+- Preferred command: `./scripts/ui-capture-rpc`
+- Compare presets with: `./scripts/ui-capture-rpc --all-presets`
+- Treat `laptop-small` as the stricter baseline when judging layout changes.
+
 ## Key Invariants
 
 - Draft store format (`commentry.json`) must remain backwards-compatible. Existing stores must still load after changes to `lua/commentry/store.lua`.
