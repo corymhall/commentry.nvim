@@ -39,6 +39,7 @@ describe("commentry.codex.send", function()
     local seen_context_id = nil
     local seen_payload_context = nil
     local seen_view = nil
+    local reconcile_calls = 0
     local send = load_send_with_stubs({
       config = {
         codex = {
@@ -71,6 +72,11 @@ describe("commentry.codex.send", function()
       comments = {
         context_id_for_view = function()
           return "ctx-comments", nil
+        end,
+        reconcile_review = function(view)
+          reconcile_calls = reconcile_calls + 1
+          assert.are.same("view-1", view.id)
+          return true
         end,
         exportable_comments = function(context_id)
           seen_context_id = context_id
@@ -121,6 +127,7 @@ describe("commentry.codex.send", function()
 
     local result = send.send_current_review({})
     assert.are.same("view-1", seen_view.id)
+    assert.are.same(1, reconcile_calls)
     assert.are.same("ctx-comments", seen_context_id)
     assert.are.same("ctx-comments", seen_payload_context.context_id)
     assert.is_true(result.ok)

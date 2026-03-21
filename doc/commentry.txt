@@ -115,7 +115,7 @@ COMMANDS                                          *commentry.commands*
   Create a range comment from the current visual selection.
 
 :Commentry list-comments
-  List jumpable active draft comments for the current diff file/side.
+  List jumpable active draft comments for the current review.
   Requires `snacks.nvim`.
 
 :Commentry set-comment-type

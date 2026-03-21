@@ -67,7 +67,7 @@ require("commentry").setup({
 
 - `:Commentry open` opens a diffview for local changes (shortcut).
 - `:Commentry add-range-comment` creates a range comment from the current visual selection.
-- `:Commentry list-comments` opens a Snacks picker for draft comments on the current file/side, with source preview and in-picker delete (`<C-d>` current, `<M-d>` selected). Requires `snacks.nvim`.
+- `:Commentry list-comments` opens a Snacks picker for active draft comments across the current review, with source preview and in-picker delete (`<C-d>` current, `<M-d>` selected). Requires `snacks.nvim`.
 - `:Commentry set-comment-type` sets default or per-comment type (`note`, `suggestion`, `issue`, `praise`).
 - `:Commentry toggle-file-reviewed` toggles reviewed status for the current diff file.
 - `:Commentry next-unreviewed` jumps to the next unreviewed diff file in panel order.

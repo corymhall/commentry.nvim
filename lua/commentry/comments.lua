@@ -565,10 +565,12 @@ end
 
 ---@param diff_id string
 ---@param context table
----@return boolean
-local function reconcile_for_context(diff_id, context)
+---@param opts? table
+---@return boolean changed, integer unresolved_count
+local function reconcile_for_context(diff_id, context, opts)
+  opts = opts or {}
   if type(context) ~= "table" or type(context.bufnr) ~= "number" then
-    return false
+    return false, 0
   end
   local line_count = vim.api.nvim_buf_line_count(context.bufnr)
   local dstate = diff_state(diff_id)
@@ -602,7 +604,7 @@ local function reconcile_for_context(diff_id, context)
     end
   end
   if #unresolved == 0 and hydrated == 0 then
-    return false
+    return false, 0
   end
 
   mark_dirty(diff_id)
@@ -612,10 +614,10 @@ local function reconcile_for_context(diff_id, context)
       maybe_drop_thread(dstate, thread)
     end
   end
-  if #unresolved > 0 then
+  if #unresolved > 0 and not opts.silent then
     Util.warn(("Marked %d comment(s) unresolved after diff changes"):format(#unresolved))
   end
-  return true
+  return true, #unresolved
 end
 
 ---@param comments commentry.DraftComment[]
@@ -646,12 +648,60 @@ local function select_comment(comments, prompt, cb)
 end
 
 ---@param context table
-local function render_for_context(context)
-  local diff_id = require_context_id(context.view, "Unable to resolve review context")
-  if not diff_id then
-    return
+---@return table[]
+local function visible_entry_contexts(context)
+  if type(context) ~= "table" then
+    return {}
   end
-  local reconciled = reconcile_for_context(diff_id, context)
+
+  local view = context.view
+  local entry = type(view) == "table" and view.cur_entry or nil
+  local layout = type(entry) == "table" and entry.layout or nil
+  if type(layout) ~= "table" then
+    return { context }
+  end
+
+  local contexts = {}
+  local seen = {}
+
+  local function push(slot_key, line_side)
+    local slot = layout[slot_key]
+    local bufnr = slot and slot.file and slot.file.bufnr or nil
+    if type(bufnr) ~= "number" or bufnr <= 0 or not vim.api.nvim_buf_is_valid(bufnr) or seen[bufnr] then
+      return
+    end
+    seen[bufnr] = true
+
+    local line_number = 1
+    local winid = slot.winid
+    if type(winid) == "number" and winid > 0 and vim.api.nvim_win_is_valid(winid) then
+      line_number = vim.api.nvim_win_get_cursor(winid)[1]
+    elseif bufnr == context.bufnr and type(context.line_number) == "number" then
+      line_number = context.line_number
+    end
+
+    contexts[#contexts + 1] = {
+      file_path = entry.path or context.file_path,
+      line_number = line_number,
+      line_side = line_side,
+      bufnr = bufnr,
+      view = view,
+    }
+  end
+
+  push("a", "base")
+  push("b", "head")
+
+  if #contexts == 0 then
+    return { context }
+  end
+
+  return contexts
+end
+
+---@param diff_id string
+---@param context table
+local function render_reconciled_context(diff_id, context)
   local dstate = diff_state(diff_id)
   local comments = {}
   for _, comment in ipairs(dstate.comments) do
@@ -667,6 +717,189 @@ local function render_for_context(context)
   if type(Diffview.render_file_review_indicator) == "function" then
     local reviewed = dstate.file_reviews[context.file_path] == true
     Diffview.render_file_review_indicator(context.bufnr, reviewed)
+  end
+end
+
+---@param view table
+---@return boolean
+local function reconcile_review_for_view(view)
+  if type(view) ~= "table" then
+    return false
+  end
+
+  local diff_id, context_err = M.context_id_for_view(view)
+  if type(diff_id) ~= "string" or diff_id == "" then
+    if context_err then
+      Util.debug("review reconcile skipped", context_err)
+    end
+    return false
+  end
+
+  local dstate = diff_state(diff_id)
+  local active_by_target = {}
+  local missing_comment_ids = {}
+  local review_paths = {}
+
+  local listed_paths = type(Diffview.list_view_files) == "function" and Diffview.list_view_files(view) or {}
+  if type(listed_paths) == "table" and #listed_paths > 0 then
+    for _, path in ipairs(listed_paths) do
+      if type(path) == "string" and path ~= "" then
+        review_paths[path] = true
+      end
+    end
+  end
+
+  for _, comment in ipairs(dstate.comments) do
+    if comment.status ~= "unresolved" then
+      if next(review_paths) ~= nil and review_paths[comment.file_path] ~= true then
+        comment.status = "unresolved"
+        comment.updated_at = timestamp()
+        missing_comment_ids[#missing_comment_ids + 1] = comment.id
+      else
+        local key = ("%s\31%s"):format(comment.file_path, comment.line_side or "head")
+        if not active_by_target[key] then
+          active_by_target[key] = {
+            file_path = comment.file_path,
+            line_side = comment.line_side or "head",
+            comment_ids = {},
+          }
+        end
+        active_by_target[key].comment_ids[#active_by_target[key].comment_ids + 1] = comment.id
+      end
+    end
+  end
+
+  local unresolved_total = #missing_comment_ids
+  if unresolved_total > 0 then
+    mark_dirty(diff_id)
+    for _, comment_id in ipairs(missing_comment_ids) do
+      remove_comment_from_threads(dstate, comment_id)
+    end
+  end
+
+  local changed = unresolved_total > 0
+  local original_context, _ = current_context()
+  local original_cursor = nil
+  if type(original_context) == "table" and original_context.bufnr == vim.api.nvim_get_current_buf() then
+    original_cursor = vim.api.nvim_win_get_cursor(0)
+  end
+
+  local targets = {}
+  for _, target in pairs(active_by_target) do
+    targets[#targets + 1] = target
+  end
+  table.sort(targets, function(a, b)
+    if a.file_path ~= b.file_path then
+      return a.file_path < b.file_path
+    end
+    return (a.line_side or "") < (b.line_side or "")
+  end)
+
+  for _, target in ipairs(targets) do
+    local focused, focus_err = false, nil
+    if type(Diffview.focus_file) == "function" then
+      focused, focus_err = Diffview.focus_file(view, target.file_path)
+    end
+    if not focused then
+      if focus_err == "unable_to_focus_file" or focus_err == "file_path_required" then
+        unresolved_total = unresolved_total + #target.comment_ids
+        changed = true
+        for _, comment_id in ipairs(target.comment_ids) do
+          local comment = dstate.comments_by_id[comment_id]
+          if type(comment) == "table" and comment.status ~= "unresolved" then
+            comment.status = "unresolved"
+            comment.updated_at = timestamp()
+            remove_comment_from_threads(dstate, comment_id)
+          end
+        end
+        mark_dirty(diff_id)
+      end
+    else
+      local side_ok = true
+      local side_err = nil
+      if type(Diffview.focus_file_side) == "function" then
+        side_ok, side_err = Diffview.focus_file_side(view, target.line_side)
+      end
+      if side_ok then
+        local target_context, _ = current_context()
+        if
+          type(target_context) == "table"
+          and target_context.file_path == target.file_path
+          and target_context.line_side == target.line_side
+        then
+          local target_changed, target_unresolved = reconcile_for_context(diff_id, target_context, { silent = true })
+          changed = target_changed or changed
+          unresolved_total = unresolved_total + target_unresolved
+          render_reconciled_context(diff_id, target_context)
+        end
+      elseif side_err == "target_side_unavailable" or side_err == "entry_layout_unavailable" then
+        unresolved_total = unresolved_total + #target.comment_ids
+        changed = true
+        for _, comment_id in ipairs(target.comment_ids) do
+          local comment = dstate.comments_by_id[comment_id]
+          if type(comment) == "table" and comment.status ~= "unresolved" then
+            comment.status = "unresolved"
+            comment.updated_at = timestamp()
+            remove_comment_from_threads(dstate, comment_id)
+          end
+        end
+        mark_dirty(diff_id)
+      end
+    end
+  end
+
+  if type(original_context) == "table" then
+    if type(Diffview.focus_file) == "function" then
+      Diffview.focus_file(view, original_context.file_path)
+    end
+    if type(Diffview.focus_file_side) == "function" then
+      Diffview.focus_file_side(view, original_context.line_side)
+    end
+    if
+      type(original_cursor) == "table"
+      and #original_cursor == 2
+      and vim.api.nvim_get_current_buf() == original_context.bufnr
+    then
+      pcall(vim.api.nvim_win_set_cursor, 0, original_cursor)
+    end
+    for _, visible_context in ipairs(visible_entry_contexts(original_context)) do
+      render_reconciled_context(diff_id, visible_context)
+    end
+  end
+
+  if unresolved_total > 0 then
+    Util.warn(("Marked %d comment(s) unresolved after diff changes"):format(unresolved_total))
+  end
+  if changed then
+    persist_for_view(diff_id, view, "Failed to persist reconciled comments")
+  end
+  return changed
+end
+
+---@param view? table
+---@return boolean
+function M.reconcile_review(view)
+  return reconcile_review_for_view(view)
+end
+
+---@param context table
+local function render_for_context(context)
+  local diff_id = require_context_id(context.view, "Unable to resolve review context")
+  if not diff_id then
+    return
+  end
+
+  local reconciled = false
+  local unresolved_total = 0
+  for _, visible_context in ipairs(visible_entry_contexts(context)) do
+    local target_changed, target_unresolved = reconcile_for_context(diff_id, visible_context, { silent = true })
+    reconciled = target_changed or reconciled
+    unresolved_total = unresolved_total + target_unresolved
+    render_reconciled_context(diff_id, visible_context)
+  end
+
+  if unresolved_total > 0 then
+    Util.warn(("Marked %d comment(s) unresolved after diff changes"):format(unresolved_total))
   end
   if reconciled then
     persist_for_view(diff_id, context.view, "Failed to persist reconciled comments")
@@ -696,18 +929,12 @@ local function active_comments_for_line(context)
 end
 
 ---@param diff_id string
----@param context table
 ---@return commentry.DraftComment[]
-local function jumpable_comments_for_context(diff_id, context)
+local function listable_comments_for_review(diff_id)
   local dstate = diff_state(diff_id)
   local comments = {}
-  local side = type(context) == "table" and context.line_side or nil
   for _, comment in ipairs(dstate.comments) do
-    if
-      comment.status ~= "unresolved"
-      and comment.file_path == context.file_path
-      and (side == nil or comment.line_side == side)
-    then
+    if comment.status ~= "unresolved" then
       comments[#comments + 1] = comment
     end
   end
@@ -1163,13 +1390,10 @@ function M.list_comments()
   if not diff_id then
     return
   end
-  local comments = jumpable_comments_for_context(diff_id, context)
+  M.reconcile_review(context.view)
+  local comments = listable_comments_for_review(diff_id)
   if #comments == 0 then
-    if context.line_side then
-      Util.info("No jumpable draft comments for current diff file/side")
-    else
-      Util.info("No jumpable draft comments for current diff file")
-    end
+    Util.info("No draft comments for current review")
     return
   end
 
@@ -1260,7 +1484,7 @@ function M.list_comments()
 
       if #items == 0 then
         picker:close()
-        Util.info("No jumpable draft comments for current diff file/side")
+        Util.info("No draft comments for current review")
         return
       end
 
@@ -1528,6 +1752,7 @@ function M.generate_export_markdown(context)
   if not diff_id then
     return nil, diff_err or "Unable to resolve review context"
   end
+  M.reconcile_review(view)
   local comments = exportable_comments(diff_id)
 
   local lines = {

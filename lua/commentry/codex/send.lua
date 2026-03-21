@@ -167,6 +167,9 @@ local function build_send_context(opts)
   end
 
   local items = {}
+  if type(Comments.reconcile_review) == "function" then
+    Comments.reconcile_review(view)
+  end
   if type(Comments.exportable_comments) == "function" then
     local exported = Comments.exportable_comments(context_id)
     if type(exported) == "table" then

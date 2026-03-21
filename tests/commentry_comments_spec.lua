@@ -372,6 +372,91 @@ describe("commentry.comments persistence", function()
     assert.are.same(0, #persisted.threads)
   end)
 
+  it("reconciles stale comments on the sibling visible diff side for the same file", function()
+    local persisted = nil
+    local base_bufnr = vim.api.nvim_create_buf(false, true)
+    local store_data = {
+      project_root = "/tmp/project",
+      diff_id = "/tmp/project",
+      comments = {
+        {
+          id = "c1",
+          diff_id = "/tmp/project",
+          file_path = "file.lua",
+          line_number = 1,
+          line_side = "base",
+          body = "Base anchor changed",
+          line_content = "before",
+        },
+      },
+      threads = {
+        {
+          id = "t-/tmp/project-file.lua|base|1",
+          diff_id = "/tmp/project",
+          file_path = "file.lua",
+          line_number = 1,
+          line_side = "base",
+          comment_ids = { "c1" },
+        },
+      },
+    }
+
+    local comments = load_with_stubs({
+      store = {
+        path_for_project = function()
+          return "/tmp/project/.commentry/commentry.json"
+        end,
+        read = function()
+          return store_data
+        end,
+        write = function(_, store)
+          persisted = store
+          return true
+        end,
+      },
+      diffview = {
+        current_file_context = function()
+          return {
+            file_path = "file.lua",
+            line_number = 1,
+            line_side = "head",
+            bufnr = 1,
+            view = {
+              git_root = "/tmp/project",
+              cur_entry = {
+                path = "file.lua",
+                layout = {
+                  a = { file = { bufnr = base_bufnr } },
+                  b = { file = { bufnr = 1 } },
+                },
+              },
+            },
+          }
+        end,
+        render_comment_markers = function()
+          return
+        end,
+      },
+    })
+
+    vim.api.nvim_buf_line_count = function()
+      return 2
+    end
+    vim.api.nvim_buf_get_lines = function()
+      return { "after" }
+    end
+
+    comments.load_for_view({ git_root = "/tmp/project" })
+    comments.render_current_buffer()
+
+    assert.is_table(persisted)
+    assert.are.same(1, #persisted.comments)
+    assert.are.same("unresolved", persisted.comments[1].status)
+    assert.are.same(0, #persisted.threads)
+
+    vim.api.nvim_buf_delete(base_bufnr, { force = true })
+  end)
+
   it("marks blank-line anchors unresolved when current line becomes non-blank", function()
     local persisted = nil
     local store_data = {
@@ -1704,10 +1789,13 @@ describe("commentry.comments persistence", function()
     comments.list_comments()
 
     assert.is_table(captured_items)
-    assert.are.same(1, #captured_items)
+    assert.are.same(2, #captured_items)
     assert.are.same("c1", captured_items[1].comment.id)
     assert.are.same("file.lua", captured_items[1].file)
     assert.are.same({ 4, 0 }, captured_items[1].pos)
+    assert.are.same("c2", captured_items[2].comment.id)
+    assert.are.same("other.lua", captured_items[2].file)
+    assert.are.same({ 8, 0 }, captured_items[2].pos)
     assert.are.same("Commentry draft comments", captured_opts.title)
     assert.is_true(type(captured_opts.format) == "function")
     assert.are.same("file", captured_opts.preview)
@@ -1730,6 +1818,28 @@ describe("commentry.comments persistence", function()
     local captured_items = nil
     local focused_path = nil
     local on_diff_buffer = false
+    local current_side = "head"
+    local function make_view()
+      return {
+        git_root = "/tmp/project",
+        cur_entry = { path = focused_path or "file.lua" },
+        files = {
+          iter = function()
+            local files = {
+              { path = "file.lua" },
+              { path = "other.lua" },
+            }
+            local index = 0
+            return function()
+              index = index + 1
+              if index <= #files then
+                return index, files[index]
+              end
+            end
+          end,
+        },
+      }
+    end
 
     local comments = load_with_stubs({
       store = {
@@ -1803,18 +1913,18 @@ describe("commentry.comments persistence", function()
       },
       diffview = {
         get_current_view = function()
-          return { git_root = "/tmp/project", cur_entry = { path = "file.lua" } }
+          return make_view()
         end,
         current_file_context = function()
           if not on_diff_buffer then
             return nil, "current buffer is not a diffview file buffer"
           end
           return {
-            file_path = "file.lua",
+            file_path = focused_path or "file.lua",
             line_number = 1,
-            line_side = "head",
+            line_side = current_side,
             bufnr = 1,
-            view = { git_root = "/tmp/project", cur_entry = { path = "file.lua" } },
+            view = make_view(),
           }
         end,
         focus_file = function(_, path)
@@ -1822,7 +1932,8 @@ describe("commentry.comments persistence", function()
           on_diff_buffer = true
           return true, nil
         end,
-        focus_file_side = function()
+        focus_file_side = function(_, line_side)
+          current_side = line_side
           return true, nil
         end,
         render_comment_markers = function()
@@ -1848,19 +1959,131 @@ describe("commentry.comments persistence", function()
         end,
       },
     }
+    vim.api.nvim_buf_line_count = function()
+      return 10
+    end
+    vim.api.nvim_buf_get_lines = function()
+      if (focused_path or "file.lua") == "other.lua" then
+        return { "other line" }
+      end
+      if current_side == "base" then
+        return { "base line" }
+      end
+      return { "head line" }
+    end
     vim.api.nvim_win_set_cursor = function(_, pos)
       moved_cursor = pos
     end
 
-    comments.load_for_view({ git_root = "/tmp/project", cur_entry = { path = "file.lua" } })
+    comments.load_for_view(make_view())
     comments.list_comments()
 
     assert.is_table(captured_items)
-    assert.are.same(2, #captured_items)
+    assert.are.same(3, #captured_items)
     assert.are.same("c-base", captured_items[1].comment.id)
     assert.are.same("c-head", captured_items[2].comment.id)
+    assert.are.same("c-other", captured_items[3].comment.id)
     assert.are.same("file.lua", focused_path)
     assert.are.same({ 4, 0 }, moved_cursor)
+  end)
+
+  it("keeps list-comments in parity with export by omitting unresolved comments across the review", function()
+    local captured_items = nil
+
+    local comments = load_with_stubs({
+      store = {
+        path_for_project = function()
+          return "/tmp/project/.commentry/commentry.json"
+        end,
+        read = function()
+          return {
+            project_root = "/tmp/project",
+            diff_id = "/tmp/project",
+            comments = {
+              {
+                id = "c1",
+                diff_id = "/tmp/project",
+                file_path = "a.lua",
+                line_number = 2,
+                line_side = "head",
+                body = "active draft",
+              },
+              {
+                id = "c2",
+                diff_id = "/tmp/project",
+                file_path = "z.lua",
+                line_number = 5,
+                line_side = "base",
+                body = "stale draft",
+                status = "unresolved",
+              },
+            },
+            threads = {
+              {
+                id = "t-/tmp/project-a.lua|head|2",
+                diff_id = "/tmp/project",
+                file_path = "a.lua",
+                line_number = 2,
+                line_side = "head",
+                comment_ids = { "c1" },
+              },
+              {
+                id = "t-/tmp/project-z.lua|base|5",
+                diff_id = "/tmp/project",
+                file_path = "z.lua",
+                line_number = 5,
+                line_side = "base",
+                comment_ids = { "c2" },
+              },
+            },
+          }
+        end,
+        write = function()
+          return true
+        end,
+      },
+      diffview = {
+        get_current_view = function()
+          return { git_root = "/tmp/project" }
+        end,
+        current_file_context = function()
+          return {
+            file_path = "a.lua",
+            line_number = 1,
+            line_side = "head",
+            bufnr = 1,
+            view = { git_root = "/tmp/project" },
+          }
+        end,
+        render_comment_markers = function()
+          return
+        end,
+        render_hover_preview = function()
+          return
+        end,
+        clear_hover_preview = function()
+          return
+        end,
+      },
+    })
+
+    package.loaded["snacks"] = {
+      picker = {
+        pick = function(opts)
+          captured_items = opts.items
+        end,
+        select = function()
+          return
+        end,
+      },
+    }
+
+    comments.load_for_view({ git_root = "/tmp/project" })
+    comments.list_comments()
+
+    assert.is_table(captured_items)
+    assert.are.same(1, #captured_items)
+    assert.are.same("c1", captured_items[1].comment.id)
   end)
 
   it("deletes selected comments via list picker action and refreshes picker", function()
@@ -2255,6 +2478,92 @@ describe("commentry.comments persistence", function()
     assert.is_true(first < second and second < third)
   end)
 
+  it("reconciles missing review files before exporting markdown", function()
+    local root = vim.fs.normalize(vim.fn.getcwd())
+    local persisted = nil
+    local comments = load_with_stubs({
+      store = {
+        path_for_context = function()
+          return "/tmp/project/.commentry/contexts/export/commentry.json"
+        end,
+        read = function()
+          return {
+            project_root = root,
+            context_id = root,
+            comments = {
+              {
+                id = "c-stale",
+                context_id = root,
+                file_path = "gone.lua",
+                line_start = 3,
+                line_end = 3,
+                line_side = "head",
+                comment_type = "note",
+                body = "Old review comment",
+                created_at = "2026-02-21T00:00:01Z",
+                updated_at = "2026-02-21T00:00:01Z",
+              },
+            },
+            threads = {
+              {
+                id = "t-gone",
+                context_id = root,
+                file_path = "gone.lua",
+                line_start = 3,
+                line_end = 3,
+                line_side = "head",
+                comment_ids = { "c-stale" },
+              },
+            },
+            file_reviews = {},
+          }
+        end,
+        write = function(_, store)
+          persisted = vim.deepcopy(store)
+          return true
+        end,
+      },
+      diffview = {
+        list_view_files = function()
+          return { "file.lua" }
+        end,
+        get_current_view = function()
+          return { git_root = root, cur_entry = { path = "file.lua", layout = {} } }
+        end,
+        current_file_context = function()
+          return {
+            file_path = "file.lua",
+            line_number = 1,
+            line_side = "head",
+            bufnr = 1,
+            view = { git_root = root, cur_entry = { path = "file.lua", layout = {} } },
+          }
+        end,
+        render_comment_markers = function()
+          return
+        end,
+        render_hover_preview = function()
+          return
+        end,
+        clear_hover_preview = function()
+          return
+        end,
+      },
+    })
+
+    local ok = comments.load_for_view({ git_root = root, cur_entry = { path = "file.lua", layout = {} } })
+    assert.is_true(ok)
+
+    local markdown, err = comments.generate_export_markdown()
+    assert.is_nil(err)
+    assert.is_true(type(markdown) == "string" and markdown ~= "")
+    assert.is_true(markdown:find("- Comments: 0", 1, true) ~= nil)
+    assert.is_true(markdown:find("Old review comment", 1, true) == nil)
+    assert.is_table(persisted)
+    assert.are.same("unresolved", persisted.comments[1].status)
+    assert.are.same(0, #persisted.threads)
+  end)
+
   it("exports markdown to register destination", function()
     local root = vim.fs.normalize(vim.fn.getcwd())
     local setreg_calls = {}
@@ -2383,6 +2692,7 @@ describe("commentry.comments persistence", function()
                 line_number = 8,
                 line_side = "head",
                 body = "other file draft",
+                status = "unresolved",
               },
             },
             threads = {
@@ -2428,7 +2738,7 @@ describe("commentry.comments persistence", function()
 
     comments.load_for_view({ git_root = "/tmp/project" })
     comments.list_comments()
-    assert.are.same("No jumpable draft comments for current diff file/side", infos[1])
+    assert.are.same("No draft comments for current review", infos[1])
   end)
 
   it("errors when snacks dependency is unavailable for list-comments", function()
