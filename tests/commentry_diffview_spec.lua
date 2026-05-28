@@ -266,4 +266,18 @@ describe("commentry review context", function()
     assert.is_true(type(context.revision_anchors[1].commit) == "string" and #context.revision_anchors[1].commit >= 7)
     assert.is_truthy(context.context_id:find("::review::branch::", 1, true) ~= nil)
   end)
+
+  it("ignores callable Diffview revision fields when resolving review context", function()
+    package.loaded["commentry.diffview"] = nil
+    local Diffview = require("commentry.diffview")
+
+    local context = Diffview.resolve_review_context(nil, {
+      root = vim.fn.getcwd(),
+      left = { commit = { hash = function() end } },
+      right = { commit = { hash = function() end } },
+    })
+
+    assert.are.same("working_tree", context.mode)
+    assert.is_nil(context.revisions)
+  end)
 end)

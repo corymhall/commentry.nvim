@@ -469,11 +469,13 @@ function M.render_compact(payload)
       end
       local body = type(item.body) == "string" and item.body or ""
       local body_lines = vim.split(body, "\n", { plain = true })
-      if #body_lines == 0 then
-        body_lines = { "" }
-      end
-      for _, body_line in ipairs(body_lines) do
-        lines[#lines + 1] = ("   | %s"):format(body_line)
+      if #body_lines <= 1 then
+        lines[#lines + 1] = ("   body: %s"):format(body_lines[1] or "")
+      else
+        lines[#lines + 1] = "   body:"
+        for _, body_line in ipairs(body_lines) do
+          lines[#lines + 1] = ("     %s"):format(body_line)
+        end
       end
     end
   end

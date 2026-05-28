@@ -234,7 +234,13 @@ describe("commentry.codex.payload", function()
           line_end = 48,
           line_side = "head",
           comment_type = "note",
-          body = "Adding a comment",
+          body = table.concat({
+            "We might be able to use the schema tools tool for this type of thing.",
+            "",
+            "These are the types of changes we categorize",
+            "",
+            "type ChangeKind string",
+          }, "\n"),
         },
       },
       provenance = { root = "/tmp/project" },
@@ -246,7 +252,12 @@ describe("commentry.codex.payload", function()
     assert.is_truthy(rendered:find("context: /tmp/project::review", 1, true))
     assert.is_truthy(rendered:find("anchors: main=5ffe8dc945e7", 1, true))
     assert.is_truthy(rendered:find("1. doc/commentry.txt:45-48 [head/note] id=c-1", 1, true))
-    assert.is_truthy(rendered:find("| Adding a comment", 1, true))
+    assert.is_truthy(rendered:find("   body:\n", 1, true))
+    assert.is_truthy(
+      rendered:find("     We might be able to use the schema tools tool for this type of thing.", 1, true)
+    )
+    assert.is_truthy(rendered:find("\n     \n     These are the types of changes we categorize", 1, true))
+    assert.is_falsy(rendered:find("   | ", 1, true))
   end)
 
   it("has no filesystem or store side effects while building/serializing", function()

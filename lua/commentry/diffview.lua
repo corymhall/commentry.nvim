@@ -173,10 +173,23 @@ local function ref_from_value(value)
   if type(value) ~= "table" then
     return nil
   end
-  if type(value.commit) == "table" then
-    return value.commit.hash or value.commit.oid or value.commit.rev or value.commit.name
+  local function first_string_ref(candidates)
+    for _, candidate in ipairs(candidates) do
+      if type(candidate) == "string" and candidate ~= "" then
+        return candidate
+      end
+    end
+    return nil
   end
-  return value.hash or value.oid or value.rev or value.name
+  if type(value.commit) == "table" then
+    return first_string_ref({
+      value.commit.hash,
+      value.commit.oid,
+      value.commit.rev,
+      value.commit.name,
+    })
+  end
+  return first_string_ref({ value.hash, value.oid, value.rev, value.name })
 end
 
 ---@param view table
