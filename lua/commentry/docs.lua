@@ -10,7 +10,7 @@ local public_command_refs = {
   ":Commentry export",
   ":Commentry debug-store",
   ":Commentry diagnostics",
-  ":Commentry send-to-codex",
+  ":Commentry send-to-agent",
 }
 
 local required_help_tags = {
@@ -18,6 +18,7 @@ local required_help_tags = {
   "commentry.install",
   "commentry.setup",
   "commentry.dependencies",
+  "commentry.agent",
   "commentry.keymaps",
   "commentry.commands",
   "commentry.v1-boundaries",

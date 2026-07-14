@@ -4,7 +4,7 @@ INTRODUCTION                                     *commentry*
 
 commentry.nvim provides local diff review workflows inside Neovim with
 draft persistence, typed/range comments, reviewed-file tracking, and an
-optional Codex handoff path.
+optional provider-agnostic agent handoff path.
 Minimum Neovim version: 0.10+.
 
 INSTALL                                           *commentry.install*
@@ -15,7 +15,7 @@ Required dependencies:
 
 Optional integrations:                           *commentry.dependencies*
 - `snacks.nvim` for `:Commentry list-comments`
-- Sidekick runtime for `:Commentry send-to-codex`
+- Sidekick runtime for `:Commentry send-to-agent`
 
 SETUP                                             *commentry.setup*
 
@@ -29,6 +29,9 @@ Use the Lua API to configure the plugin:
     },
     diagnostics = {
       open_style = "split", -- split|vsplit|float
+    },
+    agent = {
+      enabled = false,
     },
     diffview = {
       auto_attach = true,
@@ -45,6 +48,25 @@ Use the Lua API to configure the plugin:
   })
 <
 
+AGENT HARNESS HANDOFF                             *commentry.agent*
+
+Commentry delegates review payload delivery to `require("sidekick.cli").send()`.
+Sidekick reuses an attached agent when possible; otherwise it opens its CLI
+selector and can attach to an existing session or start a new one. Commentry
+does not maintain a separate session inventory or picker.
+
+Sidekick owns the supported-agent list, keeping Commentry provider agnostic.
+Enable agent handoff with:
+>
+  require("commentry").setup({
+    agent = {
+      enabled = true,
+    },
+  })
+<
+
+`:Commentry send-to-agent` leaves the Sidekick tool filter unset.
+
 KEYMAP CONFIG                                     *commentry.keymaps*
 
 All keymaps are configured under `setup({ keymaps = { ... } })` and attach
@@ -60,14 +82,14 @@ Action matrix:
   set_comment_type        mt        Normal   No              :Commentry set-comment-type
   toggle_file_reviewed    mr        Normal   Yes (`""`)      :Commentry toggle-file-reviewed
   next_unreviewed_file    ]r        Normal   Yes (`""`)      :Commentry next-unreviewed
-  send_to_codex           ms        Normal   No              :Commentry send-to-codex
+  send_to_agent           ms        Normal   No              :Commentry send-to-agent
   list_comments           ml        Normal   No              :Commentry list-comments
 
 Behavior notes:
 - Empty-string disable is intentionally supported only for
   `toggle_file_reviewed` and `next_unreviewed_file`.
 - For remap-only actions (`add_comment`, `add_range_comment`, `edit_comment`,
-  `delete_comment`, `set_comment_type`, `send_to_codex`, `list_comments`),
+  `delete_comment`, `set_comment_type`, `send_to_agent`, `list_comments`),
   `""` is invalid.
   Setup warns and
   the effective mapping remains active.
@@ -85,7 +107,7 @@ Example (partial remap + selective disable):
       edit_comment = "ge",
       delete_comment = "gd",
       set_comment_type = "gt",
-      send_to_codex = "gs",
+      send_to_agent = "gs",
       list_comments = "gl",
       toggle_file_reviewed = "",
       next_unreviewed_file = "]u",
@@ -145,24 +167,25 @@ COMMANDS                                          *commentry.commands*
   Open a scratch diagnostics buffer containing:
   - Neovim version
   - active logger config
-  - codex enabled state
+  - agent integration enabled state
   - resolved store/context metadata
   - diffview attach/buffer state
 
-:Commentry send-to-codex
-  Send current review payload to Codex.
+:Commentry send-to-agent
+  Delegate the current review payload to an agent selected by Sidekick.
   Requires:
-  - codex integration enabled in setup (`codex.enabled = true`)
-  - available Sidekick runtime/session target
-  - active attached review context (for example via `:Commentry open` or diffview auto-attach)
-  Adapter behavior:
-  - v1 adapter selection is global/implicit from config
-  - when exactly one existing Codex Sidekick session exists, send auto-attaches it
-  - when multiple existing sessions exist but exactly one matches current cwd, send auto-selects it
-  - when multiple existing sessions exist, send prompts for target selection
-  - when no existing sessions exist, send fails with actionable guidance
+  - agent integration enabled in setup (`agent.enabled = true`)
+  - available Sidekick runtime
+  - active attached review context (for example via `:Commentry open` or
+    diffview auto-attach)
+  Delegation behavior:
+  - Sidekick reuses attached sessions or opens its CLI selector
+  - Sidekick owns session attachment/start, terminal display/focus, formatting,
+    and prompt submission
+  - the generic command leaves the tool filter unset
   Semantics:
-  - send-and-forget: one dispatch attempt, immediate success/failure feedback
+  - send-and-forget: Commentry reports immediate delegation success/failure;
+    Sidekick owns any subsequent selection or cancellation
   - payload format is compact text (`COMMENTRY_REVIEW_V1`), optimized for
     human readability and low token overhead
   - no persisted send history/receipts/retry queue in v1
@@ -197,9 +220,9 @@ TROUBLESHOOTING                               *commentry.troubleshooting*
 
 - `:Commentry list-comments` is unavailable:
   install `snacks.nvim`, then rerun `:checkhealth commentry`.
-- `:Commentry send-to-codex` has no target:
-  ensure a Sidekick session is attached, then retry from an attached review
-  buffer/context.
+- Agent handoff is unavailable:
+  confirm Sidekick is installed, run `:Commentry send-to-agent` from an active
+  review context, and use Sidekick's selector to attach to or start an agent.
 
 =============================================================================
 vim:tw=78:ts=2:sw=2:et:ft=help

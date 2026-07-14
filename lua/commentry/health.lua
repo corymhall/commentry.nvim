@@ -7,49 +7,33 @@ local error = vim.health.error or vim.health.report_error
 local uv = vim.uv or vim.loop
 
 ---@return table
-local function codex_config()
+local function agent_config()
   local loaded, config = pcall(require, "commentry.config")
-  if not loaded or type(config) ~= "table" or type(config.codex) ~= "table" then
-    return { enabled = false, adapter = { select = "auto" } }
+  if not loaded or type(config) ~= "table" or type(config.agent) ~= "table" then
+    return { enabled = false }
   end
-  return config.codex
+  return config.agent
 end
 
----@param codex table
-local function codex_health(codex)
-  if not codex.enabled then
-    ok("codex integration disabled: :Commentry send-to-codex is inactive")
+---@param agent table
+local function agent_health(agent)
+  if not agent.enabled then
     return
   end
 
-  local adapter = type(codex.adapter) == "table" and codex.adapter or {}
-  local selected = adapter.select or "auto"
-  if selected ~= "auto" and selected ~= "sidekick" then
-    warn(
-      ('codex enabled with unsupported adapter.select=%q; configure "auto"/"sidekick" or disable codex'):format(
-        selected
-      )
-    )
-    return
-  end
-
-  local sidekick_ok, sidekick = pcall(require, "commentry.codex.adapters.sidekick")
+  local sidekick_ok, sidekick = pcall(require, "commentry.agent.adapters.sidekick")
   if not sidekick_ok or type(sidekick) ~= "table" or type(sidekick.send) ~= "function" then
-    warn("codex enabled but sidekick adapter is unavailable; install sidekick integration or set codex.enabled=false")
+    warn("agent enabled but sidekick adapter is unavailable; install sidekick integration or set agent.enabled=false")
     return
   end
 
-  local available = true
-  if type(sidekick.available) == "function" then
-    available = sidekick.available() == true
-  end
-
+  local available = type(sidekick.available) ~= "function" or sidekick.available() == true
   if not available then
-    warn("codex enabled but sidekick adapter runtime is unavailable; check sidekick install and active target session")
+    warn("agent enabled but sidekick CLI send API is unavailable; check the Sidekick installation")
     return
   end
 
-  ok("codex adapter ready (sidekick transport available); :Commentry send-to-codex uses attached session target")
+  ok("agent adapter ready; Sidekick resolves the :Commentry send-to-agent target")
 end
 
 local function version_health()
@@ -164,7 +148,7 @@ function M.check()
 
   store_writable_health()
   log_health(log_config())
-  codex_health(codex_config())
+  agent_health(agent_config())
 end
 
 return M

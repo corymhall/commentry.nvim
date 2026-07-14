@@ -96,7 +96,7 @@ Lua, Neovim 0.10+, diffview.nvim dependency, mini.test test suite, mise task run
 - `lua/commentry/comments.lua` — comment lifecycle + rendering
 - `lua/commentry/diffview.lua` — diffview integration
 - `lua/commentry/store.lua` — persistent draft store
-- `lua/commentry/codex/` — payload/send/orchestration
+- `lua/commentry/agent/` — payload/send/orchestration
 - `lua/commentry/health.lua` — health checks
 - `tests/` — mini.test specs
 - `mise.toml` — canonical tasks

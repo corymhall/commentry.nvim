@@ -1,7 +1,7 @@
 # commentry.nvim
 
 Neovim plugin for local diff review workflows, draft persistence, and optional
-Codex handoff from inside Neovim.
+agent handoff from inside Neovim.
 
 ## Preview
 
@@ -32,7 +32,7 @@ Required:
 Optional integrations:
 
 - `folke/snacks.nvim` for `:Commentry list-comments`
-- a Sidekick runtime for `:Commentry send-to-codex`
+- a Sidekick runtime for `:Commentry send-to-agent`
 
 ## Setup
 
@@ -45,6 +45,9 @@ require("commentry").setup({
   },
   diagnostics = {
     open_style = "split", -- split|vsplit|float
+  },
+  agent = {
+    enabled = false,
   },
   diffview = {
     auto_attach = true,
@@ -76,7 +79,28 @@ require("commentry").setup({
 - `:Commentry export register:<name>` writes markdown to a specific register (for example `register:a`).
 - `:Commentry debug-store` prints the active review context and the exact on-disk store path.
 - `:Commentry diagnostics` opens a scratch buffer with runtime diagnostics (config/log/store/diffview state).
-- `:Commentry send-to-codex` sends the current review payload to Codex using the attached Sidekick session target. Requires `codex.enabled = true` and an available Sidekick runtime.
+- `:Commentry send-to-agent` delegates the current review payload to Sidekick. Requires `agent.enabled = true`.
+
+## Agent Harness Handoff
+
+Commentry delegates agent selection and lifecycle to `require("sidekick.cli").send()`.
+Sidekick reuses an attached agent when possible; otherwise it opens its CLI
+selector and can attach to an existing session or start a new one. Commentry
+does not maintain a separate session inventory or picker.
+
+Sidekick owns the supported-agent list, so Commentry remains provider agnostic.
+Enable agent handoff with:
+
+```lua
+require("commentry").setup({
+  agent = {
+    enabled = true,
+  },
+})
+```
+
+`:Commentry send-to-agent` leaves the Sidekick tool filter unset, so Sidekick
+chooses among any configured agent harnesses.
 
 If you open diffview directly (for example `:DiffviewOpen main`), Commentry will
 auto-attach to diff buffers by default.
@@ -104,14 +128,14 @@ Commentry supports nine configurable diffview-local keymap actions:
 | `set_comment_type` | `mt` | Normal | No | `:Commentry set-comment-type` |
 | `toggle_file_reviewed` | `mr` | Normal | Yes | `:Commentry toggle-file-reviewed` |
 | `next_unreviewed_file` | `]r` | Normal | Yes | `:Commentry next-unreviewed` |
-| `send_to_codex` | `ms` | Normal | No | `:Commentry send-to-codex` |
+| `send_to_agent` | `ms` | Normal | No | `:Commentry send-to-agent` |
 | `list_comments` | `ml` | Normal | No | `:Commentry list-comments` |
 
 Notes:
 
 - Keymaps attach only in buffers marked as Commentry diffview buffers.
 - Empty-string disable is intentionally scoped to `toggle_file_reviewed` and `next_unreviewed_file`.
-- For remap-only actions (`add_comment`, `add_range_comment`, `edit_comment`, `delete_comment`, `set_comment_type`, `send_to_codex`, `list_comments`), `""` is invalid and setup warns, then default/effective mapping remains active.
+- For remap-only actions (`add_comment`, `add_range_comment`, `edit_comment`, `delete_comment`, `set_comment_type`, `send_to_agent`, `list_comments`), `""` is invalid and setup warns, then default/effective mapping remains active.
 - `add_range_comment` mapping normally uses its configured/default value from setup normalization. The fallback chain to resolved `add_comment` (then `mc`) is a defensive runtime path when `Config.keymaps` is missing or bypasses normalization.
 
 Example override (partial remap + selective disable):
@@ -124,7 +148,7 @@ require("commentry").setup({
     edit_comment = "ge",
     delete_comment = "gd",
     set_comment_type = "gt",
-    send_to_codex = "gs",
+    send_to_agent = "gs",
     list_comments = "gl",
     toggle_file_reviewed = "",
     next_unreviewed_file = "]u",
@@ -159,13 +183,10 @@ require("commentry").setup({
 - Draft comment bodies are rendered as persistent boxed cards on commented lines, even when the cursor moves away.
 - Range comments render start/mid/end gutter signs (`╭`, `│`, `╰`) with subtle line tinting to show covered lines.
 - File reviewed state is tracked per context and rendered as a lightweight `[reviewed]` / `[unreviewed]` indicator in diff buffers.
-- Send flow is explicit: open/attach a review (`:Commentry open` or auto-attach), ensure Codex integration is enabled, then run
-  `:Commentry send-to-codex`.
-- Adapter behavior is global/implicit in v1. `send-to-codex` discovers existing Sidekick Codex sessions:
-  auto-attaches when exactly one exists, auto-selects when exactly one matches current cwd, uses the Sidekick picker when multiple remain, and fails when none exist.
-- `send-to-codex` requires an attached active review context. Running it outside an attached review buffer/context fails.
-- Send is send-and-forget in v1: Commentry dispatches a compact human-readable payload (`COMMENTRY_REVIEW_V1`) once
-  and reports success/failure in Neovim messages.
+- Send flow is explicit: open/attach a review (`:Commentry open` or auto-attach), enable the generic agent integration, then run `:Commentry send-to-agent`.
+- Sidekick owns agent selection, attachment, terminal creation, display/focus, and prompt submission. Commentry only builds the review payload and delegates it.
+- Agent sends require an active Commentry review context. Running them outside an attached review buffer/context fails.
+- Send is send-and-forget in v1: Commentry delegates a compact human-readable payload (`COMMENTRY_REVIEW_V1`) once and reports whether delegation started. Sidekick owns subsequent selection or cancellation.
 - v1 does not persist send history, delivery receipts, retries, or any outbound queue state.
 
 ## Bug Reports
@@ -189,5 +210,5 @@ This bootstraps a clean Neovim with only commentry + diffview loaded.
   review context is branch-scoped (`<root>::review::branch::<branch-name>`) and shared across diff ranges on that branch.
   Comments become stale/outdated
   when anchor reconciliation detects code drift. Use `:Commentry debug-store` to confirm the active context id/path.
-- Sidekick send target not found:
-  ensure at least one existing Codex Sidekick session is available, then run `:Commentry send-to-codex` from an attached review buffer/context.
+- Agent handoff is unavailable:
+  confirm Sidekick is installed, run `:Commentry send-to-agent` from an active review context, and use Sidekick's selector to attach to or start an agent.

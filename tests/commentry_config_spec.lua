@@ -27,13 +27,10 @@ describe("commentry config", function()
     vim.schedule = original_schedule
   end)
 
-  it("defines codex defaults with explicit disabled mode", function()
+  it("defines agent integration as disabled by default", function()
     local Config = require("commentry.config")
 
-    assert.are.same(false, Config.codex.enabled)
-    assert.are.same("auto", Config.codex.adapter.select)
-    assert.is_nil(Config.codex.adapter.fallback)
-    assert.are.same("reuse", Config.codex.behavior.open)
+    assert.are.same(false, Config.agent.enabled)
     assert.are.same(76, Config.diffview.comment_cards.max_width)
     assert.are.same(6, Config.diffview.comment_cards.max_body_lines)
     assert.are.same(true, Config.diffview.comment_cards.show_markers)
@@ -45,21 +42,11 @@ describe("commentry config", function()
     assert.are.same("split", Config.diagnostics.open_style)
   end)
 
-  it("deep-merges codex config deterministically", function()
+  it("enables generic agent delegation", function()
     local Config = require("commentry.config")
-    Config.setup({
-      codex = {
-        enabled = true,
-        adapter = {
-          select = "snacks",
-        },
-      },
-    })
+    Config.setup({ agent = { enabled = true } })
 
-    assert.are.same(true, Config.codex.enabled)
-    assert.are.same("snacks", Config.codex.adapter.select)
-    assert.is_nil(Config.codex.adapter.fallback)
-    assert.are.same("reuse", Config.codex.behavior.open)
+    assert.is_true(Config.agent.enabled)
   end)
 
   it("deep-merges log config deterministically", function()
@@ -88,7 +75,7 @@ describe("commentry config", function()
       set_comment_type = "mt",
       toggle_file_reviewed = "mr",
       next_unreviewed_file = "]r",
-      send_to_codex = "ms",
+      send_to_agent = "ms",
       list_comments = "ml",
     }
 
@@ -113,7 +100,7 @@ describe("commentry config", function()
     assert.are.same("mt", Config.keymaps.set_comment_type)
     assert.are.same("mr", Config.keymaps.toggle_file_reviewed)
     assert.are.same("]r", Config.keymaps.next_unreviewed_file)
-    assert.are.same("ms", Config.keymaps.send_to_codex)
+    assert.are.same("ms", Config.keymaps.send_to_agent)
     assert.are.same("ml", Config.keymaps.list_comments)
   end)
 
@@ -131,7 +118,7 @@ describe("commentry config", function()
       set_comment_type = "mt",
       toggle_file_reviewed = "mr",
       next_unreviewed_file = "]r",
-      send_to_codex = "ms",
+      send_to_agent = "ms",
       list_comments = "ml",
     }, Config.keymaps)
   end)
@@ -139,22 +126,15 @@ describe("commentry config", function()
   it("is idempotent across repeated setup calls", function()
     local Config = require("commentry.config")
     local opts = {
-      codex = {
+      agent = {
         enabled = true,
-        adapter = {
-          select = "snacks",
-          fallback = "none",
-        },
-        behavior = {
-          open = "split",
-        },
       },
     }
 
     Config.setup(opts)
-    local first = vim.deepcopy(Config.codex)
+    local first = vim.deepcopy(Config.agent)
     Config.setup(opts)
-    local second = vim.deepcopy(Config.codex)
+    local second = vim.deepcopy(Config.agent)
 
     assert.are.same(first, second)
   end)
@@ -283,7 +263,7 @@ describe("commentry config", function()
     local Config = require("commentry.config")
     Config.setup({
       typo_option = true,
-      codex = {
+      agent = {
         mystery = "value",
       },
     })
@@ -291,7 +271,7 @@ describe("commentry config", function()
     assert.is_nil(Config.typo_option)
     assert.is_false(vim.tbl_contains(warns, ""))
     assert.is_truthy(vim.tbl_contains(warns, "commentry setup: unknown config key: typo_option"))
-    assert.is_truthy(vim.tbl_contains(warns, "commentry setup: unknown config key: codex.mystery"))
+    assert.is_truthy(vim.tbl_contains(warns, "commentry setup: unknown config key: agent.mystery"))
   end)
 
   it("warns and restores defaults for invalid log config values", function()

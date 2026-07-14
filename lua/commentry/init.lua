@@ -7,13 +7,6 @@ function M.setup(opts)
   require("commentry.log").setup(Config.log)
   require("commentry.commands").setup()
   require("commentry.diffview").setup()
-
-  if Config.codex and Config.codex.enabled then
-    local ok, codex = pcall(require, "commentry.codex")
-    if ok and type(codex.setup) == "function" then
-      codex.setup()
-    end
-  end
 end
 
 return M

@@ -162,7 +162,7 @@ describe("commentry keymap attachment", function()
         set_comment_type = "gt",
         toggle_file_reviewed = "gf",
         next_unreviewed_file = "gn",
-        send_to_codex = "gs",
+        send_to_agent = "gs",
       },
     }
     package.loaded["commentry.diffview"] = {
@@ -273,7 +273,7 @@ describe("commentry keymap attachment", function()
     assert.are.same("gt", by_desc["Commentry set comment type"].lhs)
     assert.are.same("gf", by_desc["Commentry toggle file reviewed"].lhs)
     assert.are.same("gn", by_desc["Commentry jump next unreviewed file"].lhs)
-    assert.are.same("ms", by_desc["Commentry send to codex"].lhs)
+    assert.are.same("ms", by_desc["Commentry send to agent"].lhs)
     assert.are.same("ml", by_desc["Commentry list comments"].lhs)
   end)
 
@@ -413,7 +413,7 @@ describe("commentry keymap attachment", function()
         set_comment_type = "",
         toggle_file_reviewed = "",
         next_unreviewed_file = "",
-        send_to_codex = "",
+        send_to_agent = "",
         list_comments = "",
       },
     }
@@ -438,7 +438,7 @@ describe("commentry keymap attachment", function()
     assert.are.same("me", lhs_by_desc["Commentry edit comment"])
     assert.are.same("md", lhs_by_desc["Commentry delete comment"])
     assert.are.same("mt", lhs_by_desc["Commentry set comment type"])
-    assert.are.same("ms", lhs_by_desc["Commentry send to codex"])
+    assert.are.same("ms", lhs_by_desc["Commentry send to agent"])
     assert.are.same("ml", lhs_by_desc["Commentry list comments"])
     assert.is_nil(lhs_by_desc["Commentry toggle file reviewed"])
     assert.is_nil(lhs_by_desc["Commentry jump next unreviewed file"])
@@ -525,7 +525,7 @@ describe("commentry keymap attachment", function()
     assert.are.same("mt", by_desc["Commentry set comment type"].lhs)
     assert.are.same("mr", by_desc["Commentry toggle file reviewed"].lhs)
     assert.are.same("]r", by_desc["Commentry jump next unreviewed file"].lhs)
-    assert.are.same("ms", by_desc["Commentry send to codex"].lhs)
+    assert.are.same("ms", by_desc["Commentry send to agent"].lhs)
     assert.are.same("ml", by_desc["Commentry list comments"].lhs)
   end)
 end)
@@ -538,7 +538,7 @@ describe("commentry command routing", function()
   local original_create_autocmd
   local original_util
   local original_orchestrator
-  local original_codex_preload
+  local original_agent_preload
   local original_diagnostics
 
   before_each(function()
@@ -548,8 +548,8 @@ describe("commentry command routing", function()
     original_commands = package.loaded["commentry.commands"]
     original_create_autocmd = vim.api.nvim_create_autocmd
     original_util = package.loaded["commentry.util"]
-    original_orchestrator = package.loaded["commentry.codex.orchestrator"]
-    original_codex_preload = package.preload["commentry.codex"]
+    original_orchestrator = package.loaded["commentry.agent.orchestrator"]
+    original_agent_preload = package.preload["commentry.agent"]
     original_diagnostics = package.loaded["commentry.diagnostics"]
   end)
 
@@ -559,10 +559,10 @@ describe("commentry command routing", function()
     package.loaded["commentry.diffview"] = original_diffview
     package.loaded["commentry.commands"] = original_commands
     package.loaded["commentry.util"] = original_util
-    package.loaded["commentry.codex.orchestrator"] = original_orchestrator
+    package.loaded["commentry.agent.orchestrator"] = original_orchestrator
     package.loaded["commentry.diagnostics"] = original_diagnostics
     vim.api.nvim_create_autocmd = original_create_autocmd
-    package.preload["commentry.codex"] = original_codex_preload
+    package.preload["commentry.agent"] = original_agent_preload
   end)
 
   it("routes :Commentry list-comments to comments.list_comments", function()
@@ -675,7 +675,7 @@ describe("commentry command routing", function()
     assert.is_true(vim.tbl_contains(matches, "export"))
   end)
 
-  it("includes send-to-codex in command completion", function()
+  it("includes the provider-agnostic send command in completion", function()
     vim.api.nvim_create_autocmd = function()
       return 1
     end
@@ -695,7 +695,7 @@ describe("commentry command routing", function()
     }
     package.loaded["commentry.config"] = {
       augroup = 1,
-      codex = { enabled = true },
+      agent = { enabled = true },
       diffview = { enabled = true },
       keymaps = { add_comment = "mc", edit_comment = "me", delete_comment = "md", set_comment_type = "mt" },
     }
@@ -709,7 +709,7 @@ describe("commentry command routing", function()
     local Commands = require("commentry.commands")
     local matches = Commands.complete("Commentry send")
 
-    assert.is_true(vim.tbl_contains(matches, "send-to-codex"))
+    assert.are.same({ "send-to-agent" }, matches)
   end)
 
   it("includes diagnostics in command completion", function()
@@ -724,7 +724,7 @@ describe("commentry command routing", function()
     }
     package.loaded["commentry.config"] = {
       augroup = 1,
-      codex = { enabled = false },
+      agent = { enabled = false },
       diffview = { enabled = true },
       keymaps = { add_comment = "mc", edit_comment = "me", delete_comment = "md", set_comment_type = "mt" },
     }
@@ -741,12 +741,12 @@ describe("commentry command routing", function()
     assert.is_true(vim.tbl_contains(matches, "diagnostics"))
   end)
 
-  it("keeps existing command completion unaffected when codex is disabled", function()
+  it("keeps existing command completion unaffected when agent is disabled", function()
     vim.api.nvim_create_autocmd = function()
       return 1
     end
-    package.preload["commentry.codex"] = function()
-      error("codex namespace should not load from command setup when disabled")
+    package.preload["commentry.agent"] = function()
+      error("agent namespace should not load from command setup when disabled")
     end
     package.loaded["commentry.comments"] = {
       list_comments = function()
@@ -764,7 +764,7 @@ describe("commentry command routing", function()
     }
     package.loaded["commentry.config"] = {
       augroup = 1,
-      codex = { enabled = false },
+      agent = { enabled = false },
       diffview = { enabled = true },
       keymaps = { add_comment = "mc", edit_comment = "me", delete_comment = "md", set_comment_type = "mt" },
     }
@@ -1120,7 +1120,7 @@ describe("commentry command routing", function()
     assert.are.same("register:a", captured_args)
   end)
 
-  it("routes :Commentry send-to-codex to orchestrator once with implicit target resolution", function()
+  it("routes :Commentry send-to-agent to orchestrator once with implicit target resolution", function()
     local orchestrator_calls = 0
     local seen_opts = nil
     local info_messages = {}
@@ -1143,7 +1143,7 @@ describe("commentry command routing", function()
         return
       end,
     }
-    package.loaded["commentry.codex.orchestrator"] = {
+    package.loaded["commentry.agent.orchestrator"] = {
       send_current_review = function(opts)
         orchestrator_calls = orchestrator_calls + 1
         seen_opts = vim.deepcopy(opts)
@@ -1151,6 +1151,7 @@ describe("commentry command routing", function()
           ok = true,
           code = "OK",
           adapter = "sidekick",
+          delegated = true,
           dispatched_items = 3,
         }
       end,
@@ -1171,7 +1172,7 @@ describe("commentry command routing", function()
     }
     package.loaded["commentry.config"] = {
       augroup = 1,
-      codex = { enabled = true },
+      agent = { enabled = true },
       diffview = { enabled = true },
       keymaps = { add_comment = "mc", edit_comment = "me", delete_comment = "md", set_comment_type = "mt" },
     }
@@ -1183,12 +1184,12 @@ describe("commentry command routing", function()
 
     package.loaded["commentry.commands"] = nil
     local Commands = require("commentry.commands")
-    Commands.cmd({ args = "send-to-codex" })
+    Commands.cmd({ args = "send-to-agent" })
 
     assert.are.same(1, orchestrator_calls)
     assert.are.same({}, seen_opts)
     assert.are.same(0, #error_messages)
-    assert.are.same("Sent 3 review item(s) to Codex via sidekick.", info_messages[1])
+    assert.are.same("Delegated 3 review item(s) to Sidekick.", info_messages[1])
   end)
 
   it("prefers async orchestrator send when available", function()
@@ -1214,7 +1215,7 @@ describe("commentry command routing", function()
         return
       end,
     }
-    package.loaded["commentry.codex.orchestrator"] = {
+    package.loaded["commentry.agent.orchestrator"] = {
       send_current_review = function()
         sync_calls = sync_calls + 1
         return {
@@ -1230,6 +1231,7 @@ describe("commentry command routing", function()
           ok = true,
           code = "OK",
           adapter = "sidekick",
+          delegated = true,
           dispatched_items = 2,
         })
       end,
@@ -1250,7 +1252,7 @@ describe("commentry command routing", function()
     }
     package.loaded["commentry.config"] = {
       augroup = 1,
-      codex = { enabled = true },
+      agent = { enabled = true },
       diffview = { enabled = true },
       keymaps = { add_comment = "mc", edit_comment = "me", delete_comment = "md", set_comment_type = "mt" },
     }
@@ -1262,15 +1264,15 @@ describe("commentry command routing", function()
 
     package.loaded["commentry.commands"] = nil
     local Commands = require("commentry.commands")
-    Commands.cmd({ args = "send-to-codex" })
+    Commands.cmd({ args = "send-to-agent" })
 
     assert.are.same(1, async_calls)
     assert.are.same(0, sync_calls)
     assert.are.same(0, #error_messages)
-    assert.are.same("Sent 2 review item(s) to Codex via sidekick.", info_messages[1])
+    assert.are.same("Delegated 2 review item(s) to Sidekick.", info_messages[1])
   end)
 
-  it("shows actionable failure when send-to-codex has no target", function()
+  it("shows actionable failure when send-to-agent has no target", function()
     local error_messages = {}
 
     vim.api.nvim_create_autocmd = function()
@@ -1290,12 +1292,12 @@ describe("commentry command routing", function()
         return
       end,
     }
-    package.loaded["commentry.codex.orchestrator"] = {
+    package.loaded["commentry.agent.orchestrator"] = {
       send_current_review = function()
         return {
           ok = false,
           code = "NO_TARGET",
-          message = "No attached Codex session target available. Attach a Sidekick session and retry.",
+          message = "No agent target is available.",
           retryable = false,
         }
       end,
@@ -1316,7 +1318,7 @@ describe("commentry command routing", function()
     }
     package.loaded["commentry.config"] = {
       augroup = 1,
-      codex = { enabled = true },
+      agent = { enabled = true },
       diffview = { enabled = true },
       keymaps = { add_comment = "mc", edit_comment = "me", delete_comment = "md", set_comment_type = "mt" },
     }
@@ -1328,16 +1330,16 @@ describe("commentry command routing", function()
 
     package.loaded["commentry.commands"] = nil
     local Commands = require("commentry.commands")
-    Commands.cmd({ args = "send-to-codex" })
+    Commands.cmd({ args = "send-to-agent" })
 
     assert.are.same(1, #error_messages)
     assert.are.same("table", type(error_messages[1]))
     local joined = table.concat(error_messages[1], "\n")
-    assert.is_truthy(joined:find("Codex send failed %(NO_TARGET%)", 1, false))
-    assert.is_truthy(joined:find("Attach a Sidekick session", 1, true))
+    assert.is_truthy(joined:find("Agent send failed %(NO_TARGET%)", 1, false))
+    assert.is_truthy(joined:find("Use Sidekick to select an agent", 1, true))
   end)
 
-  it("shows retry-ready failure when send-to-codex transport fails", function()
+  it("shows retry-ready failure when send-to-agent transport fails", function()
     local error_messages = {}
 
     vim.api.nvim_create_autocmd = function()
@@ -1357,12 +1359,12 @@ describe("commentry command routing", function()
         return
       end,
     }
-    package.loaded["commentry.codex.orchestrator"] = {
+    package.loaded["commentry.agent.orchestrator"] = {
       send_current_review = function()
         return {
           ok = false,
           code = "TRANSPORT_FAILED",
-          message = "Codex transport failed. Retry.",
+          message = "Agent transport failed. Retry.",
           retryable = true,
         }
       end,
@@ -1383,7 +1385,7 @@ describe("commentry command routing", function()
     }
     package.loaded["commentry.config"] = {
       augroup = 1,
-      codex = { enabled = true },
+      agent = { enabled = true },
       diffview = { enabled = true },
       keymaps = { add_comment = "mc", edit_comment = "me", delete_comment = "md", set_comment_type = "mt" },
     }
@@ -1395,13 +1397,13 @@ describe("commentry command routing", function()
 
     package.loaded["commentry.commands"] = nil
     local Commands = require("commentry.commands")
-    Commands.cmd({ args = "send-to-codex" })
+    Commands.cmd({ args = "send-to-agent" })
 
     assert.are.same(1, #error_messages)
     assert.are.same("table", type(error_messages[1]))
     local joined = table.concat(error_messages[1], "\n")
-    assert.is_truthy(joined:find("Codex send failed %(TRANSPORT_FAILED%)", 1, false))
-    assert.is_truthy(joined:find("Codex transport failed%. Retry%.", 1, false))
+    assert.is_truthy(joined:find("Agent send failed %(TRANSPORT_FAILED%)", 1, false))
+    assert.is_truthy(joined:find("Agent transport failed%. Retry%.", 1, false))
     assert.is_truthy(joined:find("retryable", 1, true))
   end)
 end)

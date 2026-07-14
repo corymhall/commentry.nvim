@@ -72,7 +72,7 @@ The core structure, scripts, and tests are copied from that repo as a starting p
 - `lua/commentry/commands.lua` - `:Commentry` command surface
 - `lua/commentry/comments.lua` - draft comment lifecycle and rendering
 - `lua/commentry/diffview.lua` - diffview integration
-- `lua/commentry/codex/` - Codex send/payload/adapters
+- `lua/commentry/agent/` - provider-agnostic send/payload/adapters
 - `tests/` - `mini.test` suite mirroring runtime modules
 - `README.md` - user-facing behavior and command docs
 - `.github/workflows/ci.yml` - canonical CI checks

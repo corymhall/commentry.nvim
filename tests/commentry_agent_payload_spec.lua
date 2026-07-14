@@ -1,6 +1,6 @@
 ---@module 'luassert'
 
-local Payload = require("commentry.codex.payload")
+local Payload = require("commentry.agent.payload")
 
 local function load_fixture(name)
   local path = ("tests/fixtures/%s"):format(name)
@@ -30,32 +30,33 @@ local function load_send_with_stubs(stubs)
   local original_config = package.loaded["commentry.config"]
   local original_diffview = package.loaded["commentry.diffview"]
   local original_comments = package.loaded["commentry.comments"]
-  local original_payload = package.loaded["commentry.codex.payload"]
-  local original_adapter = package.loaded["commentry.codex.adapter"]
-  local original_sidekick = package.loaded["commentry.codex.adapters.sidekick"]
-  local original_sidekick_preload = package.preload["commentry.codex.adapters.sidekick"]
-  local original_send = package.loaded["commentry.codex.send"]
+  local original_payload = package.loaded["commentry.agent.payload"]
+  local original_adapter = package.loaded["commentry.agent.adapter"]
+  local original_sidekick = package.loaded["commentry.agent.adapters.sidekick"]
+  local original_sidekick_preload = package.preload["commentry.agent.adapters.sidekick"]
+  local original_send = package.loaded["commentry.agent.send"]
 
   package.loaded["commentry.config"] = stubs.config
   package.loaded["commentry.diffview"] = stubs.diffview
   package.loaded["commentry.comments"] = stubs.comments
-  package.loaded["commentry.codex.payload"] = stubs.payload
-  package.loaded["commentry.codex.adapter"] = stubs.adapter
-  package.loaded["commentry.codex.adapters.sidekick"] = stubs.sidekick
-  package.preload["commentry.codex.adapters.sidekick"] = function()
+  package.loaded["commentry.agent.payload"] = stubs.payload
+  package.loaded["commentry.agent.adapter"] = stubs.adapter
+  package.loaded["commentry.agent.adapters.sidekick"] = stubs.sidekick
+  package.preload["commentry.agent.adapters.sidekick"] = function()
     return stubs.sidekick
   end
-  package.loaded["commentry.codex.send"] = nil
+  package.loaded["commentry.agent.send"] = nil
 
-  local send = require("commentry.codex.send")
+  local send = require("commentry.agent.send")
 
   package.loaded["commentry.config"] = original_config
   package.loaded["commentry.diffview"] = original_diffview
   package.loaded["commentry.comments"] = original_comments
-  package.loaded["commentry.codex.payload"] = original_payload
-  package.loaded["commentry.codex.adapter"] = original_adapter
-  package.preload["commentry.codex.adapters.sidekick"] = original_sidekick_preload
-  package.loaded["commentry.codex.send"] = original_send
+  package.loaded["commentry.agent.payload"] = original_payload
+  package.loaded["commentry.agent.adapter"] = original_adapter
+  package.loaded["commentry.agent.adapters.sidekick"] = original_sidekick
+  package.preload["commentry.agent.adapters.sidekick"] = original_sidekick_preload
+  package.loaded["commentry.agent.send"] = original_send
 
   return send
 end
@@ -96,7 +97,7 @@ local function assert_no_absolute_paths(value, key)
   end
 end
 
-describe("commentry.codex.payload", function()
+describe("commentry.agent.payload", function()
   it("builds payload with required top-level sections", function()
     local payload = Payload.build_payload({ context_id = "ctx-1" }, {
       review_meta = { mode = "working_tree" },
@@ -303,7 +304,7 @@ describe("commentry.codex.payload", function()
   end)
 
   it("extracts only active items and preserves projected fields with thread linkage", function()
-    local fixture = load_fixture("codex_payload_active_vs_stale.json")
+    local fixture = load_fixture("agent_payload_active_vs_stale.json")
     local payload = Payload.build_payload(fixture.context, {
       items = fixture.comments,
       threads = fixture.threads,
@@ -327,7 +328,7 @@ describe("commentry.codex.payload", function()
   end)
 
   it("keeps active extraction in parity with comments exportable_comments semantics", function()
-    local fixture = load_fixture("codex_payload_active_vs_stale.json")
+    local fixture = load_fixture("agent_payload_active_vs_stale.json")
     local context_id = fixture.context.context_id
     local comments = load_comments_with_store({
       store = {
@@ -374,22 +375,17 @@ describe("commentry.codex.payload", function()
   end)
 
   it("produces safe, scoped payload in full send flow with mixed stale/active and mixed paths", function()
-    local fixture = load_fixture("codex_payload_send_mixed_paths.json")
+    local fixture = load_fixture("agent_payload_send_mixed_paths.json")
     local exported_context_ids = {}
     local captured_payloads = {}
     local send = load_send_with_stubs({
       config = {
-        codex = {
-          adapter = {
-            select = "sidekick",
-            fallback = nil,
-          },
-        },
+        agent = { enabled = true },
       },
       diffview = {
         current_file_context = function()
           return {
-            file_path = "lua/commentry/codex/payload.lua",
+            file_path = "lua/commentry/agent/payload.lua",
             line_number = 10,
             line_side = "head",
             view = { id = "view-mixed" },
@@ -423,9 +419,6 @@ describe("commentry.codex.payload", function()
         end,
       },
       sidekick = {
-        current_target = function()
-          return { session_id = "session-mixed" }
-        end,
         send = function(payload)
           captured_payloads[#captured_payloads + 1] = vim.deepcopy(payload)
           return true, nil, { dispatched_items = #payload.items }
@@ -451,8 +444,8 @@ describe("commentry.codex.payload", function()
       { payload.items[1].id, payload.items[2].id, payload.items[3].id }
     )
     assert.is_nil(payload.items[1].file_path)
-    assert.are.same("lua/commentry/codex/send.lua", payload.items[2].file_path)
-    assert.are.same("lua/commentry/codex/payload.lua", payload.items[3].file_path)
+    assert.are.same("lua/commentry/agent/send.lua", payload.items[2].file_path)
+    assert.are.same("lua/commentry/agent/payload.lua", payload.items[3].file_path)
     assert_no_absolute_paths(payload.items)
     assert_no_absolute_paths(payload.provenance.files)
     assert.are.same(Payload.serialize(captured_payloads[1]), Payload.serialize(captured_payloads[2]))

@@ -25,10 +25,10 @@ function M.dump()
 
   if type(Config) == "table" then
     local log_config = type(Config.log) == "table" and Config.log or {}
-    local codex_config = type(Config.codex) == "table" and Config.codex or {}
+    local agent_config = type(Config.agent) == "table" and Config.agent or {}
     lines[#lines + 1] = ("log.level=%s"):format(tostring(log_config.level))
     lines[#lines + 1] = ("log.sink=%s"):format(tostring(log_config.sink))
-    lines[#lines + 1] = ("codex.enabled=%s"):format(tostring(codex_config.enabled))
+    lines[#lines + 1] = ("agent.enabled=%s"):format(tostring(agent_config.enabled))
   end
 
   if type(Comments) == "table" and type(Comments.debug_store_context) == "function" then

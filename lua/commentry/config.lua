@@ -12,7 +12,7 @@ M.ns = vim.api.nvim_create_namespace("commentry")
 ---@field set_comment_type string
 ---@field toggle_file_reviewed string
 ---@field next_unreviewed_file string
----@field send_to_codex string
+---@field send_to_agent string
 ---@field list_comments string
 
 ---@class commentry.StoreConfig
@@ -34,17 +34,8 @@ M.ns = vim.api.nvim_create_namespace("commentry")
 ---@field enabled boolean
 ---@field line_highlight boolean
 
----@class commentry.CodexAdapterConfig
----@field select string
----@field fallback string|nil
-
----@class commentry.CodexBehaviorConfig
----@field open string
-
----@class commentry.CodexConfig
+---@class commentry.AgentConfig
 ---@field enabled boolean
----@field adapter commentry.CodexAdapterConfig
----@field behavior commentry.CodexBehaviorConfig
 
 ---@class commentry.LogConfig
 ---@field level "error"|"warn"|"info"|"debug"
@@ -61,7 +52,7 @@ M.ns = vim.api.nvim_create_namespace("commentry")
 ---@field default_comment_type string
 ---@field store commentry.StoreConfig
 ---@field diffview commentry.DiffviewConfig
----@field codex commentry.CodexConfig
+---@field agent commentry.AgentConfig
 ---@field log commentry.LogConfig
 ---@field diagnostics commentry.DiagnosticsConfig
 local defaults = {
@@ -74,7 +65,7 @@ local defaults = {
     set_comment_type = "mt",
     toggle_file_reviewed = "mr",
     next_unreviewed_file = "]r",
-    send_to_codex = "ms",
+    send_to_agent = "ms",
     list_comments = "ml",
   },
   comment_types = { "note", "suggestion", "issue", "praise" },
@@ -96,15 +87,8 @@ local defaults = {
       line_highlight = true,
     },
   },
-  codex = {
+  agent = {
     enabled = false,
-    adapter = {
-      select = "auto",
-      fallback = nil,
-    },
-    behavior = {
-      open = "reuse",
-    },
   },
   log = {
     level = "warn",
@@ -127,7 +111,7 @@ local keymap_keys = {
   "set_comment_type",
   "toggle_file_reviewed",
   "next_unreviewed_file",
-  "send_to_codex",
+  "send_to_agent",
   "list_comments",
 }
 
@@ -156,7 +140,6 @@ local diagnostics_open_styles = {
 }
 
 local known_nullable_keys = {
-  ["codex.adapter.fallback"] = true,
   ["log.file"] = true,
 }
 
@@ -339,15 +322,7 @@ local function normalize_config(current)
     defaults.diffview.comment_ranges.line_highlight,
     "diffview.comment_ranges.line_highlight"
   )
-  current.codex.enabled = normalize_scalar(current.codex.enabled, "boolean", defaults.codex.enabled, "codex.enabled")
-  current.codex.adapter.select =
-    normalize_scalar(current.codex.adapter.select, "string", defaults.codex.adapter.select, "codex.adapter.select")
-  if current.codex.adapter.fallback ~= nil and type(current.codex.adapter.fallback) ~= "string" then
-    warn_invalid_type("codex.adapter.fallback", current.codex.adapter.fallback, "string|nil")
-    current.codex.adapter.fallback = defaults.codex.adapter.fallback
-  end
-  current.codex.behavior.open =
-    normalize_scalar(current.codex.behavior.open, "string", defaults.codex.behavior.open, "codex.behavior.open")
+  current.agent.enabled = normalize_scalar(current.agent.enabled, "boolean", defaults.agent.enabled, "agent.enabled")
   current.log.level = normalize_scalar(current.log.level, "string", defaults.log.level, "log.level")
   current.log.sink = normalize_scalar(current.log.sink, "string", defaults.log.sink, "log.sink")
   if not log_levels[current.log.level] then

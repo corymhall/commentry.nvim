@@ -16,7 +16,7 @@ describe("commentry.health", function()
     original_diffview = package.loaded["diffview"]
     original_snacks = package.loaded["snacks"]
     original_config = package.loaded["commentry.config"]
-    original_sidekick = package.loaded["commentry.codex.adapters.sidekick"]
+    original_sidekick = package.loaded["commentry.agent.adapters.sidekick"]
     original_fn_has = vim.fn.has
     original_fn_exists = vim.fn.exists
     original_fn_isdirectory = vim.fn.isdirectory
@@ -40,7 +40,7 @@ describe("commentry.health", function()
     package.loaded["diffview"] = original_diffview
     package.loaded["snacks"] = original_snacks
     package.loaded["commentry.config"] = original_config
-    package.loaded["commentry.codex.adapters.sidekick"] = original_sidekick
+    package.loaded["commentry.agent.adapters.sidekick"] = original_sidekick
     vim.fn.has = original_fn_has
     vim.fn.exists = original_fn_exists
     vim.fn.isdirectory = original_fn_isdirectory
@@ -48,8 +48,8 @@ describe("commentry.health", function()
     package.loaded["commentry.health"] = nil
   end)
 
-  it("reports snacks readiness and codex disabled mode as healthy", function()
-    local seen = { ok = {}, warn = {} }
+  local function capture_health()
+    local seen = { ok = {}, warn = {}, error = {} }
     vim.health = {
       start = function() end,
       ok = function(msg)
@@ -58,260 +58,136 @@ describe("commentry.health", function()
       warn = function(msg)
         seen.warn[#seen.warn + 1] = msg
       end,
-      error = function() end,
+      error = function(msg)
+        seen.error[#seen.error + 1] = msg
+      end,
     }
+    return seen
+  end
 
+  local function healthy_dependencies(config)
     package.loaded["diffview"] = {}
     package.loaded["snacks"] = { picker = { select = function() end } }
-    package.loaded["commentry.config"] = {
-      codex = {
-        enabled = false,
-        adapter = { select = "auto" },
-      },
-    }
+    package.loaded["commentry.config"] = config or { agent = { enabled = false } }
+  end
 
-    local health = require("commentry.health")
-    health.check()
+  it("reports core and picker readiness", function()
+    local seen = capture_health()
+    healthy_dependencies()
+
+    require("commentry.health").check()
 
     assert.is_true(vim.tbl_contains(seen.ok, "Neovim version is supported (>= 0.10)"))
     assert.is_true(vim.tbl_contains(seen.ok, ":Commentry command is registered"))
     assert.is_true(vim.tbl_contains(seen.ok, "commentry.config is loaded"))
     assert.is_true(vim.tbl_contains(seen.ok, "diffview.nvim is installed"))
     assert.is_true(vim.tbl_contains(seen.ok, "snacks.nvim picker.select is available for :Commentry list-comments"))
-    assert.is_true(vim.tbl_contains(seen.ok, "codex integration disabled: :Commentry send-to-codex is inactive"))
     assert.are.same(0, #seen.warn)
   end)
 
   it("warns when snacks is unavailable", function()
-    local seen_warn = {}
-    vim.health = {
-      start = function() end,
-      ok = function() end,
-      warn = function(msg)
-        seen_warn[#seen_warn + 1] = msg
-      end,
-      error = function() end,
-    }
-
+    local seen = capture_health()
     package.loaded["diffview"] = {}
     package.loaded["snacks"] = nil
-    package.loaded["commentry.config"] = {
-      codex = {
-        enabled = false,
-        adapter = { select = "auto" },
-      },
-    }
+    package.loaded["commentry.config"] = { agent = { enabled = false } }
 
-    local health = require("commentry.health")
-    health.check()
+    require("commentry.health").check()
 
-    assert.is_true(vim.tbl_contains(seen_warn, "snacks.nvim not installed: :Commentry list-comments is unavailable"))
+    assert.is_true(vim.tbl_contains(seen.warn, "snacks.nvim not installed: :Commentry list-comments is unavailable"))
   end)
 
   it("warns when snacks picker.select is unavailable", function()
-    local seen_warn = {}
-    vim.health = {
-      start = function() end,
-      ok = function() end,
-      warn = function(msg)
-        seen_warn[#seen_warn + 1] = msg
-      end,
-      error = function() end,
-    }
-
+    local seen = capture_health()
     package.loaded["diffview"] = {}
     package.loaded["snacks"] = { picker = {} }
-    package.loaded["commentry.config"] = {
-      codex = {
-        enabled = false,
-        adapter = { select = "auto" },
-      },
-    }
+    package.loaded["commentry.config"] = { agent = { enabled = false } }
 
-    local health = require("commentry.health")
-    health.check()
+    require("commentry.health").check()
 
-    assert.is_true(vim.tbl_contains(seen_warn, "snacks.nvim installed but picker.select is unavailable"))
+    assert.is_true(vim.tbl_contains(seen.warn, "snacks.nvim installed but picker.select is unavailable"))
   end)
 
-  it("warns when codex is enabled and sidekick adapter is unavailable", function()
-    local seen = { ok = {}, warn = {} }
-    vim.health = {
-      start = function() end,
-      ok = function(msg)
-        seen.ok[#seen.ok + 1] = msg
-      end,
-      warn = function(msg)
-        seen.warn[#seen.warn + 1] = msg
-      end,
-      error = function() end,
-    }
+  it("warns when agent delegation is enabled and the adapter is unavailable", function()
+    local seen = capture_health()
+    healthy_dependencies({ agent = { enabled = true } })
+    package.loaded["commentry.agent.adapters.sidekick"] = {}
 
-    package.loaded["diffview"] = {}
-    package.loaded["snacks"] = { picker = { select = function() end } }
-    package.loaded["commentry.config"] = {
-      codex = {
-        enabled = true,
-        adapter = { select = "sidekick" },
-      },
-    }
-    package.loaded["commentry.codex.adapters.sidekick"] = {}
-
-    local health = require("commentry.health")
-    health.check()
+    require("commentry.health").check()
 
     assert.is_true(
       vim.tbl_contains(
         seen.warn,
-        "codex enabled but sidekick adapter is unavailable; install sidekick integration or set codex.enabled=false"
+        "agent enabled but sidekick adapter is unavailable; install sidekick integration or set agent.enabled=false"
       )
     )
   end)
 
-  it("warns when codex is enabled but sidekick runtime is unavailable", function()
-    local seen = { ok = {}, warn = {} }
-    vim.health = {
-      start = function() end,
-      ok = function(msg)
-        seen.ok[#seen.ok + 1] = msg
-      end,
-      warn = function(msg)
-        seen.warn[#seen.warn + 1] = msg
-      end,
-      error = function() end,
-    }
-
-    package.loaded["diffview"] = {}
-    package.loaded["snacks"] = { picker = { select = function() end } }
-    package.loaded["commentry.config"] = {
-      codex = {
-        enabled = true,
-        adapter = { select = "sidekick" },
-      },
-    }
-    package.loaded["commentry.codex.adapters.sidekick"] = {
-      send = function()
-        return true, nil, { dispatched_items = 1 }
-      end,
+  it("warns when the Sidekick CLI send API is unavailable", function()
+    local seen = capture_health()
+    healthy_dependencies({ agent = { enabled = true } })
+    package.loaded["commentry.agent.adapters.sidekick"] = {
+      send = function() end,
       available = function()
         return false
       end,
     }
 
-    local health = require("commentry.health")
-    health.check()
+    require("commentry.health").check()
 
     assert.is_true(
       vim.tbl_contains(
         seen.warn,
-        "codex enabled but sidekick adapter runtime is unavailable; check sidekick install and active target session"
+        "agent enabled but sidekick CLI send API is unavailable; check the Sidekick installation"
       )
     )
   end)
 
-  it("reports codex adapter readiness when enabled and available", function()
-    local seen = { ok = {}, warn = {} }
-    vim.health = {
-      start = function() end,
-      ok = function(msg)
-        seen.ok[#seen.ok + 1] = msg
-      end,
-      warn = function(msg)
-        seen.warn[#seen.warn + 1] = msg
-      end,
-      error = function() end,
-    }
-
-    package.loaded["diffview"] = {}
-    package.loaded["snacks"] = { picker = { select = function() end } }
-    package.loaded["commentry.config"] = {
-      codex = {
-        enabled = true,
-        adapter = { select = "sidekick" },
-      },
-    }
-    package.loaded["commentry.codex.adapters.sidekick"] = {
-      send = function()
-        return true, nil, {}
-      end,
+  it("reports agent delegation readiness", function()
+    local seen = capture_health()
+    healthy_dependencies({ agent = { enabled = true } })
+    package.loaded["commentry.agent.adapters.sidekick"] = {
+      send = function() end,
       available = function()
         return true
       end,
     }
 
-    local health = require("commentry.health")
-    health.check()
+    require("commentry.health").check()
 
     assert.is_true(
-      vim.tbl_contains(
-        seen.ok,
-        "codex adapter ready (sidekick transport available); :Commentry send-to-codex uses attached session target"
-      )
+      vim.tbl_contains(seen.ok, "agent adapter ready; Sidekick resolves the :Commentry send-to-agent target")
     )
     assert.are.same(0, #seen.warn)
   end)
 
   it("warns when logger config values are invalid", function()
-    local seen = { warn = {} }
-    vim.health = {
-      start = function() end,
-      ok = function() end,
-      warn = function(msg)
-        seen.warn[#seen.warn + 1] = msg
-      end,
-      error = function() end,
-    }
+    local seen = capture_health()
+    healthy_dependencies({
+      agent = { enabled = false },
+      log = { level = "trace", sink = "stdout" },
+    })
 
-    package.loaded["diffview"] = {}
-    package.loaded["snacks"] = { picker = { select = function() end } }
-    package.loaded["commentry.config"] = {
-      codex = {
-        enabled = false,
-        adapter = { select = "auto" },
-      },
-      log = {
-        level = "trace",
-        sink = "stdout",
-      },
-    }
-
-    local health = require("commentry.health")
-    health.check()
+    require("commentry.health").check()
 
     assert.is_true(vim.tbl_contains(seen.warn, 'log.level="trace" is invalid; expected one of error|warn|info|debug'))
     assert.is_true(vim.tbl_contains(seen.warn, 'log.sink="stdout" is invalid; expected one of notify|echo|file'))
   end)
 
   it("warns when file sink path is not writable", function()
-    local seen = { warn = {} }
-    vim.health = {
-      start = function() end,
-      ok = function() end,
-      warn = function(msg)
-        seen.warn[#seen.warn + 1] = msg
-      end,
-      error = function() end,
-    }
+    local seen = capture_health()
     io.open = function()
       return nil
     end
-
-    package.loaded["diffview"] = {}
-    package.loaded["snacks"] = { picker = { select = function() end } }
-    package.loaded["commentry.config"] = {
-      codex = {
-        enabled = false,
-        adapter = { select = "auto" },
-      },
+    healthy_dependencies({
+      agent = { enabled = false },
       log = {
         level = "info",
         sink = "file",
         file = vim.fn.tempname() .. "/commentry.log",
       },
-    }
+    })
 
-    local health = require("commentry.health")
-    health.check()
+    require("commentry.health").check()
 
     local found = false
     for _, message in ipairs(seen.warn) do
@@ -323,33 +199,16 @@ describe("commentry.health", function()
   end)
 
   it("does not create store directory during health checks", function()
-    local seen = { ok = {} }
-    vim.health = {
-      start = function() end,
-      ok = function(msg)
-        seen.ok[#seen.ok + 1] = msg
-      end,
-      warn = function() end,
-      error = function() end,
-    }
+    local seen = capture_health()
     vim.fn.isdirectory = function(path)
       if type(path) == "string" and path:find(".commentry", 1, true) then
         return 0
       end
       return original_fn_isdirectory(path)
     end
+    healthy_dependencies()
 
-    package.loaded["diffview"] = {}
-    package.loaded["snacks"] = { picker = { select = function() end } }
-    package.loaded["commentry.config"] = {
-      codex = {
-        enabled = false,
-        adapter = { select = "auto" },
-      },
-    }
-
-    local health = require("commentry.health")
-    health.check()
+    require("commentry.health").check()
 
     local found = false
     for _, message in ipairs(seen.ok) do

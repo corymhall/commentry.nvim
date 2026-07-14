@@ -20,12 +20,12 @@
 | CONTRIBUTING.md | Missing | No contribution guide |
 | Architecture / module docs | Missing | No module map; agent must read full tree to orient |
 | Test commands | Good | `mise run test` runs full suite; `mise run ci` runs lint+test+health |
-| Health checks | Strong | `lua/commentry/health.lua` checks version, setup, deps, codex |
+| Health checks | Strong | `lua/commentry/health.lua` checks version, setup, dependencies, and agent integration |
 
 ### What this repo does well
 - **Excellent test coverage** — 1.16:1 test-to-source ratio with 11 spec files mirroring the module tree.
 - **CI/local parity** — CI runs `mise run lint` / `mise run test` / `mise run health`, same commands you run locally.
-- **Comprehensive health.lua** — runtime healthcheck validates Neovim version, plugin setup, diffview, snacks, and codex adapter state.
+- **Comprehensive health.lua** — runtime healthcheck validates Neovim version, plugin setup, diffview, snacks, and agent adapter state.
 
 ### Top 3 gaps
 1. **AGENTS.md is outdated and incomplete** — commands reference `./scripts/test` instead of `mise run`, version claim is wrong, and it lacks forbidden actions, escalation triggers, and invariants needed for safe AI changes.
@@ -60,7 +60,7 @@ Lua, Neovim 0.10+, diffview.nvim dependency, mini.test test suite, mise task run
 - `lua/commentry/comments.lua` — comment CRUD, multiline editor, export
 - `lua/commentry/diffview.lua` — diffview.nvim integration, git ops, file review state
 - `lua/commentry/store.lua` — persistent JSON store (draft comments, review state)
-- `lua/commentry/codex/` — Codex send integration (orchestrator, adapter, payload, send)
+- `lua/commentry/agent/` — provider-agnostic send integration (orchestrator, adapter, payload, send)
 - `lua/commentry/health.lua` — `:checkhealth commentry` implementation
 - `tests/` — one spec file per module (mini.test)
 - `mise.toml` — all dev commands (format, lint, test, health, ci)

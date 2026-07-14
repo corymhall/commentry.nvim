@@ -31,7 +31,7 @@
       {
         "id": "c-active-abs-in-repo",
         "diff_id": "ctx-active",
-        "file_path": "/tmp/project/lua/commentry/codex/send.lua",
+        "file_path": "/tmp/project/lua/commentry/agent/send.lua",
         "line_number": 3,
         "line_side": "head",
         "comment_type": "suggestion",
@@ -40,7 +40,7 @@
       {
         "id": "c-active-rel",
         "diff_id": "ctx-active",
-        "file_path": "lua/commentry/codex/payload.lua",
+        "file_path": "lua/commentry/agent/payload.lua",
         "line_number": 4,
         "line_side": "head",
         "body": "keep relative"

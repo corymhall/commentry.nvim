@@ -1,7 +1,7 @@
 ---@module 'luassert'
 
-local Adapter = require("commentry.codex.adapter")
-local Orchestrator = require("commentry.codex.orchestrator")
+local Adapter = require("commentry.agent.adapter")
+local Orchestrator = require("commentry.agent.orchestrator")
 
 local function failure_contract(ok, err)
   return {
@@ -27,7 +27,7 @@ local function sorted_keys(value)
   return keys
 end
 
-describe("commentry.codex.adapter", function()
+describe("commentry.agent.adapter", function()
   it("returns NO_TARGET when target is missing", function()
     local ok, err = Adapter.send({ prompt = "ping" }, nil)
     assert_failure_contract(ok, err, {
@@ -182,7 +182,7 @@ describe("commentry.codex.adapter", function()
   end)
 end)
 
-describe("commentry.codex.orchestrator", function()
+describe("commentry.agent.orchestrator", function()
   it("imports and delegates to adapter contract", function()
     local ok, err, details = Orchestrator.send({ prompt = "ping" }, {
       send = function()

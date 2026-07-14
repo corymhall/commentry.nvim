@@ -1,4 +1,4 @@
----@class commentry.CodexError
+---@class commentry.AgentError
 ---@field code "NO_TARGET"|"ADAPTER_UNAVAILABLE"|"TRANSPORT_FAILED"|"INTERNAL_ERROR"
 ---@field message string
 ---@field retryable boolean
@@ -31,7 +31,7 @@ local canonical_errors = {
 M.ERRORS = vim.deepcopy(canonical_errors)
 
 ---@param code string
----@return commentry.CodexError
+---@return commentry.AgentError
 function M.error(code)
   local canonical = canonical_errors[code] or canonical_errors.INTERNAL_ERROR
   return {
@@ -43,7 +43,7 @@ end
 
 ---@param err any
 ---@param fallback? "NO_TARGET"|"ADAPTER_UNAVAILABLE"|"TRANSPORT_FAILED"|"INTERNAL_ERROR"
----@return commentry.CodexError
+---@return commentry.AgentError
 function M.normalize_error(err, fallback)
   if type(err) == "table" then
     local code = err.code
@@ -61,7 +61,7 @@ end
 
 ---@param payload any
 ---@param target? table
----@return boolean ok, commentry.CodexError? err, table? details
+---@return boolean ok, commentry.AgentError? err, table? details
 function M.send(payload, target)
   if target == nil then
     return false, M.error("NO_TARGET")

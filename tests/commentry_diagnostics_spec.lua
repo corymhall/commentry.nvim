@@ -36,7 +36,7 @@ describe("commentry.diagnostics", function()
   it("dumps config/store/diffview state", function()
     package.loaded["commentry.config"] = {
       log = { level = "info", sink = "echo" },
-      codex = { enabled = true },
+      agent = { enabled = true },
     }
     package.loaded["commentry.comments"] = {
       debug_store_context = function()
@@ -61,6 +61,7 @@ describe("commentry.diagnostics", function()
 
     assert.is_truthy(text:find("commentry.nvim diagnostics", 1, true))
     assert.is_truthy(text:find("log.level=info", 1, true))
+    assert.is_truthy(text:find("agent.enabled=true", 1, true))
     assert.is_truthy(text:find("store=/tmp/commentry.json", 1, true))
     assert.is_truthy(text:find("context=ctx-1", 1, true))
     assert.is_truthy(text:find("diffview.attached=true", 1, true))

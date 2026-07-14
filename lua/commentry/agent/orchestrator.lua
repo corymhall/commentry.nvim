@@ -1,11 +1,11 @@
-local Adapter = require("commentry.codex.adapter")
-local Send = require("commentry.codex.send")
+local Adapter = require("commentry.agent.adapter")
+local Send = require("commentry.agent.send")
 
 local M = {}
 
 ---@param payload any
 ---@param target? table
----@return boolean ok, commentry.CodexError? err, table? details
+---@return boolean ok, commentry.AgentError? err, table? details
 function M.send(payload, target)
   return Adapter.send(payload, target)
 end

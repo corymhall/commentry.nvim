@@ -14,7 +14,7 @@ local fallback_keymap_defaults = {
   set_comment_type = "mt",
   toggle_file_reviewed = "mr",
   next_unreviewed_file = "]r",
-  send_to_codex = "ms",
+  send_to_agent = "ms",
   list_comments = "ml",
 }
 
@@ -39,11 +39,11 @@ M.commands = {}
 local function report_send_failure(result)
   local code = type(result.code) == "string" and result.code or "UNKNOWN"
   local message = type(result.message) == "string" and result.message or "Failed to send current review."
-  local base = ("Codex send failed (%s): %s"):format(code, message)
+  local base = ("Agent send failed (%s): %s"):format(code, message)
   if code == "NO_TARGET" then
     Util.error({
       base,
-      "Attach a Sidekick session, then retry: :Commentry send-to-codex",
+      "Use Sidekick to select an agent, then retry: :Commentry send-to-agent",
     })
     return
   end
@@ -143,10 +143,10 @@ local function maybe_attach_keymaps(bufnr)
 
   Util.debug("Attaching comment keymaps", buffer_debug_info(bufnr))
 
-  local function send_to_codex_keymap()
-    local send_cmd = M.commands["send-to-codex"]
+  local function send_to_agent_keymap()
+    local send_cmd = M.commands["send-to-agent"]
     if type(send_cmd) ~= "function" then
-      Util.error("Codex send command is unavailable.")
+      Util.error("Agent send command is unavailable.")
       return
     end
     send_cmd({}, "")
@@ -181,10 +181,10 @@ local function maybe_attach_keymaps(bufnr)
       handler = Comments.next_unreviewed_file,
     },
     {
-      action = "send_to_codex",
+      action = "send_to_agent",
       mode = "n",
-      desc = "Commentry send to codex",
-      handler = send_to_codex_keymap,
+      desc = "Commentry send to agent",
+      handler = send_to_agent_keymap,
     },
     {
       action = "list_comments",
@@ -294,27 +294,27 @@ function M.setup()
     diagnostics.open()
   end)
 
-  M.register("send-to-codex", function(_, _cmd_args)
-    if not (Config.codex and Config.codex.enabled) then
+  local function send_review()
+    if not (Config.agent and Config.agent.enabled) then
       Util.error({
-        "Codex integration is disabled.",
-        "Enable `codex.enabled = true` and retry :Commentry send-to-codex.",
+        "Agent integration is disabled.",
+        "Enable `agent.enabled = true` and retry :Commentry send-to-agent.",
       })
       return
     end
 
-    local ok_orchestrator, orchestrator = pcall(require, "commentry.codex.orchestrator")
+    local ok_orchestrator, orchestrator = pcall(require, "commentry.agent.orchestrator")
     if not ok_orchestrator then
       Util.error({
-        "Codex orchestrator is unavailable.",
-        "Check plugin installation/runtimepath and retry :Commentry send-to-codex.",
+        "Agent orchestrator is unavailable.",
+        "Check plugin installation/runtimepath and retry :Commentry send-to-agent.",
       })
       return
     end
 
     local function handle_result(result)
       if type(result) ~= "table" then
-        Util.error("Codex send failed: invalid orchestrator response.")
+        Util.error("Agent send failed: invalid orchestrator response.")
         return
       end
       if not result.ok then
@@ -322,9 +322,14 @@ function M.setup()
         return
       end
 
-      local adapter = type(result.adapter) == "string" and result.adapter or "unknown"
       local dispatched_items = type(result.dispatched_items) == "number" and result.dispatched_items or 0
-      Util.info(("Sent %d review item(s) to Codex via %s."):format(dispatched_items, adapter))
+      if result.delegated then
+        Util.info(("Delegated %d review item(s) to Sidekick."):format(dispatched_items))
+        return
+      end
+
+      local adapter = type(result.adapter) == "string" and result.adapter or "unknown"
+      Util.info(("Sent %d review item(s) to an agent via %s."):format(dispatched_items, adapter))
     end
 
     if type(orchestrator.send_current_review_async) == "function" then
@@ -333,13 +338,17 @@ function M.setup()
     end
     if type(orchestrator.send_current_review) ~= "function" then
       Util.error({
-        "Codex orchestrator is unavailable.",
-        "Check plugin installation/runtimepath and retry :Commentry send-to-codex.",
+        "Agent orchestrator is unavailable.",
+        "Check plugin installation/runtimepath and retry :Commentry send-to-agent.",
       })
       return
     end
 
     handle_result(orchestrator.send_current_review({}))
+  end
+
+  M.register("send-to-agent", function()
+    send_review()
   end)
 
   for _, module_name in ipairs(feature_modules) do
