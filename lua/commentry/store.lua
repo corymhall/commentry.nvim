@@ -133,21 +133,45 @@ local function validate_thread(thread, errors, index)
   end
 end
 
----@param file_reviews table|nil
+---@param endpoint any
+---@return boolean
+local function valid_review_endpoint(endpoint)
+  return endpoint == "absent" or type(endpoint) == "string" and endpoint:match("^%d+:%x+$") ~= nil
+end
+
+---@param reviewed_changes table|nil
 ---@param errors string[]
-local function validate_file_reviews(file_reviews, errors)
-  if type(file_reviews) ~= "table" then
-    push_error(errors, "store.file_reviews must be a table")
+local function validate_reviewed_changes(reviewed_changes, errors)
+  if type(reviewed_changes) ~= "table" then
+    push_error(errors, "store.reviewed_changes must be a table")
     return
   end
-  -- file_reviews is a map (file_path -> boolean). An empty table is valid and
-  -- expected on first write before any file-reviewed toggles are performed.
-  for file_path, reviewed in pairs(file_reviews) do
+  for file_path, snapshots in pairs(reviewed_changes) do
     if type(file_path) ~= "string" or file_path == "" then
-      push_error(errors, "store.file_reviews keys must be non-empty strings")
+      push_error(errors, "store.reviewed_changes keys must be non-empty file paths")
     end
-    if type(reviewed) ~= "boolean" then
-      push_error(errors, ("store.file_reviews[%s] must be a boolean"):format(tostring(file_path)))
+    if type(snapshots) ~= "table" then
+      push_error(errors, ("store.reviewed_changes[%s] must be a table"):format(tostring(file_path)))
+    else
+      for fingerprint, snapshot in pairs(snapshots) do
+        local prefix = ("store.reviewed_changes[%s][%s]"):format(tostring(file_path), tostring(fingerprint))
+        if type(fingerprint) ~= "string" or fingerprint:match("^%x+$") == nil then
+          push_error(errors, prefix .. " fingerprint must be a hexadecimal string")
+        end
+        if type(snapshot) ~= "table" then
+          push_error(errors, prefix .. " must be a table")
+        else
+          if not valid_review_endpoint(snapshot.base) then
+            push_error(errors, prefix .. ".base must be 'absent' or '<mode>:<oid>'")
+          end
+          if not valid_review_endpoint(snapshot.head) then
+            push_error(errors, prefix .. ".head must be 'absent' or '<mode>:<oid>'")
+          end
+          if type(snapshot.reviewed_at) ~= "string" or snapshot.reviewed_at == "" then
+            push_error(errors, prefix .. ".reviewed_at must be a non-empty string")
+          end
+        end
+      end
     end
   end
 end
@@ -200,7 +224,7 @@ function M.validate(store)
   if not is_array(store.threads or {}) then
     push_error(errors, "store.threads must be an array")
   end
-  validate_file_reviews(store.file_reviews, errors)
+  validate_reviewed_changes(store.reviewed_changes, errors)
 
   local comment_type_set, comment_type_list = allowed_comment_types()
 

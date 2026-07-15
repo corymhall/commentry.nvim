@@ -15,7 +15,7 @@ SINGLE_SCENARIO=""
 CWD=""
 CLEANUP_REPO=""
 
-SCENARIOS=(popup card range)
+SCENARIOS=(popup card range review)
 
 cleanup() {
   if [[ -n ${CLEANUP_REPO:-} && -d ${CLEANUP_REPO:-} ]]; then
@@ -52,6 +52,9 @@ scenario_name() {
     range)
       printf '%s\n' "rpc-range-comment"
       ;;
+    review)
+      printf '%s\n' "rpc-review-progress"
+      ;;
     *)
       echo "Unknown scenario: $1" >&2
       exit 1
@@ -70,6 +73,9 @@ scenario_title() {
     range)
       printf '%s\n' "RPC Range Comment"
       ;;
+    review)
+      printf '%s\n' "RPC Review Progress"
+      ;;
     *)
       echo "Unknown scenario: $1" >&2
       exit 1
@@ -87,6 +93,9 @@ scenario_caption() {
       ;;
     range)
       printf '%s\n' "Rendered from Neovim multigrid redraw events after saving a multi-line issue comment."
+      ;;
+    review)
+      printf '%s\n' "Commentry-owned reviewed marks rendered independently from Diffview selections."
       ;;
     *)
       echo "Unknown scenario: $1" >&2
@@ -191,7 +200,7 @@ const links = presets
   .map((preset) => `<li><a href="${preset}/index.html">${preset}</a></li>`)
   .join("\n");
 
-const compareLinks = ["popup", "card", "range"]
+const compareLinks = ["popup", "card", "range", "review"]
   .map((scenario) => `<li><a href="compare/${scenario}.html">compare ${scenario}</a></li>`)
   .join("\n");
 
@@ -259,6 +268,12 @@ const scenarios = [
     title: "Range Comment Comparison",
     image: "rpc-range-comment.png",
     caption: "Multi-line range comment rendered from real multigrid UI events.",
+  },
+  {
+    key: "review",
+    title: "Review Progress Comparison",
+    image: "rpc-review-progress.png",
+    caption: "Content-addressed reviewed marks rendered in the Diffview panel and active diff.",
   },
 ];
 

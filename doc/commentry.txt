@@ -11,7 +11,8 @@ INSTALL                                           *commentry.install*
 
 Required dependencies:
 - Neovim 0.10+
-- `diffview.nvim` for the diff UI
+- `dlyongemallo/diffview-plus.nvim` or `sindrets/diffview.nvim` for the diff UI
+  (install one; both expose the `diffview` module and commands)
 
 Optional integrations:                           *commentry.dependencies*
 - `snacks.nvim` for `:Commentry list-comments`
@@ -144,10 +145,10 @@ COMMANDS                                          *commentry.commands*
   Set default or per-comment type.
 
 :Commentry toggle-file-reviewed
-  Toggle reviewed status for the current diff file.
+  Toggle reviewed status for the current file's exact displayed change.
 
 :Commentry next-unreviewed
-  Jump to the next unreviewed file in the active diffview file list.
+  Jump to the next unreviewed entry in the active diffview file list.
 
 :Commentry export [stdout|register|register:{name}]
   Export active draft comments as deterministic markdown.
@@ -207,6 +208,14 @@ PERSISTENCE NOTES                                 *commentry.persistence*
   for that branch.
 - Comments remain in the same context until anchor reconciliation marks them
   stale/outdated after code changes.
+- Reviewed state records each file's base/head Git blob and mode identities.
+  Unstaged, staged, committed, amended, rebased, and pushed forms remain
+  reviewed when their displayed before/after content is identical.
+- Changing either displayed endpoint makes that entry unreviewed. Returning to
+  an exact previously reviewed snapshot restores its reviewed state.
+- Commentry-owned `[reviewed]` file marks and `[partial]` directory marks are
+  rendered in the Diffview file panel. They do not use Diffview+ selections
+  and therefore never become batch stage/restore targets.
 - Comment add/edit/range opens a floating multiline editor:
   - `Enter` inserts newline
   - `Ctrl-s` saves
@@ -218,6 +227,9 @@ PERSISTENCE NOTES                                 *commentry.persistence*
 
 TROUBLESHOOTING                               *commentry.troubleshooting*
 
+- A store using the former `file_reviews` boolean map is incompatible with the
+  content-addressed `reviewed_changes` format. Remove that context's
+  `commentry.json` to start a new draft store.
 - `:Commentry list-comments` is unavailable:
   install `snacks.nvim`, then rerun `:checkhealth commentry`.
 - Agent handoff is unavailable:

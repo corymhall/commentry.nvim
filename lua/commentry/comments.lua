@@ -127,7 +127,8 @@ local function diff_state(diff_id)
     state.diffs[diff_id] = {
       comments = {},
       threads = {},
-      file_reviews = {},
+      reviewed_changes = {},
+      review_snapshots_by_entry = {},
       comments_by_id = {},
       threads_by_id = {},
       dirty = false,
@@ -398,12 +399,13 @@ local function apply_store(diff_id, store)
   local dstate = diff_state(diff_id)
   dstate.comments = {}
   dstate.threads = {}
-  dstate.file_reviews = {}
+  dstate.reviewed_changes = {}
+  dstate.review_snapshots_by_entry = {}
   dstate.comments_by_id = {}
   dstate.threads_by_id = {}
 
-  if type(store.file_reviews) == "table" then
-    dstate.file_reviews = vim.deepcopy(store.file_reviews)
+  if type(store.reviewed_changes) == "table" then
+    dstate.reviewed_changes = vim.deepcopy(store.reviewed_changes)
   end
 
   if type(store.comments) == "table" then
@@ -534,7 +536,7 @@ local function save_store(diff_id, project_root, context_id)
     context_id = context_id,
     comments = comments,
     threads = threads,
-    file_reviews = vim.deepcopy(dstate.file_reviews or {}),
+    reviewed_changes = vim.deepcopy(dstate.reviewed_changes or {}),
   }
 
   return Store.write(path, store)
@@ -699,6 +701,72 @@ local function visible_entry_contexts(context)
   return contexts
 end
 
+---@param dstate table
+---@param entry table|nil
+---@return boolean
+local function entry_is_reviewed(dstate, entry)
+  if type(entry) ~= "table" then
+    return false
+  end
+  local snapshot = dstate.review_snapshots_by_entry[entry]
+  local reviews = dstate.reviewed_changes[entry.path]
+  return type(snapshot) == "table"
+    and type(snapshot.fingerprint) == "string"
+    and type(reviews) == "table"
+    and type(reviews[snapshot.fingerprint]) == "table"
+end
+
+---@param view table
+---@return table<table, table>, table[]
+local function review_snapshots_for_view(view)
+  local entries = type(Diffview.list_view_entries) == "function" and Diffview.list_view_entries(view) or {}
+  if #entries == 0 and type(view) == "table" and type(view.cur_entry) == "table" then
+    entries = { view.cur_entry }
+  end
+  if type(Diffview.review_snapshots) ~= "function" then
+    return {}, entries
+  end
+  local snapshots, errors = Diffview.review_snapshots(view, entries)
+  if type(errors) == "table" and #errors > 0 then
+    Util.debug("Unable to fingerprint some diffview entries", errors)
+  end
+  return type(snapshots) == "table" and snapshots or {}, entries
+end
+
+---@param view table
+---@return boolean
+function M.refresh_review_state(view)
+  if type(view) ~= "table" then
+    return false
+  end
+  local diff_id = M.context_id_for_view(view)
+  if not diff_id then
+    return false
+  end
+  local dstate = diff_state(diff_id)
+  local snapshots, entries = review_snapshots_for_view(view)
+  local reviewed_by_entry = {}
+  dstate.review_snapshots_by_entry = snapshots
+  for _, entry in ipairs(entries) do
+    reviewed_by_entry[entry] = entry_is_reviewed(dstate, entry)
+  end
+  if type(Diffview.render_file_review_panel) == "function" then
+    Diffview.render_file_review_panel(view, reviewed_by_entry)
+  end
+  return true
+end
+
+---@param dstate table
+---@param context table
+---@return boolean
+local function context_is_reviewed(dstate, context)
+  local view = type(context) == "table" and context.view or nil
+  local entry = type(Diffview.current_file_entry) == "function" and Diffview.current_file_entry(view)
+    or type(view) == "table" and view.cur_entry
+    or nil
+  return entry_is_reviewed(dstate, entry)
+end
+
 ---@param diff_id string
 ---@param context table
 local function render_reconciled_context(diff_id, context)
@@ -715,8 +783,7 @@ local function render_reconciled_context(diff_id, context)
   end
   Diffview.render_comment_markers(context.bufnr, comments)
   if type(Diffview.render_file_review_indicator) == "function" then
-    local reviewed = dstate.file_reviews[context.file_path] == true
-    Diffview.render_file_review_indicator(context.bufnr, reviewed)
+    Diffview.render_file_review_indicator(context.bufnr, context_is_reviewed(dstate, context))
   end
 end
 
@@ -1557,48 +1624,6 @@ function M.list_comments()
   })
 end
 
----@param diff_id string
----@param current_path string
----@return string[]
-local function ordered_review_files(diff_id, current_path)
-  local files = {}
-  local seen = {}
-
-  local function push(path)
-    if type(path) ~= "string" or path == "" or seen[path] then
-      return
-    end
-    seen[path] = true
-    files[#files + 1] = path
-  end
-
-  local view = nil
-  local context, _ = current_context()
-  if type(context) == "table" then
-    view = context.view
-  end
-
-  if type(Diffview.list_view_files) == "function" and type(view) == "table" then
-    for _, path in ipairs(Diffview.list_view_files(view)) do
-      push(path)
-    end
-  end
-
-  if #files == 0 then
-    local dstate = diff_state(diff_id)
-    for _, comment in ipairs(dstate.comments) do
-      push(comment.file_path)
-    end
-    for path in pairs(dstate.file_reviews or {}) do
-      push(path)
-    end
-    table.sort(files)
-  end
-
-  push(current_path)
-  return files
-end
-
 ---@return boolean|nil, string|nil
 function M.current_file_reviewed()
   local context, err = current_context()
@@ -1609,7 +1634,8 @@ function M.current_file_reviewed()
   if not diff_id then
     return nil, "context_id_unavailable"
   end
-  return diff_state(diff_id).file_reviews[context.file_path] == true, nil
+  M.refresh_review_state(context.view)
+  return context_is_reviewed(diff_state(diff_id), context), nil
 end
 
 --- toggle file reviewed.
@@ -1624,14 +1650,40 @@ function M.toggle_file_reviewed()
     return
   end
 
+  M.refresh_review_state(context.view)
   local dstate = diff_state(diff_id)
-  local reviewed = dstate.file_reviews[context.file_path] == true
-  dstate.file_reviews[context.file_path] = not reviewed
+  local entry = type(Diffview.current_file_entry) == "function" and Diffview.current_file_entry(context.view)
+    or context.view.cur_entry
+  local snapshot = type(entry) == "table" and dstate.review_snapshots_by_entry[entry] or nil
+  if type(entry) ~= "table" or type(snapshot) ~= "table" or type(snapshot.fingerprint) ~= "string" then
+    Util.error("Unable to fingerprint the current diff file")
+    return
+  end
+
+  local reviews = dstate.reviewed_changes[entry.path]
+  if type(reviews) ~= "table" then
+    reviews = {}
+    dstate.reviewed_changes[entry.path] = reviews
+  end
+  local reviewed = type(reviews[snapshot.fingerprint]) == "table"
+  if reviewed then
+    reviews[snapshot.fingerprint] = nil
+    if next(reviews) == nil then
+      dstate.reviewed_changes[entry.path] = nil
+    end
+  else
+    reviews[snapshot.fingerprint] = {
+      base = snapshot.base,
+      head = snapshot.head,
+      reviewed_at = timestamp(),
+    }
+  end
 
   mark_dirty(diff_id)
+  M.refresh_review_state(context.view)
   render_for_context(context)
   persist_for_view(diff_id, context.view, "Failed to persist file review state")
-  if dstate.file_reviews[context.file_path] then
+  if not reviewed then
     Util.info(("Marked `%s` reviewed"):format(context.file_path))
   else
     Util.info(("Marked `%s` unreviewed"):format(context.file_path))
@@ -1650,48 +1702,54 @@ function M.next_unreviewed_file()
     return
   end
 
+  M.refresh_review_state(context.view)
   local dstate = diff_state(diff_id)
-  local files = ordered_review_files(diff_id, context.file_path)
-  if #files == 0 then
+  local entries = type(Diffview.list_view_entries) == "function" and Diffview.list_view_entries(context.view) or {}
+  if #entries == 0 then
     Util.info("No files available for review navigation")
     return
   end
 
+  local current_entry = type(Diffview.current_file_entry) == "function" and Diffview.current_file_entry(context.view)
+    or context.view.cur_entry
   local start_index = 1
-  for index, path in ipairs(files) do
-    if path == context.file_path then
+  for index, entry in ipairs(entries) do
+    if entry == current_entry then
       start_index = index
       break
     end
   end
 
-  local next_path = nil
-  for offset = 1, #files - 1 do
-    local idx = ((start_index + offset - 1) % #files) + 1
-    local path = files[idx]
-    if dstate.file_reviews[path] ~= true then
-      next_path = path
+  local next_entry = nil
+  for offset = 1, #entries - 1 do
+    local idx = ((start_index + offset - 1) % #entries) + 1
+    local entry = entries[idx]
+    if not entry_is_reviewed(dstate, entry) then
+      next_entry = entry
       break
     end
   end
 
-  if not next_path then
+  if not next_entry then
     Util.info("No other unreviewed files")
     return
   end
 
-  if type(Diffview.focus_file) == "function" then
-    local ok, focus_err = Diffview.focus_file(context.view, next_path)
-    if not ok then
-      Util.warn(focus_err or "Unable to focus target file in diffview")
-      return
-    end
+  local ok, focus_err
+  if type(Diffview.focus_entry) == "function" then
+    ok, focus_err = Diffview.focus_entry(context.view, next_entry)
+  elseif type(Diffview.focus_file) == "function" then
+    ok, focus_err = Diffview.focus_file(context.view, next_entry.path)
   else
     Util.warn("Diffview navigation helpers are unavailable")
     return
   end
+  if not ok then
+    Util.warn(focus_err or "Unable to focus target file in diffview")
+    return
+  end
 
-  Util.info(("Jumped to next unreviewed file: %s"):format(next_path))
+  Util.info(("Jumped to next unreviewed file: %s"):format(next_entry.path))
 end
 
 ---@param diff_id string

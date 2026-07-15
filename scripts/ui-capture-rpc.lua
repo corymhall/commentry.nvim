@@ -128,6 +128,20 @@ local ok, err = xpcall(function()
     return
   end
 
+  if scenario == "review" then
+    bridge:request("nvim_exec_lua", {
+      [[
+        require("commentry.comments").toggle_file_reviewed()
+        return true
+      ]],
+      {},
+    }, 5000)
+    bridge:wait_for_flush(5000)
+    local snapshot = bridge.screen:snapshot("rpc-review-progress")
+    Bridge.write_snapshot_files(snapshot, bridge.screen, out_dir, "rpc-review-progress")
+    return
+  end
+
   if scenario == "range" then
     bridge:request("nvim_exec_lua", {
       [[

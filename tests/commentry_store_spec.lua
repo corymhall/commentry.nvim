@@ -37,8 +37,14 @@ local function sample_store(root)
         comment_ids = { "c1" },
       },
     },
-    file_reviews = {
-      ["lua/commentry/store.lua"] = true,
+    reviewed_changes = {
+      ["lua/commentry/store.lua"] = {
+        [string.rep("a", 64)] = {
+          base = "100644:" .. string.rep("b", 40),
+          head = "100644:" .. string.rep("c", 40),
+          reviewed_at = "2026-02-21T00:00:00Z",
+        },
+      },
     },
   }
 end
@@ -151,8 +157,14 @@ describe("commentry.store", function()
           comment_ids = { "c1" },
         },
       },
-      file_reviews = {
-        ["lua/commentry/store.lua"] = "yes",
+      reviewed_changes = {
+        ["lua/commentry/store.lua"] = {
+          invalid = {
+            base = "bad",
+            head = false,
+            reviewed_at = "",
+          },
+        },
       },
     }
 
@@ -165,7 +177,7 @@ describe("commentry.store", function()
     assert.is_true(combined:find("line_end", 1, true) ~= nil)
     assert.is_true(combined:find("line_side", 1, true) ~= nil)
     assert.is_true(combined:find("comment_type", 1, true) ~= nil)
-    assert.is_true(combined:find("file_reviews", 1, true) ~= nil)
+    assert.is_true(combined:find("reviewed_changes", 1, true) ~= nil)
   end)
 
   it("accepts configured custom comment types", function()
@@ -184,9 +196,9 @@ describe("commentry.store", function()
     assert.are.same({}, errors)
   end)
 
-  it("accepts empty file_reviews map for first-write stores", function()
+  it("accepts an empty reviewed_changes map for first-write stores", function()
     local store = sample_store("/tmp/project")
-    store.file_reviews = {}
+    store.reviewed_changes = {}
 
     local ok, errors = Store.validate(store)
     assert.is_true(ok)

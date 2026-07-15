@@ -7,6 +7,7 @@ describe("commentry.diffview comment cards", function()
   local original_create_autocmd
   local original_schedule
   local original_buf_is_valid
+  local original_buf_line_count
   local original_clear_namespace
   local original_set_extmark
   local original_set_hl
@@ -18,6 +19,7 @@ describe("commentry.diffview comment cards", function()
     original_create_autocmd = vim.api.nvim_create_autocmd
     original_schedule = vim.schedule
     original_buf_is_valid = vim.api.nvim_buf_is_valid
+    original_buf_line_count = vim.api.nvim_buf_line_count
     original_clear_namespace = vim.api.nvim_buf_clear_namespace
     original_set_extmark = vim.api.nvim_buf_set_extmark
     original_set_hl = vim.api.nvim_set_hl
@@ -30,6 +32,7 @@ describe("commentry.diffview comment cards", function()
     vim.api.nvim_create_autocmd = original_create_autocmd
     vim.schedule = original_schedule
     vim.api.nvim_buf_is_valid = original_buf_is_valid
+    vim.api.nvim_buf_line_count = original_buf_line_count
     vim.api.nvim_buf_clear_namespace = original_clear_namespace
     vim.api.nvim_buf_set_extmark = original_set_extmark
     vim.api.nvim_set_hl = original_set_hl
@@ -137,6 +140,68 @@ describe("commentry.diffview comment cards", function()
     assert.are.same(0, marker_calls[1].line)
     assert.are.same("[reviewed]", marker_calls[1].opts.virt_text[1][1])
     assert.are.same("[unreviewed]", marker_calls[2].opts.virt_text[1][1])
+  end)
+
+  it("renders independent reviewed and partial marks in the file panel", function()
+    local marks = {}
+    local reviewed = { path = "reviewed.lua" }
+    local pending = { path = "pending.lua" }
+    local directory = {
+      _node = {
+        leaves = function()
+          return { { data = reviewed }, { data = pending } }
+        end,
+      },
+    }
+
+    vim.api.nvim_buf_is_valid = function()
+      return true
+    end
+    vim.api.nvim_buf_line_count = function()
+      return 10
+    end
+    vim.api.nvim_buf_clear_namespace = function()
+      return
+    end
+    vim.api.nvim_set_hl = function()
+      return
+    end
+    vim.api.nvim_buf_set_extmark = function(_, _, row, _, opts)
+      marks[#marks + 1] = { row = row, text = opts.virt_text[1][1] }
+      return #marks
+    end
+
+    package.loaded["commentry.diffview"] = nil
+    local Diffview = require("commentry.diffview")
+    Diffview.render_file_review_panel({
+      panel = {
+        bufid = 5,
+        components = {
+          working = {
+            files = {
+              comp = {
+                components = {
+                  {
+                    name = "directory",
+                    context = directory,
+                    lstart = 1,
+                    components = {
+                      { name = "file", context = reviewed, lstart = 2, components = {} },
+                      { name = "file", context = pending, lstart = 3, components = {} },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    }, { [reviewed] = true, [pending] = false })
+
+    assert.are.same({
+      { row = 1, text = "[partial]" },
+      { row = 2, text = "[reviewed]" },
+    }, marks)
   end)
 
   it("lists files from view and focuses target path", function()

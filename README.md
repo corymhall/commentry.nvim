@@ -12,22 +12,25 @@ visible in-place:
 
 ## Install
 
-Using lazy.nvim:
+Using lazy.nvim with Diffview+:
 
 ```lua
 {
   "commentry/commentry.nvim",
   dependencies = {
-    "sindrets/diffview.nvim",
+    "dlyongemallo/diffview-plus.nvim",
   },
   opts = {},
 }
 ```
 
+The upstream `sindrets/diffview.nvim` package is also supported. Install only
+one implementation; both expose the same `diffview` module and commands.
+
 Required:
 
 - Neovim `0.10+`
-- `sindrets/diffview.nvim` for the diff UI
+- `dlyongemallo/diffview-plus.nvim` or `sindrets/diffview.nvim` for the diff UI
 
 Optional integrations:
 
@@ -72,8 +75,8 @@ require("commentry").setup({
 - `:Commentry add-range-comment` creates a range comment from the current visual selection.
 - `:Commentry list-comments` opens a Snacks picker for active draft comments across the current review, with source preview and in-picker delete (`<C-d>` current, `<M-d>` selected). Requires `snacks.nvim`.
 - `:Commentry set-comment-type` sets default or per-comment type (`note`, `suggestion`, `issue`, `praise`).
-- `:Commentry toggle-file-reviewed` toggles reviewed status for the current diff file.
-- `:Commentry next-unreviewed` jumps to the next unreviewed diff file in panel order.
+- `:Commentry toggle-file-reviewed` toggles reviewed status for the current file's exact displayed change.
+- `:Commentry next-unreviewed` jumps to the next unreviewed diff entry in panel order.
 - `:Commentry export` prints deterministic markdown for active draft comments.
 - `:Commentry export register` writes markdown to the unnamed register.
 - `:Commentry export register:<name>` writes markdown to a specific register (for example `register:a`).
@@ -182,7 +185,9 @@ require("commentry").setup({
 - Add/edit/range comment actions open a floating multiline editor (`Enter` for newline, `Ctrl-s` to save, `q`/`Esc` in normal mode to cancel, `Tab` to cycle type).
 - Draft comment bodies are rendered as persistent boxed cards on commented lines, even when the cursor moves away.
 - Range comments render start/mid/end gutter signs (`╭`, `│`, `╰`) with subtle line tinting to show covered lines.
-- File reviewed state is tracked per context and rendered as a lightweight `[reviewed]` / `[unreviewed]` indicator in diff buffers.
+- Reviewed state is content-addressed from each file's base/head Git blob and mode identities. It survives unstaged -> staged -> committed -> pushed transitions when the displayed before/after content is unchanged, regardless of commit IDs or Diffview range syntax.
+- A file is unreviewed when either displayed endpoint changes. Returning to an exact previously reviewed before/after snapshot restores its reviewed state.
+- Commentry renders `[reviewed]` marks in the Diffview file panel, `[partial]` on partially reviewed directories, and a lightweight `[reviewed]` / `[unreviewed]` indicator in active diff buffers. These marks are independent from Diffview+ batch selections.
 - Send flow is explicit: open/attach a review (`:Commentry open` or auto-attach), enable the generic agent integration, then run `:Commentry send-to-agent`.
 - Sidekick owns agent selection, attachment, terminal creation, display/focus, and prompt submission. Commentry only builds the review payload and delegates it.
 - Agent sends require an active Commentry review context. Running them outside an attached review buffer/context fails.
@@ -206,6 +211,8 @@ This bootstraps a clean Neovim with only commentry + diffview loaded.
   (add/edit/delete comment, set type, toggle reviewed). If no writes happened in that context yet, the file is absent.
 - `:Commentry list-comments` is unavailable:
   install `snacks.nvim`, then rerun `:checkhealth commentry` to confirm `picker.select` support.
+- Incompatible pre-snapshot store:
+  reviewed-file persistence now uses `reviewed_changes` snapshots rather than the former `file_reviews` boolean map. Remove the context's `commentry.json` if it predates this format.
 - Wrong context:
   review context is branch-scoped (`<root>::review::branch::<branch-name>`) and shared across diff ranges on that branch.
   Comments become stale/outdated

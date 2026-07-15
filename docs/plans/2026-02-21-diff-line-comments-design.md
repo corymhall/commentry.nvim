@@ -87,7 +87,7 @@ Slice-specific verification:
   - Result: pass (`43` cases, `0` failures, `0` notes).
 - Added regression coverage:
   - `tests/commentry_store_spec.lua`: context path isolation + commit-range context-id sanitization.
-  - `tests/commentry_comments_spec.lua`: in-memory separation between working-tree and commit-range contexts; preservation of type/range metadata and `file_reviews` during reconcile persists.
+  - `tests/commentry_comments_spec.lua`: in-memory separation between working-tree and commit-range contexts; preservation of type/range metadata and content-addressed `reviewed_changes` during reconcile persists.
   - `tests/commentry_commands_spec.lua`: command routing remains stable with extra subcommand args.
   - `tests/commentry_diffview_spec.lua`: hover preview remains side-scoped (`base` vs `head`) at identical line numbers.
 - Rollout notes:

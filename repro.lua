@@ -22,7 +22,7 @@ vim.opt.runtimepath:prepend(lazypath)
 
 require("lazy").setup({
   {
-    "sindrets/diffview.nvim",
+    "dlyongemallo/diffview-plus.nvim",
     lazy = false,
   },
   {

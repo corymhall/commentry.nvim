@@ -895,7 +895,7 @@ describe("commentry.comments persistence", function()
             comment_ids = { "wt-1" },
           },
         },
-        file_reviews = {},
+        reviewed_changes = {},
       },
       [path_for_context("", vim.fs.normalize(vim.uv.fs_realpath(commit_range_root) or commit_range_root))] = {
         project_root = commit_range_root,
@@ -925,7 +925,7 @@ describe("commentry.comments persistence", function()
             comment_ids = { "cr-1" },
           },
         },
-        file_reviews = {},
+        reviewed_changes = {},
       },
     }
 
@@ -1017,7 +1017,7 @@ describe("commentry.comments persistence", function()
             comment_ids = { "main-1" },
           },
         },
-        file_reviews = {},
+        reviewed_changes = {},
       },
       [path_for_context("", context_id_for_branch("feature"))] = {
         project_root = "/tmp/project",
@@ -1047,7 +1047,7 @@ describe("commentry.comments persistence", function()
             comment_ids = { "feature-1" },
           },
         },
-        file_reviews = {},
+        reviewed_changes = {},
       },
     }
 
@@ -1103,7 +1103,7 @@ describe("commentry.comments persistence", function()
     assert.are.same("feature-1", captured[1].id)
   end)
 
-  it("preserves typed/range metadata and file review map when reconciling mismatches", function()
+  it("preserves typed/range metadata and reviewed snapshots when reconciling mismatches", function()
     local persisted = nil
     local root = make_temp_dir()
     local store_data = {
@@ -1135,9 +1135,14 @@ describe("commentry.comments persistence", function()
           comment_ids = { "c1" },
         },
       },
-      file_reviews = {
-        ["file.lua"] = true,
-        ["other.lua"] = false,
+      reviewed_changes = {
+        ["file.lua"] = {
+          reviewed = {
+            base = "100644:base",
+            head = "100644:head",
+            reviewed_at = "2026-02-21T00:00:00Z",
+          },
+        },
       },
     }
 
@@ -1181,8 +1186,7 @@ describe("commentry.comments persistence", function()
     comments.render_current_buffer()
 
     assert.is_table(persisted)
-    assert.are.same(true, persisted.file_reviews["file.lua"])
-    assert.are.same(false, persisted.file_reviews["other.lua"])
+    assert.are.same(store_data.reviewed_changes, persisted.reviewed_changes)
     assert.are.same(2, persisted.comments[1].line_start)
     assert.are.same(4, persisted.comments[1].line_end)
     assert.are.same("issue", persisted.comments[1].comment_type)
@@ -1422,7 +1426,7 @@ describe("commentry.comments persistence", function()
           comment_ids = { "c2" },
         },
       },
-      file_reviews = {},
+      reviewed_changes = {},
     }
 
     local context = {
@@ -1559,15 +1563,22 @@ describe("commentry.comments persistence", function()
     assert.are.same("context_id_unavailable", export_err)
   end)
 
-  it("toggles file reviewed state and persists indicator state", function()
+  it("toggles the current content-addressed review snapshot", function()
     local writes = {}
     local indicator = {}
+    local entry = { path = "file.lua" }
+    local view = { git_root = "/tmp/project", cur_entry = entry }
     local context = {
       file_path = "file.lua",
       line_number = 1,
       line_side = "head",
       bufnr = 1,
-      view = { git_root = "/tmp/project" },
+      view = view,
+    }
+    local snapshot = {
+      base = "100644:" .. string.rep("a", 40),
+      head = "100644:" .. string.rep("b", 40),
+      fingerprint = string.rep("c", 64),
     }
 
     local comments = load_with_stubs({
@@ -1581,10 +1592,7 @@ describe("commentry.comments persistence", function()
             context_id = "ctx-working-tree",
             comments = {},
             threads = {},
-            file_reviews = {
-              ["file.lua"] = false,
-              ["other.lua"] = true,
-            },
+            reviewed_changes = {},
           }
         end,
         write = function(_, store)
@@ -1595,6 +1603,18 @@ describe("commentry.comments persistence", function()
       diffview = {
         current_file_context = function()
           return context
+        end,
+        current_file_entry = function()
+          return entry
+        end,
+        list_view_entries = function()
+          return { entry }
+        end,
+        review_snapshots = function()
+          return { [entry] = snapshot }, {}
+        end,
+        render_file_review_panel = function()
+          return
         end,
         render_comment_markers = function()
           return
@@ -1620,19 +1640,81 @@ describe("commentry.comments persistence", function()
     assert.is_true(reviewed_after_toggle)
     assert.is_false(reviewed_after_second_toggle)
     assert.are.same(2, #writes)
-    assert.are.same(true, writes[1].file_reviews["file.lua"])
-    assert.are.same(false, writes[2].file_reviews["file.lua"])
+    assert.is_table(writes[1].reviewed_changes["file.lua"][snapshot.fingerprint])
+    assert.is_nil(writes[2].reviewed_changes["file.lua"])
     assert.are.same({ true, false }, indicator)
   end)
 
-  it("jumps to next unreviewed file in diffview order", function()
-    local focused_path = nil
+  it("shows changed snapshots as unreviewed and recognizes an exact reviewed snapshot again", function()
+    local entry = { path = "file.lua" }
+    local view = { git_root = "/tmp/project", cur_entry = entry }
+    local fingerprint = "reviewed"
+    local rendered = {}
+    local comments = load_with_stubs({
+      store = {
+        path_for_project = function()
+          return "/tmp/project/.commentry/commentry.json"
+        end,
+        read = function()
+          return {
+            project_root = "/tmp/project",
+            context_id = "ctx-working-tree",
+            comments = {},
+            threads = {},
+            reviewed_changes = {
+              ["file.lua"] = {
+                reviewed = { base = "base", head = "head", reviewed_at = "now" },
+              },
+            },
+          }
+        end,
+      },
+      diffview = {
+        list_view_entries = function()
+          return { entry }
+        end,
+        review_snapshots = function()
+          return { [entry] = { base = "base", head = "head", fingerprint = fingerprint } }, {}
+        end,
+        render_file_review_panel = function(_, statuses)
+          rendered[#rendered + 1] = statuses[entry]
+        end,
+      },
+    })
+
+    comments.load_for_view(view)
+    comments.refresh_review_state(view)
+    fingerprint = "changed"
+    comments.refresh_review_state(view)
+    fingerprint = "reviewed"
+    comments.refresh_review_state(view)
+
+    assert.are.same({ true, false, true }, rendered)
+  end)
+
+  it("jumps to the next entry whose displayed change is unreviewed", function()
+    local focused_entry = nil
+    local entries = {
+      { path = "file.lua" },
+      { path = "other.lua" },
+      { path = "third.lua" },
+    }
+    local snapshots = {}
+    local reviewed_changes = {}
+    for index, entry in ipairs(entries) do
+      local fingerprint = ("f%d"):format(index)
+      snapshots[entry] = { base = "base", head = "head", fingerprint = fingerprint }
+      if index ~= 2 then
+        reviewed_changes[entry.path] = { [fingerprint] = { base = "base", head = "head" } }
+      end
+    end
+    local view = { git_root = "/tmp/project", cur_entry = entries[1] }
     local context = {
       file_path = "file.lua",
       line_number = 1,
       line_side = "head",
       bufnr = 1,
-      view = { git_root = "/tmp/project" },
+      view = view,
     }
 
     local comments = load_with_stubs({
@@ -1646,11 +1728,7 @@ describe("commentry.comments persistence", function()
             context_id = "ctx-working-tree",
             comments = {},
             threads = {},
-            file_reviews = {
-              ["file.lua"] = true,
-              ["other.lua"] = false,
-              ["third.lua"] = true,
-            },
+            reviewed_changes = reviewed_changes,
           }
         end,
         write = function()
@@ -1661,12 +1739,21 @@ describe("commentry.comments persistence", function()
         current_file_context = function()
           return context
         end,
-        list_view_files = function()
-          return { "file.lua", "other.lua", "third.lua" }
+        current_file_entry = function()
+          return view.cur_entry
         end,
-        focus_file = function(_, path)
-          focused_path = path
+        list_view_entries = function()
+          return entries
+        end,
+        review_snapshots = function()
+          return snapshots, {}
+        end,
+        focus_entry = function(_, entry)
+          focused_entry = entry
           return true, nil
+        end,
+        render_file_review_panel = function()
+          return
         end,
         render_comment_markers = function()
           return
@@ -1681,7 +1768,7 @@ describe("commentry.comments persistence", function()
     comments.load_for_view(context.view)
     comments.next_unreviewed_file()
 
-    assert.are.same("other.lua", focused_path)
+    assert.are.same(entries[2], focused_entry)
   end)
 
   it("lists draft comments and jumps to selected entry line", function()
@@ -2515,7 +2602,7 @@ describe("commentry.comments persistence", function()
                 comment_ids = { "c-stale" },
               },
             },
-            file_reviews = {},
+            reviewed_changes = {},
           }
         end,
         write = function(_, store)

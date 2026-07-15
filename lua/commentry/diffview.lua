@@ -2,9 +2,11 @@ local M = {}
 
 local Config = require("commentry.config")
 local file_review_ns = vim.api.nvim_create_namespace("commentry-file-review")
+local file_review_panel_ns = vim.api.nvim_create_namespace("commentry-file-review-panel")
 local uv = vim.uv or vim.loop
 local ROOT_CANDIDATE_KEYS = { "git_root", "toplevel", "root", "cwd", "path" }
 local view_context_by_tabpage = {}
+local review_refresh_attached = setmetatable({}, { __mode = "k" })
 local setup_done = false
 
 --- mark buffer.
@@ -416,8 +418,21 @@ local function sync_comments_for_view()
   if not ok then
     return
   end
+  local view = M.get_current_view()
+  if type(view) == "table" and not review_refresh_attached[view] then
+    local emitter = view.emitter
+    if type(emitter) == "table" and type(emitter.on) == "function" then
+      review_refresh_attached[view] = true
+      emitter:on("files_updated", function()
+        vim.schedule(sync_comments_for_view)
+      end)
+    end
+  end
   if type(comments.load_current_view) == "function" then
     comments.load_current_view()
+  end
+  if type(comments.refresh_review_state) == "function" and type(view) == "table" then
+    comments.refresh_review_state(view)
   end
   if type(comments.render_current_buffer) == "function" then
     comments.render_current_buffer()
@@ -527,6 +542,19 @@ function M.get_current_view()
   return lib.get_current_view(), nil
 end
 
+---@param view? table
+---@return table|nil
+function M.current_file_entry(view)
+  local resolved = view
+  if type(resolved) ~= "table" then
+    resolved = M.get_current_view()
+  end
+  if type(resolved) ~= "table" or type(resolved.cur_entry) ~= "table" then
+    return nil
+  end
+  return resolved.cur_entry
+end
+
 ---@return table|nil, string|nil
 function M.current_file_context()
   local view, err = M.get_current_view()
@@ -592,6 +620,29 @@ function M.debug_state()
 end
 
 ---@param view? table
+---@return table[]
+function M.list_view_entries(view)
+  if type(view) ~= "table" then
+    return {}
+  end
+  if type(view.panel) == "table" and type(view.panel.ordered_file_list) == "function" then
+    local ok, ordered = pcall(view.panel.ordered_file_list, view.panel)
+    if ok and type(ordered) == "table" then
+      return ordered
+    end
+  end
+  local entries = {}
+  if type(view.files) == "table" and type(view.files.iter) == "function" then
+    for _, entry in view.files:iter() do
+      if type(entry) == "table" then
+        entries[#entries + 1] = entry
+      end
+    end
+  end
+  return entries
+end
+
+---@param view? table
 ---@return string[]
 function M.list_view_files(view)
   if type(view) ~= "table" then
@@ -630,6 +681,28 @@ function M.list_view_files(view)
   end
 
   return files
+end
+
+---@param view table
+---@param entry table
+---@return boolean, string|nil
+function M.focus_entry(view, entry)
+  if type(view) ~= "table" then
+    return false, "view_unavailable"
+  end
+  if type(entry) ~= "table" then
+    return false, "file_entry_required"
+  end
+  if view.cur_entry == entry then
+    return true, nil
+  end
+  if type(view.set_file) == "function" then
+    local ok = pcall(view.set_file, view, entry, true, true)
+    if ok then
+      return true, nil
+    end
+  end
+  return false, "unable_to_focus_file"
 end
 
 ---@param view table
@@ -877,6 +950,8 @@ end
 
 function M.ensure_highlights()
   pcall(vim.api.nvim_set_hl, 0, "CommentryMarker", { link = "Comment" })
+  pcall(vim.api.nvim_set_hl, 0, "CommentryFileReviewed", { link = "DiagnosticOk" })
+  pcall(vim.api.nvim_set_hl, 0, "CommentryDirectoryPartiallyReviewed", { link = "DiagnosticWarn" })
   pcall(vim.api.nvim_set_hl, 0, "CommentryBody", { link = "Comment" })
   pcall(vim.api.nvim_set_hl, 0, "CommentryBorderNote", { link = "Comment" })
   pcall(vim.api.nvim_set_hl, 0, "CommentryTypeNote", { link = "Comment" })
@@ -1053,6 +1128,100 @@ function M.render_comment_markers(bufnr, comments)
       virt_lines_above = false,
       hl_mode = "combine",
     })
+  end
+end
+
+---@param view table
+---@param entries table[]
+---@return table<table, table>, string[]
+function M.review_snapshots(view, entries)
+  local root = type(view) == "table"
+      and type(view.adapter) == "table"
+      and type(view.adapter.ctx) == "table"
+      and view.adapter.ctx.toplevel
+    or nil
+  if type(root) ~= "string" or root == "" then
+    local context = M.review_context_for_view(view)
+    root = context and context.root or nil
+  end
+  if type(root) ~= "string" or root == "" then
+    return {}, { "review root is unavailable" }
+  end
+  return require("commentry.review").snapshots(root, entries)
+end
+
+---@param view table
+---@param reviewed_by_entry table<table, boolean>
+function M.render_file_review_panel(view, reviewed_by_entry)
+  local panel = type(view) == "table" and view.panel or nil
+  local bufnr = type(panel) == "table" and panel.bufid or nil
+  if type(bufnr) ~= "number" or not vim.api.nvim_buf_is_valid(bufnr) then
+    return
+  end
+  vim.api.nvim_buf_clear_namespace(bufnr, file_review_panel_ns, 0, -1)
+  if type(panel.components) ~= "table" then
+    return
+  end
+
+  M.ensure_highlights()
+  local line_count = vim.api.nvim_buf_line_count(bufnr)
+  local marked_rows = {}
+  local function mark(row, text, hl)
+    if type(row) ~= "number" or row < 0 or row >= line_count or marked_rows[row] then
+      return
+    end
+    marked_rows[row] = true
+    pcall(vim.api.nvim_buf_set_extmark, bufnr, file_review_panel_ns, row, 0, {
+      virt_text = { { text, hl } },
+      virt_text_pos = "right_align",
+      hl_mode = "combine",
+      priority = 90,
+    })
+  end
+
+  local function directory_state(context)
+    local node = type(context) == "table" and context._node or nil
+    local leaves = type(node) == "table" and type(node.leaves) == "function" and node:leaves() or {}
+    local reviewed = 0
+    local total = 0
+    for _, leaf in ipairs(leaves) do
+      if type(leaf) == "table" and type(leaf.data) == "table" then
+        total = total + 1
+        if reviewed_by_entry[leaf.data] then
+          reviewed = reviewed + 1
+        end
+      end
+    end
+    if total > 0 and reviewed == total then
+      return "all"
+    elseif reviewed > 0 then
+      return "some"
+    end
+    return "none"
+  end
+
+  local function visit(component)
+    if type(component) ~= "table" then
+      return
+    end
+    if component.name == "file" and reviewed_by_entry[component.context] then
+      mark(component.lstart, "[reviewed]", "CommentryFileReviewed")
+    elseif component.name == "directory" then
+      local state = directory_state(component.context)
+      if state == "all" then
+        mark(component.lstart, "[reviewed]", "CommentryFileReviewed")
+      elseif state == "some" then
+        mark(component.lstart, "[partial]", "CommentryDirectoryPartiallyReviewed")
+      end
+    end
+    for _, child in ipairs(component.components or {}) do
+      visit(child)
+    end
+  end
+
+  for _, section in ipairs({ "conflicting", "working", "staged" }) do
+    local files = panel.components[section] and panel.components[section].files
+    visit(files and files.comp or nil)
   end
 end
 
