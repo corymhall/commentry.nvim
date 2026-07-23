@@ -246,8 +246,16 @@ function M.setup()
     Util.error(err or "Failed to open diff view")
   end)
 
-  M.register("list-comments", function()
-    Comments.list_comments()
+  M.register("list-comments", function(_, cmd_args)
+    Comments.list_comments(cmd_args)
+  end)
+
+  M.register("reattach", function(args)
+    Comments.reattach_comment(args)
+  end)
+
+  M.register("help", function()
+    vim.cmd.help("commentry")
   end)
 
   M.register("add-range-comment", function()
@@ -387,6 +395,13 @@ end
 function M.complete(line)
   M.setup()
   line = line:gsub("^%s*Commentry%s+", "")
+  local comment_filter = line:match("^list%-comments%s+(%S*)$")
+  if comment_filter then
+    return vim.tbl_filter(function(value)
+      return value:find(comment_filter, 1, true) == 1
+    end, { "active", "unresolved", "all" })
+  end
+
   local prefix = line:match("^(%S*)") or ""
   local keys = vim.tbl_keys(M.commands)
   table.sort(keys)

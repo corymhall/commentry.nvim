@@ -81,7 +81,12 @@ describe("commentry.health", function()
     assert.is_true(vim.tbl_contains(seen.ok, ":Commentry command is registered"))
     assert.is_true(vim.tbl_contains(seen.ok, "commentry.config is loaded"))
     assert.is_true(vim.tbl_contains(seen.ok, "diffview.nvim is installed"))
-    assert.is_true(vim.tbl_contains(seen.ok, "snacks.nvim picker.select is available for :Commentry list-comments"))
+    assert.is_true(
+      vim.tbl_contains(
+        seen.ok,
+        "snacks.nvim picker.select is available for :Commentry list-comments and :Commentry reattach"
+      )
+    )
     assert.are.same(0, #seen.warn)
   end)
 
@@ -93,7 +98,12 @@ describe("commentry.health", function()
 
     require("commentry.health").check()
 
-    assert.is_true(vim.tbl_contains(seen.warn, "snacks.nvim not installed: :Commentry list-comments is unavailable"))
+    assert.is_true(
+      vim.tbl_contains(
+        seen.warn,
+        "snacks.nvim not installed: :Commentry list-comments and :Commentry reattach are unavailable"
+      )
+    )
   end)
 
   it("warns when snacks picker.select is unavailable", function()

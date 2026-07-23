@@ -204,6 +204,61 @@ describe("commentry.diffview comment cards", function()
     }, marks)
   end)
 
+  it("renders active and unresolved comment counts beside file review state", function()
+    local marks = {}
+    local reviewed = { path = "reviewed.lua" }
+    local pending = { path = "pending.lua" }
+
+    vim.api.nvim_buf_is_valid = function()
+      return true
+    end
+    vim.api.nvim_buf_line_count = function()
+      return 10
+    end
+    vim.api.nvim_buf_clear_namespace = function()
+      return
+    end
+    vim.api.nvim_set_hl = function()
+      return
+    end
+    vim.api.nvim_buf_set_extmark = function(_, _, row, _, opts)
+      local text = {}
+      for _, chunk in ipairs(opts.virt_text) do
+        text[#text + 1] = chunk[1]
+      end
+      marks[#marks + 1] = { row = row, text = table.concat(text) }
+      return #marks
+    end
+
+    package.loaded["commentry.diffview"] = nil
+    local Diffview = require("commentry.diffview")
+    Diffview.render_file_review_panel({
+      panel = {
+        bufid = 5,
+        components = {
+          working = {
+            files = {
+              comp = {
+                components = {
+                  { name = "file", context = reviewed, lstart = 2, components = {} },
+                  { name = "file", context = pending, lstart = 3, components = {} },
+                },
+              },
+            },
+          },
+        },
+      },
+    }, { [reviewed] = true, [pending] = false }, {
+      ["reviewed.lua"] = { active = 2, unresolved = 1 },
+      ["pending.lua"] = { active = 1, unresolved = 0 },
+    })
+
+    assert.are.same({
+      { row = 2, text = "[R 2c 1u]" },
+      { row = 3, text = "[1 comment]" },
+    }, marks)
+  end)
+
   it("lists files from view and focuses target path", function()
     local focused = nil
     package.loaded["commentry.diffview"] = nil

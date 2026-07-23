@@ -951,6 +951,8 @@ end
 function M.ensure_highlights()
   pcall(vim.api.nvim_set_hl, 0, "CommentryMarker", { link = "Comment" })
   pcall(vim.api.nvim_set_hl, 0, "CommentryFileReviewed", { link = "DiagnosticOk" })
+  pcall(vim.api.nvim_set_hl, 0, "CommentryFileCommentCount", { link = "DiagnosticInfo" })
+  pcall(vim.api.nvim_set_hl, 0, "CommentryFileUnresolvedCount", { link = "DiagnosticWarn" })
   pcall(vim.api.nvim_set_hl, 0, "CommentryDirectoryPartiallyReviewed", { link = "DiagnosticWarn" })
   pcall(vim.api.nvim_set_hl, 0, "CommentryBody", { link = "Comment" })
   pcall(vim.api.nvim_set_hl, 0, "CommentryBorderNote", { link = "Comment" })
@@ -1152,7 +1154,8 @@ end
 
 ---@param view table
 ---@param reviewed_by_entry table<table, boolean>
-function M.render_file_review_panel(view, reviewed_by_entry)
+---@param comment_counts_by_path? table<string, { active: integer, unresolved: integer }>
+function M.render_file_review_panel(view, reviewed_by_entry, comment_counts_by_path)
   local panel = type(view) == "table" and view.panel or nil
   local bufnr = type(panel) == "table" and panel.bufid or nil
   if type(bufnr) ~= "number" or not vim.api.nvim_buf_is_valid(bufnr) then
@@ -1166,17 +1169,24 @@ function M.render_file_review_panel(view, reviewed_by_entry)
   M.ensure_highlights()
   local line_count = vim.api.nvim_buf_line_count(bufnr)
   local marked_rows = {}
-  local function mark(row, text, hl)
-    if type(row) ~= "number" or row < 0 or row >= line_count or marked_rows[row] then
+  local function mark(row, chunks)
+    if type(row) ~= "number" or row < 0 or row >= line_count or marked_rows[row] or #chunks == 0 then
       return
     end
     marked_rows[row] = true
     pcall(vim.api.nvim_buf_set_extmark, bufnr, file_review_panel_ns, row, 0, {
-      virt_text = { { text, hl } },
+      virt_text = chunks,
       virt_text_pos = "right_align",
       hl_mode = "combine",
       priority = 90,
     })
+  end
+
+  local function append_chunk(chunks, text, hl)
+    if #chunks > 0 then
+      chunks[#chunks + 1] = { " ", "Comment" }
+    end
+    chunks[#chunks + 1] = { text, hl }
   end
 
   local function directory_state(context)
@@ -1204,14 +1214,46 @@ function M.render_file_review_panel(view, reviewed_by_entry)
     if type(component) ~= "table" then
       return
     end
-    if component.name == "file" and reviewed_by_entry[component.context] then
-      mark(component.lstart, "[reviewed]", "CommentryFileReviewed")
+    if component.name == "file" then
+      local chunks = {}
+      local reviewed = reviewed_by_entry[component.context] == true
+      local path = type(component.context) == "table" and component.context.path or nil
+      local counts = type(comment_counts_by_path) == "table" and comment_counts_by_path[path] or nil
+      local active = type(counts) == "table" and tonumber(counts.active) or 0
+      local unresolved = type(counts) == "table" and tonumber(counts.unresolved) or 0
+      local states = (reviewed and 1 or 0) + (active > 0 and 1 or 0) + (unresolved > 0 and 1 or 0)
+
+      if states <= 1 then
+        if reviewed then
+          append_chunk(chunks, "[reviewed]", "CommentryFileReviewed")
+        elseif active > 0 then
+          local label = active == 1 and "[1 comment]" or ("[%d comments]"):format(active)
+          append_chunk(chunks, label, "CommentryFileCommentCount")
+        elseif unresolved > 0 then
+          append_chunk(chunks, ("[%d unresolved]"):format(unresolved), "CommentryFileUnresolvedCount")
+        end
+      else
+        chunks[#chunks + 1] = { "[", "Comment" }
+        if reviewed then
+          chunks[#chunks + 1] = { "R", "CommentryFileReviewed" }
+        end
+        if active > 0 then
+          chunks[#chunks + 1] = { reviewed and " " or "", "Comment" }
+          chunks[#chunks + 1] = { ("%dc"):format(active), "CommentryFileCommentCount" }
+        end
+        if unresolved > 0 then
+          chunks[#chunks + 1] = { (reviewed or active > 0) and " " or "", "Comment" }
+          chunks[#chunks + 1] = { ("%du"):format(unresolved), "CommentryFileUnresolvedCount" }
+        end
+        chunks[#chunks + 1] = { "]", "Comment" }
+      end
+      mark(component.lstart, chunks)
     elseif component.name == "directory" then
       local state = directory_state(component.context)
       if state == "all" then
-        mark(component.lstart, "[reviewed]", "CommentryFileReviewed")
+        mark(component.lstart, { { "[reviewed]", "CommentryFileReviewed" } })
       elseif state == "some" then
-        mark(component.lstart, "[partial]", "CommentryDirectoryPartiallyReviewed")
+        mark(component.lstart, { { "[partial]", "CommentryDirectoryPartiallyReviewed" } })
       end
     end
     for _, child in ipairs(component.components or {}) do

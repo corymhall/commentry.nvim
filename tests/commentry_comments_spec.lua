@@ -369,6 +369,7 @@ describe("commentry.comments persistence", function()
     assert.is_table(persisted)
     assert.are.same(1, #persisted.comments)
     assert.are.same("unresolved", persisted.comments[1].status)
+    assert.are.same("line_changed", persisted.comments[1].unresolved_reason)
     assert.are.same(0, #persisted.threads)
   end)
 
@@ -1692,6 +1693,66 @@ describe("commentry.comments persistence", function()
     assert.are.same({ true, false, true }, rendered)
   end)
 
+  it("passes active and unresolved per-file comment counts to the diff panel", function()
+    local entry = { path = "file.lua" }
+    local view = { git_root = "/tmp/project", cur_entry = entry }
+    local rendered_counts = nil
+    local comments = load_with_stubs({
+      store = {
+        path_for_project = function()
+          return "/tmp/project/.commentry/commentry.json"
+        end,
+        read = function()
+          return {
+            project_root = "/tmp/project",
+            context_id = "ctx-working-tree",
+            comments = {
+              {
+                id = "active",
+                context_id = "ctx-working-tree",
+                file_path = "file.lua",
+                line_start = 1,
+                line_end = 1,
+                line_side = "head",
+                comment_type = "note",
+                body = "Active",
+              },
+              {
+                id = "stale",
+                context_id = "ctx-working-tree",
+                file_path = "file.lua",
+                line_start = 2,
+                line_end = 2,
+                line_side = "head",
+                comment_type = "issue",
+                body = "Stale",
+                status = "unresolved",
+              },
+            },
+            threads = {},
+            reviewed_changes = {},
+          }
+        end,
+      },
+      diffview = {
+        list_view_entries = function()
+          return { entry }
+        end,
+        review_snapshots = function()
+          return {}, {}
+        end,
+        render_file_review_panel = function(_, _, counts)
+          rendered_counts = counts
+        end,
+      },
+    })
+
+    comments.load_for_view(view)
+    comments.refresh_review_state(view)
+
+    assert.are.same({ active = 1, unresolved = 1 }, rendered_counts["file.lua"])
+  end)
+
   it("jumps to the next entry whose displayed change is unreviewed", function()
     local focused_entry = nil
     local entries = {
@@ -2448,6 +2509,208 @@ describe("commentry.comments persistence", function()
     assert.are.same("c3", persisted.comments[1].id)
     assert.are.same(1, #captured_items)
     assert.are.same("c3", captured_items[1].comment.id)
+  end)
+
+  it("lists unresolved comments with anchor context and permanently deletes them", function()
+    local persisted = nil
+    local captured_items = nil
+    local captured_opts = nil
+
+    package.loaded["snacks"] = {
+      picker = {
+        pick = function(opts)
+          captured_items = opts.items
+          captured_opts = opts
+        end,
+        select = function(items, _, cb)
+          cb(items[1], 1)
+        end,
+      },
+    }
+
+    local comments = load_with_stubs({
+      store = {
+        path_for_project = function()
+          return "/tmp/project/.commentry/commentry.json"
+        end,
+        read = function()
+          return {
+            project_root = "/tmp/project",
+            diff_id = "/tmp/project",
+            comments = {
+              {
+                id = "active",
+                diff_id = "/tmp/project",
+                file_path = "file.lua",
+                line_number = 2,
+                line_side = "head",
+                comment_type = "note",
+                body = "Active draft",
+              },
+              {
+                id = "stale",
+                diff_id = "/tmp/project",
+                file_path = "file.lua",
+                line_number = 4,
+                line_side = "head",
+                comment_type = "issue",
+                body = "Recover this draft",
+                status = "unresolved",
+                unresolved_reason = "line_changed",
+                line_content = "local old_value = value",
+              },
+            },
+            threads = {},
+          }
+        end,
+        write = function(_, store_data)
+          persisted = vim.deepcopy(store_data)
+          return true
+        end,
+      },
+      diffview = {
+        get_current_view = function()
+          return { git_root = "/tmp/project" }
+        end,
+        current_file_context = function()
+          return {
+            file_path = "file.lua",
+            line_number = 1,
+            line_side = "head",
+            bufnr = 1,
+            view = { git_root = "/tmp/project" },
+          }
+        end,
+        render_comment_markers = function() end,
+      },
+    })
+
+    comments.load_for_view({ git_root = "/tmp/project" })
+    comments.list_comments("unresolved")
+
+    assert.are.same("Commentry unresolved comments", captured_opts.title)
+    assert.are.same(1, #captured_items)
+    assert.are.same("stale", captured_items[1].comment.id)
+    assert.is_true(captured_items[1].text:find("line changed", 1, true) ~= nil)
+    assert.is_true(captured_items[1].text:find("was: local old_value = value", 1, true) ~= nil)
+
+    local closed = 0
+    captured_opts.actions.delete_comment({
+      selected = function()
+        return {}
+      end,
+      refresh = function() end,
+      close = function()
+        closed = closed + 1
+      end,
+    }, { item = captured_items[1] })
+
+    assert.are.same(1, closed)
+    assert.is_table(persisted)
+    assert.are.same(1, #persisted.comments)
+    assert.are.same("active", persisted.comments[1].id)
+  end)
+
+  it("reattaches an unresolved range at the current destination and preserves its length", function()
+    local persisted = nil
+    local destination_bufnr = vim.api.nvim_get_current_buf()
+
+    package.loaded["snacks"] = {
+      picker = {
+        pick = function(opts)
+          opts.confirm(nil, opts.items[1])
+        end,
+        select = function() end,
+      },
+    }
+
+    local comments = load_with_stubs({
+      store = {
+        path_for_project = function()
+          return "/tmp/project/.commentry/commentry.json"
+        end,
+        read = function()
+          return {
+            project_root = "/tmp/project",
+            diff_id = "/tmp/project",
+            comments = {
+              {
+                id = "stale",
+                diff_id = "/tmp/project",
+                file_path = "old.lua",
+                line_number = 4,
+                line_start = 4,
+                line_end = 5,
+                line_side = "base",
+                comment_type = "issue",
+                body = "Move this range",
+                status = "unresolved",
+                unresolved_reason = "line_changed",
+                line_content = "old anchor",
+              },
+            },
+            threads = {
+              {
+                id = "legacy-stale-thread",
+                diff_id = "/tmp/project",
+                file_path = "old.lua",
+                line_number = 4,
+                line_start = 4,
+                line_end = 5,
+                line_side = "base",
+                comment_ids = { "stale" },
+              },
+            },
+          }
+        end,
+        write = function(_, store_data)
+          persisted = vim.deepcopy(store_data)
+          return true
+        end,
+      },
+      diffview = {
+        get_current_view = function()
+          return { git_root = "/tmp/project" }
+        end,
+        current_file_context = function()
+          return {
+            file_path = "new.lua",
+            line_number = 8,
+            line_side = "head",
+            bufnr = destination_bufnr,
+            view = { git_root = "/tmp/project" },
+          }
+        end,
+        render_comment_markers = function() end,
+      },
+    })
+
+    vim.api.nvim_buf_line_count = function()
+      return 20
+    end
+    vim.api.nvim_buf_get_lines = function(_, start)
+      if start == 7 then
+        return { "new anchor" }
+      end
+      return { "" }
+    end
+
+    comments.load_for_view({ git_root = "/tmp/project" })
+    comments.reattach_comment({ range = 0 })
+
+    assert.is_table(persisted)
+    assert.are.same(1, #persisted.comments)
+    local reattached = persisted.comments[1]
+    assert.are.same("stale", reattached.id)
+    assert.are.same("new.lua", reattached.file_path)
+    assert.are.same("head", reattached.line_side)
+    assert.are.same(8, reattached.line_start)
+    assert.are.same(9, reattached.line_end)
+    assert.are.same("new anchor", reattached.line_content)
+    assert.is_nil(reattached.status)
+    assert.is_nil(reattached.unresolved_reason)
+    assert.are.same(1, #persisted.threads)
+    assert.are.same({ "stale" }, persisted.threads[1].comment_ids)
   end)
 
   it("generates deterministic export markdown with typed range labels", function()

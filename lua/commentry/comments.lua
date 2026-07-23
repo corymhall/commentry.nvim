@@ -361,7 +361,11 @@ local function maybe_drop_thread(dstate, thread)
   if #thread.comment_ids > 0 then
     return
   end
-  dstate.threads_by_id[thread.id] = nil
+  for thread_id, candidate in pairs(dstate.threads_by_id) do
+    if candidate == thread then
+      dstate.threads_by_id[thread_id] = nil
+    end
+  end
   for index = #dstate.threads, 1, -1 do
     if dstate.threads[index].id == thread.id then
       table.remove(dstate.threads, index)
@@ -373,10 +377,19 @@ end
 ---@param dstate table
 ---@param comment_id string
 local function remove_comment_from_threads(dstate, comment_id)
-  for _, thread in ipairs(dstate.threads) do
+  for index = #dstate.threads, 1, -1 do
+    local thread = dstate.threads[index]
     remove_from_thread(thread, comment_id)
     maybe_drop_thread(dstate, thread)
   end
+end
+
+---@param comment commentry.DraftComment
+---@param reason string
+local function mark_unresolved(comment, reason)
+  comment.status = "unresolved"
+  comment.unresolved_reason = reason
+  comment.updated_at = timestamp()
 end
 
 ---@param bufnr integer
@@ -424,6 +437,7 @@ local function apply_store(diff_id, store)
           created_at = comment.created_at or timestamp(),
           updated_at = comment.updated_at or comment.created_at or timestamp(),
           status = comment.status,
+          unresolved_reason = comment.unresolved_reason,
           line_content = comment.line_content,
           comment_type = comment.comment_type or "note",
           line_start = line_start,
@@ -481,6 +495,7 @@ local function runtime_comment_to_store(context_id, comment)
     created_at = comment.created_at,
     updated_at = comment.updated_at,
     status = comment.status,
+    unresolved_reason = comment.unresolved_reason,
     line_content = comment.line_content,
   }
 end
@@ -601,8 +616,7 @@ local function reconcile_for_context(diff_id, context, opts)
       and comment.status ~= "unresolved"
     then
       unresolved[#unresolved + 1] = comment.id
-      comment.status = "unresolved"
-      comment.updated_at = timestamp()
+      mark_unresolved(comment, in_range and "line_changed" or "line_out_of_range")
     end
   end
   if #unresolved == 0 and hydrated == 0 then
@@ -611,10 +625,7 @@ local function reconcile_for_context(diff_id, context, opts)
 
   mark_dirty(diff_id)
   for _, comment_id in ipairs(unresolved) do
-    for _, thread in ipairs(dstate.threads) do
-      remove_from_thread(thread, comment_id)
-      maybe_drop_thread(dstate, thread)
-    end
+    remove_comment_from_threads(dstate, comment_id)
   end
   if #unresolved > 0 and not opts.silent then
     Util.warn(("Marked %d comment(s) unresolved after diff changes"):format(#unresolved))
@@ -733,6 +744,40 @@ local function review_snapshots_for_view(view)
   return type(snapshots) == "table" and snapshots or {}, entries
 end
 
+---@param dstate table
+---@return table<string, { active: integer, unresolved: integer }>
+local function comment_counts_by_path(dstate)
+  local counts = {}
+  for _, comment in ipairs(dstate.comments) do
+    local path = comment.file_path
+    if type(path) == "string" and path ~= "" then
+      counts[path] = counts[path] or { active = 0, unresolved = 0 }
+      local key = comment.status == "unresolved" and "unresolved" or "active"
+      counts[path][key] = counts[path][key] + 1
+    end
+  end
+  return counts
+end
+
+---@param diff_id string
+---@param view table
+---@param entries? table[]
+local function render_file_panel(diff_id, view, entries)
+  if type(Diffview.render_file_review_panel) ~= "function" then
+    return
+  end
+  local dstate = diff_state(diff_id)
+  entries = entries or (type(Diffview.list_view_entries) == "function" and Diffview.list_view_entries(view) or {})
+  if #entries == 0 and type(view) == "table" and type(view.cur_entry) == "table" then
+    entries = { view.cur_entry }
+  end
+  local reviewed_by_entry = {}
+  for _, entry in ipairs(entries) do
+    reviewed_by_entry[entry] = entry_is_reviewed(dstate, entry)
+  end
+  Diffview.render_file_review_panel(view, reviewed_by_entry, comment_counts_by_path(dstate))
+end
+
 ---@param view table
 ---@return boolean
 function M.refresh_review_state(view)
@@ -745,14 +790,8 @@ function M.refresh_review_state(view)
   end
   local dstate = diff_state(diff_id)
   local snapshots, entries = review_snapshots_for_view(view)
-  local reviewed_by_entry = {}
   dstate.review_snapshots_by_entry = snapshots
-  for _, entry in ipairs(entries) do
-    reviewed_by_entry[entry] = entry_is_reviewed(dstate, entry)
-  end
-  if type(Diffview.render_file_review_panel) == "function" then
-    Diffview.render_file_review_panel(view, reviewed_by_entry)
-  end
+  render_file_panel(diff_id, view, entries)
   return true
 end
 
@@ -819,8 +858,7 @@ local function reconcile_review_for_view(view)
   for _, comment in ipairs(dstate.comments) do
     if comment.status ~= "unresolved" then
       if next(review_paths) ~= nil and review_paths[comment.file_path] ~= true then
-        comment.status = "unresolved"
-        comment.updated_at = timestamp()
+        mark_unresolved(comment, "file_missing")
         missing_comment_ids[#missing_comment_ids + 1] = comment.id
       else
         local key = ("%s\31%s"):format(comment.file_path, comment.line_side or "head")
@@ -874,8 +912,7 @@ local function reconcile_review_for_view(view)
         for _, comment_id in ipairs(target.comment_ids) do
           local comment = dstate.comments_by_id[comment_id]
           if type(comment) == "table" and comment.status ~= "unresolved" then
-            comment.status = "unresolved"
-            comment.updated_at = timestamp()
+            mark_unresolved(comment, "file_missing")
             remove_comment_from_threads(dstate, comment_id)
           end
         end
@@ -905,8 +942,7 @@ local function reconcile_review_for_view(view)
         for _, comment_id in ipairs(target.comment_ids) do
           local comment = dstate.comments_by_id[comment_id]
           if type(comment) == "table" and comment.status ~= "unresolved" then
-            comment.status = "unresolved"
-            comment.updated_at = timestamp()
+            mark_unresolved(comment, "side_missing")
             remove_comment_from_threads(dstate, comment_id)
           end
         end
@@ -934,6 +970,7 @@ local function reconcile_review_for_view(view)
     end
   end
 
+  render_file_panel(diff_id, view)
   if unresolved_total > 0 then
     Util.warn(("Marked %d comment(s) unresolved after diff changes"):format(unresolved_total))
   end
@@ -968,6 +1005,7 @@ local function render_for_context(context)
   if unresolved_total > 0 then
     Util.warn(("Marked %d comment(s) unresolved after diff changes"):format(unresolved_total))
   end
+  render_file_panel(diff_id, context.view)
   if reconciled then
     persist_for_view(diff_id, context.view, "Failed to persist reconciled comments")
   end
@@ -995,13 +1033,28 @@ local function active_comments_for_line(context)
   return comments
 end
 
+---@param value string|nil
+---@return "active"|"unresolved"|"all"|nil, string|nil
+local function normalize_comment_filter(value)
+  local filter = type(value) == "string" and vim.trim(value) or ""
+  if filter == "" then
+    return "active", nil
+  end
+  if filter == "active" or filter == "unresolved" or filter == "all" then
+    return filter, nil
+  end
+  return nil, "Comment filter must be one of: active, unresolved, all"
+end
+
 ---@param diff_id string
+---@param filter "active"|"unresolved"|"all"
 ---@return commentry.DraftComment[]
-local function listable_comments_for_review(diff_id)
+local function listable_comments_for_review(diff_id, filter)
   local dstate = diff_state(diff_id)
   local comments = {}
   for _, comment in ipairs(dstate.comments) do
-    if comment.status ~= "unresolved" then
+    local unresolved = comment.status == "unresolved"
+    if filter == "all" or filter == "unresolved" and unresolved or filter == "active" and not unresolved then
       comments[#comments + 1] = comment
     end
   end
@@ -1056,7 +1109,25 @@ local function list_entry_label(comment)
     preview = preview:sub(1, 69) .. "..."
   end
   local comment_type = comment.comment_type or "note"
-  return ("%s @ %s [%s] %s"):format(comment.file_path, comment_location_label(comment), comment_type, preview)
+  if comment.status ~= "unresolved" then
+    return ("%s @ %s [%s] %s"):format(comment.file_path, comment_location_label(comment), comment_type, preview)
+  end
+
+  local reason = type(comment.unresolved_reason) == "string" and comment.unresolved_reason:gsub("_", " ")
+    or "anchor changed"
+  local anchor = type(comment.line_content) == "string" and comment.line_content:gsub("\n", " ") or ""
+  if #anchor > 48 then
+    anchor = anchor:sub(1, 45) .. "..."
+  end
+  local suffix = anchor ~= "" and (" | was: %s"):format(anchor) or ""
+  return ("! %s @ %s [%s; %s] %s%s"):format(
+    comment.file_path,
+    comment_location_label(comment),
+    comment_type,
+    reason,
+    preview,
+    suffix
+  )
 end
 
 ---@class commentry.ListCommentPickerItem
@@ -1135,15 +1206,17 @@ local function jump_to_comment(comment)
   return true
 end
 
+---@param command? string
 ---@return boolean, string|nil
-local function snacks_picker_available()
+local function snacks_picker_available(command)
+  command = command or "list-comments"
   local ok, snacks = pcall(require, "snacks")
   if not ok then
-    return false, "snacks.nvim is required for :Commentry list-comments"
+    return false, ("snacks.nvim is required for :Commentry %s"):format(command)
   end
   local picker = snacks and snacks.picker or nil
   if type(picker) ~= "table" or type(picker.select) ~= "function" then
-    return false, "snacks.nvim picker.select is required for :Commentry list-comments"
+    return false, ("snacks.nvim picker.select is required for :Commentry %s"):format(command)
   end
   return true, nil
 end
@@ -1439,8 +1512,14 @@ function M.refresh_hover_preview()
   return true
 end
 
---- list comments.
-function M.list_comments()
+---@param cmd_args? string
+function M.list_comments(cmd_args)
+  local filter, filter_err = normalize_comment_filter(cmd_args)
+  if not filter then
+    Util.error(filter_err)
+    return
+  end
+
   local context, context_err = context_for_list_comments()
   if not context then
     Util.error(context_err or "No diffview context")
@@ -1458,9 +1537,12 @@ function M.list_comments()
     return
   end
   M.reconcile_review(context.view)
-  local comments = listable_comments_for_review(diff_id)
+  local comments = listable_comments_for_review(diff_id, filter)
   if #comments == 0 then
-    Util.info("No draft comments for current review")
+    local empty_message = filter == "unresolved" and "No unresolved comments for current review"
+      or filter == "all" and "No comments for current review"
+      or "No draft comments for current review"
+    Util.info(empty_message)
     return
   end
 
@@ -1551,7 +1633,10 @@ function M.list_comments()
 
       if #items == 0 then
         picker:close()
-        Util.info("No draft comments for current review")
+        local empty_message = filter == "unresolved" and "No unresolved comments for current review"
+          or filter == "all" and "No comments for current review"
+          or "No draft comments for current review"
+        Util.info(empty_message)
         return
       end
 
@@ -1563,8 +1648,12 @@ function M.list_comments()
     item.text = list_picker_label(item)
   end
 
+  local title = filter == "unresolved" and "Commentry unresolved comments"
+    or filter == "all" and "Commentry all comments"
+    or "Commentry draft comments"
+
   snacks.picker.pick({
-    title = "Commentry draft comments",
+    title = title,
     items = items,
     preview = "file",
     layout = {
@@ -1620,6 +1709,114 @@ function M.list_comments()
         return
       end
       jump_to_comment(choice.comment or choice)
+    end,
+  })
+end
+
+---@param command? vim.api.keyset.create_user_command.command_args
+function M.reattach_comment(command)
+  local context, context_err = current_context()
+  if not context then
+    Util.error(context_err or "No diffview context")
+    return
+  end
+
+  local snacks_ok, snacks_err = snacks_picker_available("reattach")
+  if not snacks_ok then
+    Util.error(snacks_err)
+    return
+  end
+
+  local diff_id = require_context_id(context.view, "Unable to resolve review context")
+  if not diff_id then
+    return
+  end
+  M.reconcile_review(context.view)
+  local unresolved = listable_comments_for_review(diff_id, "unresolved")
+  if #unresolved == 0 then
+    Util.info("No unresolved comments for current review")
+    return
+  end
+
+  command = type(command) == "table" and command or {}
+  local explicit_range = type(command.range) == "number" and command.range > 0
+  local target_start = explicit_range and tonumber(command.line1) or context.line_number
+  local explicit_end = explicit_range and tonumber(command.line2) or nil
+  if not is_integer(target_start) or explicit_end ~= nil and not is_integer(explicit_end) then
+    Util.error("Invalid reattachment range")
+    return
+  end
+
+  local items = list_picker_items(unresolved)
+  for _, item in ipairs(items) do
+    item.text = list_picker_label(item)
+  end
+
+  local root = project_root_for_view(context.view)
+  local snacks = require("snacks")
+  snacks.picker.pick({
+    title = "Reattach unresolved comment",
+    items = items,
+    preview = "file",
+    layout = {
+      preset = "default",
+    },
+    cwd = root,
+    format = function(item)
+      return { { item.text or list_picker_label(item) } }
+    end,
+    confirm = function(_, item)
+      local choice = item and (item.item or item) or nil
+      local target = choice and (choice.comment or choice) or nil
+      if type(target) ~= "table" or target.status ~= "unresolved" then
+        return
+      end
+      if not vim.api.nvim_buf_is_valid(context.bufnr) then
+        Util.error("Reattachment target buffer is no longer valid")
+        return
+      end
+
+      local old_start = line_start_for(target) or 1
+      local old_end = line_end_for(target) or old_start
+      local target_end = explicit_end or target_start + math.max(old_end - old_start, 0)
+      local line_count = vim.api.nvim_buf_line_count(context.bufnr)
+      if target_end > line_count then
+        Util.error(("Reattachment range L%d-L%d exceeds the target buffer"):format(target_start, target_end))
+        return
+      end
+
+      local anchor, anchor_err = M.build_anchor(context.file_path, target_start, context.line_side, target_end)
+      if not anchor then
+        Util.error(anchor_err or "Invalid reattachment anchor")
+        return
+      end
+
+      local updated = vim.deepcopy(target)
+      updated.file_path = anchor.file_path
+      updated.line_number = anchor.line_number
+      updated.line_start = anchor.line_start
+      updated.line_end = anchor.line_end
+      updated.line_side = anchor.line_side
+      updated.line_content = line_text_at(context.bufnr, anchor.line_start)
+      updated.status = nil
+      updated.unresolved_reason = nil
+      updated.updated_at = timestamp()
+
+      local dstate = diff_state(diff_id)
+      remove_comment_from_threads(dstate, updated.id)
+      local thread, thread_err = ensure_thread(diff_id, anchor)
+      if not thread then
+        Util.error(thread_err or "Failed to create reattached comment thread")
+        return
+      end
+      if not vim.tbl_contains(thread.comment_ids, updated.id) then
+        thread.comment_ids[#thread.comment_ids + 1] = updated.id
+      end
+      upsert_comment(dstate, updated)
+      mark_dirty(diff_id)
+      render_for_context(context)
+      persist_for_view(diff_id, context.view, "Failed to persist reattached comment")
+      Util.info(("Reattached comment to `%s` %s"):format(updated.file_path, comment_location_label(updated)))
     end,
   })
 end

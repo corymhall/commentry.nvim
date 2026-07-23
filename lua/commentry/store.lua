@@ -88,6 +88,9 @@ local function validate_comment(comment, errors, index, allowed_comment_types, a
   if comment.status ~= nil and type(comment.status) ~= "string" then
     push_error(errors, ("comments[%d].status must be a string when provided"):format(index))
   end
+  if comment.unresolved_reason ~= nil and type(comment.unresolved_reason) ~= "string" then
+    push_error(errors, ("comments[%d].unresolved_reason must be a string when provided"):format(index))
+  end
   if comment.line_content ~= nil and type(comment.line_content) ~= "string" then
     push_error(errors, ("comments[%d].line_content must be a string when provided"):format(index))
   end

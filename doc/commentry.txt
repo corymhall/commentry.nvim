@@ -15,7 +15,7 @@ Required dependencies:
   (install one; both expose the `diffview` module and commands)
 
 Optional integrations:                           *commentry.dependencies*
-- `snacks.nvim` for `:Commentry list-comments`
+- `snacks.nvim` for `:Commentry list-comments` and `:Commentry reattach`
 - Sidekick runtime for `:Commentry send-to-agent`
 
 SETUP                                             *commentry.setup*
@@ -137,9 +137,20 @@ COMMANDS                                          *commentry.commands*
 :Commentry add-range-comment
   Create a range comment from the current visual selection.
 
-:Commentry list-comments
-  List jumpable active draft comments for the current review.
+:Commentry list-comments [active|unresolved|all]
+  List draft comments for the current review. Defaults to active comments.
+  Unresolved rows include the stale anchor text and reconciliation reason.
+  Delete the current or selected drafts with `<C-d>` / `<M-d>`.
   Requires `snacks.nvim`.
+
+:Commentry reattach
+  Reattach an unresolved draft at the current diff line. Select the draft from
+  the picker after running the command at its new destination. Normal
+  invocation preserves the previous range length. A command range, for example
+  `:'<,'>Commentry reattach`, uses that exact destination range.
+
+:Commentry help
+  Open the native `commentry` vimdoc.
 
 :Commentry set-comment-type
   Set default or per-comment type.
@@ -191,6 +202,27 @@ COMMANDS                                          *commentry.commands*
     human readability and low token overhead
   - no persisted send history/receipts/retry queue in v1
 
+UNRESOLVED COMMENTS                               *commentry.unresolved*
+
+When code changes move or replace an anchored line, Commentry keeps the draft
+but marks it unresolved. Unresolved drafts do not render as cards and are not
+included in exports or agent handoff payloads.
+
+Recovery workflow:
+1. Run `:Commentry list-comments unresolved` to inspect the old file, side,
+   line/range, reconciliation reason, saved anchor text, and body.
+2. To discard feedback that no longer applies, use `<C-d>` for the current row
+   or `<M-d>` for selected rows and confirm permanent deletion.
+3. To recover feedback, move to the replacement diff line and run
+   `:Commentry reattach`. Select the unresolved draft to move it there.
+4. For a replacement range, visually select it and run
+   `:'<,'>Commentry reattach`.
+
+Reattachment preserves the comment id, body, type, creation time, and normal
+range length. It replaces the file/side/line anchor, captures current line
+content, clears unresolved state, recreates the anchor thread, and persists
+immediately.
+
 V1 BOUNDARIES                                     *commentry.v1-boundaries*
 
 - No persisted outbound send log/history
@@ -213,9 +245,12 @@ PERSISTENCE NOTES                                 *commentry.persistence*
   reviewed when their displayed before/after content is identical.
 - Changing either displayed endpoint makes that entry unreviewed. Returning to
   an exact previously reviewed snapshot restores its reviewed state.
-- Commentry-owned `[reviewed]` file marks and `[partial]` directory marks are
-  rendered in the Diffview file panel. They do not use Diffview+ selections
-  and therefore never become batch stage/restore targets.
+- Commentry-owned `[reviewed]` file marks, active/unresolved per-file comment
+  counts, and `[partial]` directory marks are rendered in the Diffview file
+  panel. Combined narrow-row badges use `R` for reviewed, `c` for active
+  comments, and `u` for unresolved comments (for example `[R 2c 1u]`). They do
+  not use Diffview+ selections and therefore never become batch stage/restore
+  targets.
 - Comment add/edit/range opens a floating multiline editor:
   - `Enter` inserts newline
   - `Ctrl-s` saves
@@ -232,6 +267,9 @@ TROUBLESHOOTING                               *commentry.troubleshooting*
   `commentry.json` to start a new draft store.
 - `:Commentry list-comments` is unavailable:
   install `snacks.nvim`, then rerun `:checkhealth commentry`.
+- A comment disappeared after unstaged code changed:
+  run `:Commentry list-comments unresolved`. Delete it if it no longer applies,
+  or move to the replacement line and run `:Commentry reattach`.
 - Agent handoff is unavailable:
   confirm Sidekick is installed, run `:Commentry send-to-agent` from an active
   review context, and use Sidekick's selector to attach to or start an agent.

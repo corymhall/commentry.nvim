@@ -139,11 +139,11 @@ function M.check()
 
   local snacks_ok, snacks = pcall(require, "snacks")
   if not snacks_ok then
-    warn("snacks.nvim not installed: :Commentry list-comments is unavailable")
+    warn("snacks.nvim not installed: :Commentry list-comments and :Commentry reattach are unavailable")
   elseif type(snacks.picker) ~= "table" or type(snacks.picker.select) ~= "function" then
     warn("snacks.nvim installed but picker.select is unavailable")
   else
-    ok("snacks.nvim picker.select is available for :Commentry list-comments")
+    ok("snacks.nvim picker.select is available for :Commentry list-comments and :Commentry reattach")
   end
 
   store_writable_health()

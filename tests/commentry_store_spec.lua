@@ -180,6 +180,21 @@ describe("commentry.store", function()
     assert.is_true(combined:find("reviewed_changes", 1, true) ~= nil)
   end)
 
+  it("validates optional unresolved reasons", function()
+    local store = sample_store("/tmp/project")
+    store.comments[1].status = "unresolved"
+    store.comments[1].unresolved_reason = "line_changed"
+
+    local ok, errors = Store.validate(store)
+    assert.is_true(ok)
+    assert.are.same({}, errors)
+
+    store.comments[1].unresolved_reason = false
+    local invalid, invalid_errors = Store.validate(store)
+    assert.is_false(invalid)
+    assert.is_true(table.concat(invalid_errors, "\n"):find("unresolved_reason", 1, true) ~= nil)
+  end)
+
   it("accepts configured custom comment types", function()
     local Config = require("commentry.config")
     local original_comment_types = Config.comment_types

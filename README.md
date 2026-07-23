@@ -34,7 +34,7 @@ Required:
 
 Optional integrations:
 
-- `folke/snacks.nvim` for `:Commentry list-comments`
+- `folke/snacks.nvim` for `:Commentry list-comments` and `:Commentry reattach`
 - a Sidekick runtime for `:Commentry send-to-agent`
 
 ## Setup
@@ -73,7 +73,9 @@ require("commentry").setup({
 
 - `:Commentry open` opens a diffview for local changes (shortcut).
 - `:Commentry add-range-comment` creates a range comment from the current visual selection.
-- `:Commentry list-comments` opens a Snacks picker for active draft comments across the current review, with source preview and in-picker delete (`<C-d>` current, `<M-d>` selected). Requires `snacks.nvim`.
+- `:Commentry list-comments [active|unresolved|all]` opens a Snacks picker for draft comments across the current review. The default is `active`; unresolved rows include the stale anchor and reason. Delete the current or selected drafts with `<C-d>` / `<M-d>`. Requires `snacks.nvim`.
+- `:Commentry reattach` reattaches a selected unresolved comment at the current diff line. A command range such as `:'<,'>Commentry reattach` uses that exact destination range; normal invocation preserves the comment's previous range length.
+- `:Commentry help` opens the native `commentry` vimdoc.
 - `:Commentry set-comment-type` sets default or per-comment type (`note`, `suggestion`, `issue`, `praise`).
 - `:Commentry toggle-file-reviewed` toggles reviewed status for the current file's exact displayed change.
 - `:Commentry next-unreviewed` jumps to the next unreviewed diff entry in panel order.
@@ -187,7 +189,8 @@ require("commentry").setup({
 - Range comments render start/mid/end gutter signs (`╭`, `│`, `╰`) with subtle line tinting to show covered lines.
 - Reviewed state is content-addressed from each file's base/head Git blob and mode identities. It survives unstaged -> staged -> committed -> pushed transitions when the displayed before/after content is unchanged, regardless of commit IDs or Diffview range syntax.
 - A file is unreviewed when either displayed endpoint changes. Returning to an exact previously reviewed before/after snapshot restores its reviewed state.
-- Commentry renders `[reviewed]` marks in the Diffview file panel, `[partial]` on partially reviewed directories, and a lightweight `[reviewed]` / `[unreviewed]` indicator in active diff buffers. These marks are independent from Diffview+ batch selections.
+- Commentry renders `[reviewed]` marks in the Diffview file panel, `[partial]` on partially reviewed directories, per-file active comment counts, and separate unresolved counts. When several states share a narrow panel row, the compact badge uses `R` (reviewed), `c` (active comments), and `u` (unresolved), for example `[R 2c 1u]`. A lightweight `[reviewed]` / `[unreviewed]` indicator also appears in active diff buffers. These marks are independent from Diffview+ batch selections.
+- When code changes invalidate an anchor, the draft remains persisted with an unresolved reason instead of being exported or sent. Use `:Commentry list-comments unresolved` to inspect or permanently delete it, or move to the new destination and run `:Commentry reattach`.
 - Send flow is explicit: open/attach a review (`:Commentry open` or auto-attach), enable the generic agent integration, then run `:Commentry send-to-agent`.
 - Sidekick owns agent selection, attachment, terminal creation, display/focus, and prompt submission. Commentry only builds the review payload and delegates it.
 - Agent sends require an active Commentry review context. Running them outside an attached review buffer/context fails.
@@ -215,7 +218,8 @@ This bootstraps a clean Neovim with only commentry + diffview loaded.
   reviewed-file persistence now uses `reviewed_changes` snapshots rather than the former `file_reviews` boolean map. Remove the context's `commentry.json` if it predates this format.
 - Wrong context:
   review context is branch-scoped (`<root>::review::branch::<branch-name>`) and shared across diff ranges on that branch.
-  Comments become stale/outdated
-  when anchor reconciliation detects code drift. Use `:Commentry debug-store` to confirm the active context id/path.
+  Use `:Commentry debug-store` to confirm the active context id/path.
+- Comment disappeared after unstaged code changed:
+  anchor reconciliation keeps the draft but marks it unresolved. Run `:Commentry list-comments unresolved` to inspect or delete it. To recover it, move to the replacement line and run `:Commentry reattach`.
 - Agent handoff is unavailable:
   confirm Sidekick is installed, run `:Commentry send-to-agent` from an active review context, and use Sidekick's selector to attach to or start an agent.

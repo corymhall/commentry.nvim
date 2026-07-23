@@ -987,15 +987,17 @@ describe("commentry command routing", function()
     assert.is_true(vim.tbl_contains(next_matches, "next-unreviewed"))
   end)
 
-  it("routes list-comments with extra args without affecting handler selection", function()
+  it("passes list-comments filters to the picker", function()
     local called = 0
+    local captured_args = nil
     vim.api.nvim_create_autocmd = function()
       return 1
     end
 
     package.loaded["commentry.comments"] = {
-      list_comments = function()
+      list_comments = function(args)
         called = called + 1
+        captured_args = args
       end,
       set_comment_type = function()
         return
@@ -1020,9 +1022,47 @@ describe("commentry command routing", function()
 
     package.loaded["commentry.commands"] = nil
     local Commands = require("commentry.commands")
-    Commands.cmd({ args = "list-comments file.lua:1-3" })
+    Commands.cmd({ args = "list-comments unresolved" })
 
     assert.are.same(1, called)
+    assert.are.same("unresolved", captured_args)
+  end)
+
+  it("routes reattachment args and completes recovery commands and filters", function()
+    local captured = nil
+    vim.api.nvim_create_autocmd = function()
+      return 1
+    end
+
+    package.loaded["commentry.comments"] = {
+      list_comments = function() end,
+      reattach_comment = function(args)
+        captured = args
+      end,
+      set_comment_type = function() end,
+      export_comments = function() end,
+      render_current_buffer = function() end,
+    }
+    package.loaded["commentry.config"] = {
+      augroup = 1,
+      diffview = { enabled = true },
+      keymaps = { add_comment = "mc", edit_comment = "me", delete_comment = "md", set_comment_type = "mt" },
+    }
+    package.loaded["commentry.diffview"] = {
+      open = function()
+        return true
+      end,
+    }
+
+    package.loaded["commentry.commands"] = nil
+    local Commands = require("commentry.commands")
+    local args = { args = "reattach", range = 2, line1 = 4, line2 = 6 }
+    Commands.cmd(args)
+
+    assert.are.same(args, captured)
+    assert.are.same({ "unresolved" }, Commands.complete("Commentry list-comments un"))
+    assert.is_true(vim.tbl_contains(Commands.complete("Commentry re"), "reattach"))
+    assert.is_true(vim.tbl_contains(Commands.complete("Commentry he"), "help"))
   end)
 
   it("passes resolved review context when opening commit range views", function()
