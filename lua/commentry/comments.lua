@@ -2408,6 +2408,20 @@ end
 ---@param context table
 ---@return integer, integer
 local function visual_line_range(context)
+  local mode = vim.fn.mode(1)
+  local mode_prefix = type(mode) == "string" and mode:sub(1, 1) or ""
+  if mode_prefix == "v" or mode_prefix == "V" or mode_prefix == "\22" then
+    -- Visual marks are updated only after Visual mode ends. During a Lua
+    -- Visual-mode mapping, use the live selection start and cursor instead.
+    local visual_pos = vim.fn.getpos("v")
+    local visual_line = tonumber(visual_pos[2]) or 0
+    local cursor_line = tonumber(context.line_number) or 0
+    local visual_buf = tonumber(visual_pos[1]) or 0
+    if visual_line > 0 and cursor_line > 0 and (visual_buf == 0 or visual_buf == context.bufnr) then
+      return math.min(visual_line, cursor_line), math.max(visual_line, cursor_line)
+    end
+  end
+
   local start_pos = vim.fn.getpos("'<")
   local end_pos = vim.fn.getpos("'>")
   local start_line = tonumber(start_pos[2]) or 0

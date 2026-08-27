@@ -111,6 +111,7 @@ describe("commentry.comments persistence", function()
   local original_ui_input
   local original_ui_select
   local original_getpos
+  local original_mode
   local original_snacks
   local original_util
   local original_snacks_picker_util
@@ -136,6 +137,7 @@ describe("commentry.comments persistence", function()
     original_ui_input = vim.ui.input
     original_ui_select = vim.ui.select
     original_getpos = vim.fn.getpos
+    original_mode = vim.fn.mode
     original_snacks = package.loaded["snacks"]
     original_snacks_picker_util = package.loaded["snacks.picker.util"]
     original_util = package.loaded["commentry.util"]
@@ -150,6 +152,7 @@ describe("commentry.comments persistence", function()
     vim.ui.input = original_ui_input
     vim.ui.select = original_ui_select
     vim.fn.getpos = original_getpos
+    vim.fn.mode = original_mode
     package.loaded["snacks"] = original_snacks
     package.loaded["snacks.picker.util"] = original_snacks_picker_util
     package.loaded["commentry.util"] = original_util
@@ -1257,11 +1260,12 @@ describe("commentry.comments persistence", function()
     assert.are.same(0, #writes[3].threads)
   end)
 
-  it("creates range comments from visual line selection", function()
+  it("creates and renders range comments from the live visual line selection", function()
     local writes = {}
+    local rendered = nil
     local context = {
       file_path = "file.lua",
-      line_number = 4,
+      line_number = 7,
       line_side = "head",
       bufnr = 1,
       view = { git_root = "/tmp/project" },
@@ -1284,8 +1288,8 @@ describe("commentry.comments persistence", function()
         current_file_context = function()
           return context
         end,
-        render_comment_markers = function()
-          return
+        render_comment_markers = function(_, visible)
+          rendered = vim.deepcopy(visible)
         end,
       },
     })
@@ -1296,11 +1300,15 @@ describe("commentry.comments persistence", function()
     vim.api.nvim_buf_get_lines = function()
       return { "line text" }
     end
+    vim.fn.mode = function()
+      return "V"
+    end
     vim.fn.getpos = function(mark)
-      if mark == "'<" then
+      if mark == "v" then
         return { 1, 4, 1, 0 }
       end
-      return { 1, 7, 1, 0 }
+      -- These stale marks must not replace the live Visual selection.
+      return { 1, 3, 1, 0 }
     end
     comments._set_input_provider_for_tests(function(_, cb)
       cb("Range note", "note")
@@ -1315,6 +1323,9 @@ describe("commentry.comments persistence", function()
     assert.are.same(1, #writes[1].threads)
     assert.are.same(4, writes[1].threads[1].line_start)
     assert.are.same(7, writes[1].threads[1].line_end)
+    assert.are.same(1, #rendered)
+    assert.are.same(4, rendered[1].line_start)
+    assert.are.same(7, rendered[1].line_end)
   end)
 
   it("sets selected comment type for a line comment and persists", function()
