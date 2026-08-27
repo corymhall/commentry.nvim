@@ -1832,10 +1832,12 @@ describe("commentry.comments persistence", function()
     assert.are.same(entries[2], focused_entry)
   end)
 
-  it("lists draft comments and jumps to selected entry line", function()
+  it("lists draft comments with rendered file previews and jumps to selected entry line", function()
     local moved_cursor = nil
     local captured_items = nil
     local captured_opts = nil
+    local previewed_item = nil
+    local rendered_preview = nil
 
     local comments = load_with_stubs({
       store = {
@@ -1903,8 +1905,8 @@ describe("commentry.comments persistence", function()
             view = { git_root = "/tmp/project" },
           }
         end,
-        render_comment_markers = function()
-          return
+        render_comment_markers = function(bufnr, visible)
+          rendered_preview = { bufnr = bufnr, comments = visible }
         end,
         render_hover_preview = function()
           return
@@ -1917,6 +1919,11 @@ describe("commentry.comments persistence", function()
 
     package.loaded["snacks"] = {
       picker = {
+        preview = {
+          file = function(ctx)
+            previewed_item = ctx.item
+          end,
+        },
         pick = function(opts)
           captured_items = opts.items
           captured_opts = opts
@@ -1946,7 +1953,16 @@ describe("commentry.comments persistence", function()
     assert.are.same({ 8, 0 }, captured_items[2].pos)
     assert.are.same("Commentry draft comments", captured_opts.title)
     assert.is_true(type(captured_opts.format) == "function")
-    assert.are.same("file", captured_opts.preview)
+    assert.is_true(type(captured_opts.preview) == "function")
+    captured_opts.preview({ item = captured_items[1], buf = 42 })
+    assert.are.same(captured_items[1], previewed_item)
+    assert.are.same(42, rendered_preview.bufnr)
+    assert.are.same(
+      { "c1" },
+      vim.tbl_map(function(comment)
+        return comment.id
+      end, rendered_preview.comments)
+    )
     assert.are.same("default", captured_opts.layout.preset)
     assert.is_true(type(captured_opts.actions.delete_comment) == "function")
     assert.is_true(type(captured_opts.actions.delete_comment_selected) == "function")

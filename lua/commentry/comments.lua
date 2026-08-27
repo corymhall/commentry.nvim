@@ -1134,6 +1134,7 @@ end
 ---@field comment commentry.DraftComment
 ---@field file string
 ---@field pos integer[]
+---@field buf? integer
 
 ---@param comments commentry.DraftComment[]
 ---@return commentry.ListCommentPickerItem[]
@@ -1547,6 +1548,11 @@ function M.list_comments(cmd_args)
   end
 
   local items = list_picker_items(comments)
+  if type(Diffview.file_side_buffer) == "function" then
+    for _, item in ipairs(items) do
+      item.buf = Diffview.file_side_buffer(context.view, item.comment.file_path, item.comment.line_side)
+    end
+  end
   local dstate = diff_state(diff_id)
   local root = project_root_for_view(context.view)
   local snacks = require("snacks")
@@ -1560,6 +1566,34 @@ function M.list_comments(cmd_args)
       return nil
     end
     return target
+  end
+
+  --- Render the file first, then add the same comment cards used by Diffview.
+  ---@param preview_context any
+  local function preview_comment(preview_context)
+    local file_previewer = snacks.picker.preview and snacks.picker.preview.file or nil
+    if type(file_previewer) ~= "function" then
+      return
+    end
+    file_previewer(preview_context)
+
+    local target = picker_item_comment(preview_context.item)
+    local bufnr = preview_context.buf
+    if not target or type(bufnr) ~= "number" or target.status == "unresolved" then
+      return
+    end
+
+    local visible = {}
+    for _, comment in ipairs(dstate.comments) do
+      if
+        comment.status ~= "unresolved"
+        and comment.file_path == target.file_path
+        and comment.line_side == target.line_side
+      then
+        visible[#visible + 1] = comment
+      end
+    end
+    Diffview.render_comment_markers(bufnr, visible)
   end
 
   ---@param action string
@@ -1655,7 +1689,7 @@ function M.list_comments(cmd_args)
   snacks.picker.pick({
     title = title,
     items = items,
-    preview = "file",
+    preview = preview_comment,
     layout = {
       preset = "default",
     },

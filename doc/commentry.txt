@@ -138,9 +138,10 @@ COMMANDS                                          *commentry.commands*
   Create a range comment from the current visual selection.
 
 :Commentry list-comments [active|unresolved|all]
-  List draft comments for the current review. Defaults to active comments.
-  Unresolved rows include the stale anchor text and reconciliation reason.
-  Delete the current or selected drafts with `<C-d>` / `<M-d>`.
+  List draft comments for the current review. The file preview renders active
+  comments with the same cards and range marks as Diffview. Defaults to active
+  comments. Unresolved rows include the stale anchor text and reconciliation
+  reason. Delete the current or selected drafts with `<C-d>` / `<M-d>`.
   Requires `snacks.nvim`.
 
 :Commentry reattach

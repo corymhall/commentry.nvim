@@ -684,6 +684,36 @@ function M.list_view_files(view)
 end
 
 ---@param view table
+---@param path string
+---@param line_side string
+---@return integer|nil
+function M.file_side_buffer(view, path, line_side)
+  if type(view) ~= "table" or type(path) ~= "string" then
+    return nil
+  end
+  local side_key = line_side == "base" and "a" or line_side == "head" and "b" or nil
+  if not side_key then
+    return nil
+  end
+
+  for _, entry in ipairs(M.list_view_entries(view)) do
+    if entry.path == path and type(entry.layout) == "table" then
+      local slot = entry.layout[side_key]
+      local bufnr = slot and slot.file and slot.file.bufnr or nil
+      if type(bufnr) == "number" and vim.api.nvim_buf_is_valid(bufnr) then
+        if not vim.api.nvim_buf_is_loaded(bufnr) then
+          pcall(vim.fn.bufload, bufnr)
+        end
+        if vim.api.nvim_buf_is_loaded(bufnr) then
+          return bufnr
+        end
+      end
+    end
+  end
+  return nil
+end
+
+---@param view table
 ---@param entry table
 ---@return boolean, string|nil
 function M.focus_entry(view, entry)

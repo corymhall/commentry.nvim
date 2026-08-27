@@ -259,13 +259,21 @@ describe("commentry.diffview comment cards", function()
     }, marks)
   end)
 
-  it("lists files from view and focuses target path", function()
+  it("lists files, resolves loaded side buffers, and focuses a target path", function()
     local focused = nil
     package.loaded["commentry.diffview"] = nil
     local Diffview = require("commentry.diffview")
+    local base_buf = vim.api.nvim_create_buf(false, true)
+    local head_buf = vim.api.nvim_create_buf(false, true)
 
     local files = {
-      { path = "a.lua" },
+      {
+        path = "a.lua",
+        layout = {
+          a = { file = { bufnr = base_buf } },
+          b = { file = { bufnr = head_buf } },
+        },
+      },
       { path = "b.lua" },
     }
     local view = {
@@ -289,6 +297,9 @@ describe("commentry.diffview comment cards", function()
     local ok, err = Diffview.focus_file(view, "b.lua")
 
     assert.are.same({ "a.lua", "b.lua" }, paths)
+    assert.are.same(base_buf, Diffview.file_side_buffer(view, "a.lua", "base"))
+    assert.are.same(head_buf, Diffview.file_side_buffer(view, "a.lua", "head"))
+    assert.is_nil(Diffview.file_side_buffer(view, "b.lua", "head"))
     assert.is_true(ok)
     assert.is_nil(err)
     assert.are.same("b.lua", focused)

@@ -73,7 +73,7 @@ require("commentry").setup({
 
 - `:Commentry open` opens a diffview for local changes (shortcut).
 - `:Commentry add-range-comment` creates a range comment from the current visual selection.
-- `:Commentry list-comments [active|unresolved|all]` opens a Snacks picker for draft comments across the current review. The default is `active`; unresolved rows include the stale anchor and reason. Delete the current or selected drafts with `<C-d>` / `<M-d>`. Requires `snacks.nvim`.
+- `:Commentry list-comments [active|unresolved|all]` opens a Snacks picker for draft comments across the current review. The file preview renders active comments with the same cards and range marks as Diffview. The default is `active`; unresolved rows include the stale anchor and reason. Delete the current or selected drafts with `<C-d>` / `<M-d>`. Requires `snacks.nvim`.
 - `:Commentry reattach` reattaches a selected unresolved comment at the current diff line. A command range such as `:'<,'>Commentry reattach` uses that exact destination range; normal invocation preserves the comment's previous range length.
 - `:Commentry help` opens the native `commentry` vimdoc.
 - `:Commentry set-comment-type` sets default or per-comment type (`note`, `suggestion`, `issue`, `praise`).
