@@ -154,7 +154,8 @@ COMMANDS                                          *commentry.commands*
   Open the native `commentry` vimdoc.
 
 :Commentry set-comment-type
-  Set default or per-comment type.
+  Set the default or per-comment type. Built-in types are `note`,
+  `suggestion`, `issue`, `praise`, and `question`.
 
 :Commentry toggle-file-reviewed
   Toggle reviewed status for the current file's exact displayed change.

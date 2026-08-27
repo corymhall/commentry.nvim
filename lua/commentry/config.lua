@@ -68,7 +68,7 @@ local defaults = {
     send_to_agent = "ms",
     list_comments = "ml",
   },
-  comment_types = { "note", "suggestion", "issue", "praise" },
+  comment_types = { "note", "suggestion", "issue", "praise", "question" },
   default_comment_type = "note",
   store = {
     filename = "commentry.json",

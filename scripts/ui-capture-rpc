@@ -89,7 +89,7 @@ scenario_caption() {
       printf '%s\n' "Rendered from Neovim multigrid redraw events while the Commentry floating editor is open."
       ;;
     card)
-      printf '%s\n' "Rendered from Neovim multigrid redraw events after saving an inline suggestion comment."
+      printf '%s\n' "Rendered from Neovim multigrid redraw events after saving an inline question comment."
       ;;
     range)
       printf '%s\n' "Rendered from Neovim multigrid redraw events after saving a multi-line issue comment."

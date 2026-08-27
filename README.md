@@ -76,7 +76,7 @@ require("commentry").setup({
 - `:Commentry list-comments [active|unresolved|all]` opens a Snacks picker for draft comments across the current review. The file preview renders active comments with the same cards and range marks as Diffview. The default is `active`; unresolved rows include the stale anchor and reason. Delete the current or selected drafts with `<C-d>` / `<M-d>`. Requires `snacks.nvim`.
 - `:Commentry reattach` reattaches a selected unresolved comment at the current diff line. A command range such as `:'<,'>Commentry reattach` uses that exact destination range; normal invocation preserves the comment's previous range length.
 - `:Commentry help` opens the native `commentry` vimdoc.
-- `:Commentry set-comment-type` sets default or per-comment type (`note`, `suggestion`, `issue`, `praise`).
+- `:Commentry set-comment-type` sets default or per-comment type (`note`, `suggestion`, `issue`, `praise`, `question`).
 - `:Commentry toggle-file-reviewed` toggles reviewed status for the current file's exact displayed change.
 - `:Commentry next-unreviewed` jumps to the next unreviewed diff entry in panel order.
 - `:Commentry export` prints deterministic markdown for active draft comments.

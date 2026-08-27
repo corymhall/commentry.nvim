@@ -80,8 +80,9 @@ describe("commentry.diffview comment cards", function()
     assert.are.same(" · L4-L6", first_card_line[3][1])
   end)
 
-  it("renders range gutter signs with subtle line highlights", function()
+  it("renders question range signs, line highlights, and card styling", function()
     local range_calls = {}
+    local card_calls = {}
 
     vim.api.nvim_buf_is_valid = function()
       return true
@@ -95,6 +96,8 @@ describe("commentry.diffview comment cards", function()
     vim.api.nvim_buf_set_extmark = function(_, _, line, _, opts)
       if opts.sign_text then
         range_calls[#range_calls + 1] = { line = line, opts = opts }
+      elseif opts.virt_lines then
+        card_calls[#card_calls + 1] = { line = line, opts = opts }
       end
       return 1
     end
@@ -103,7 +106,7 @@ describe("commentry.diffview comment cards", function()
     local Diffview = require("commentry.diffview")
 
     Diffview.render_comment_markers(1, {
-      { id = "c-1", line_start = 4, line_end = 6, comment_type = "issue", body = "range body" },
+      { id = "c-1", line_start = 4, line_end = 6, comment_type = "question", body = "range body" },
     })
 
     table.sort(range_calls, function(a, b)
@@ -113,8 +116,11 @@ describe("commentry.diffview comment cards", function()
     assert.are.same("╭", range_calls[1].opts.sign_text)
     assert.are.same("┆", range_calls[2].opts.sign_text)
     assert.are.same("╰", range_calls[3].opts.sign_text)
-    assert.are.same("CommentryRangeSignIssue", range_calls[1].opts.sign_hl_group)
-    assert.are.same("CommentryRangeLineIssue", range_calls[2].opts.line_hl_group)
+    assert.are.same("CommentryRangeSignQuestion", range_calls[1].opts.sign_hl_group)
+    assert.are.same("CommentryRangeLineQuestion", range_calls[2].opts.line_hl_group)
+    assert.are.same(1, #card_calls)
+    assert.are.same("QUESTION", card_calls[1].opts.virt_lines[1][2][1])
+    assert.are.same("CommentryTypeQuestion", card_calls[1].opts.virt_lines[1][2][2])
   end)
 
   it("renders reviewed state indicator labels", function()

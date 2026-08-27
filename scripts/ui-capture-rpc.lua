@@ -114,7 +114,7 @@ local ok, err = xpcall(function()
       [[
         local comments = require("commentry.comments")
         comments._set_input_provider_for_tests(function(_, cb)
-          cb("Consider renaming this variable to reflect the reviewed value.", "suggestion")
+          cb("Should this variable name explain the reviewed value?", "question")
         end)
         comments.add_comment()
         comments._set_input_provider_for_tests(nil)

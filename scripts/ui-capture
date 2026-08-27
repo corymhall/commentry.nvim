@@ -207,7 +207,7 @@ run_capture_set() {
       card)
         name="comment-card"
         title="Rendered Comment Card"
-        caption="A saved inline suggestion showing the persistent card treatment and end-of-line marker."
+        caption="A saved inline question showing the persistent card treatment and end-of-line marker."
         ;;
       range)
         name="range-comment"

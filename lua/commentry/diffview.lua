@@ -827,6 +827,7 @@ local TYPE_LABEL = {
   suggestion = "SUGGESTION",
   issue = "ISSUE",
   praise = "PRAISE",
+  question = "QUESTION",
 }
 
 local TYPE_HL = {
@@ -834,11 +835,13 @@ local TYPE_HL = {
   suggestion = { border = "CommentryBorderSuggestion", tag = "CommentryTypeSuggestion" },
   issue = { border = "CommentryBorderIssue", tag = "CommentryTypeIssue" },
   praise = { border = "CommentryBorderPraise", tag = "CommentryTypePraise" },
+  question = { border = "CommentryBorderQuestion", tag = "CommentryTypeQuestion" },
 }
 
 local TYPE_PRIORITY = {
-  issue = 4,
-  suggestion = 3,
+  issue = 5,
+  suggestion = 4,
+  question = 3,
   note = 2,
   praise = 1,
 }
@@ -993,29 +996,31 @@ function M.ensure_highlights()
   pcall(vim.api.nvim_set_hl, 0, "CommentryTypeIssue", { link = "DiagnosticError" })
   pcall(vim.api.nvim_set_hl, 0, "CommentryBorderPraise", { link = "DiagnosticOk" })
   pcall(vim.api.nvim_set_hl, 0, "CommentryTypePraise", { link = "DiagnosticOk" })
+  pcall(vim.api.nvim_set_hl, 0, "CommentryBorderQuestion", { link = "DiagnosticInfo" })
+  pcall(vim.api.nvim_set_hl, 0, "CommentryTypeQuestion", { link = "DiagnosticInfo" })
   pcall(vim.api.nvim_set_hl, 0, "CommentryRangeLineNote", { link = "CursorLine" })
   pcall(vim.api.nvim_set_hl, 0, "CommentryRangeLineSuggestion", { link = "CursorLine" })
   pcall(vim.api.nvim_set_hl, 0, "CommentryRangeLineIssue", { link = "CursorLine" })
   pcall(vim.api.nvim_set_hl, 0, "CommentryRangeLinePraise", { link = "CursorLine" })
+  pcall(vim.api.nvim_set_hl, 0, "CommentryRangeLineQuestion", { link = "CursorLine" })
   pcall(vim.api.nvim_set_hl, 0, "CommentryRangeSignNote", { link = "CommentryBorderNote" })
   pcall(vim.api.nvim_set_hl, 0, "CommentryRangeSignSuggestion", { link = "CommentryBorderSuggestion" })
   pcall(vim.api.nvim_set_hl, 0, "CommentryRangeSignIssue", { link = "CommentryBorderIssue" })
   pcall(vim.api.nvim_set_hl, 0, "CommentryRangeSignPraise", { link = "CommentryBorderPraise" })
+  pcall(vim.api.nvim_set_hl, 0, "CommentryRangeSignQuestion", { link = "CommentryBorderQuestion" })
 end
 
 ---@param comment_type string
 ---@return string
 local function range_sign_hl(comment_type)
-  local suffix = (comment_type == "issue" or comment_type == "suggestion" or comment_type == "praise") and comment_type
-    or "note"
+  local suffix = TYPE_HL[comment_type] and comment_type or "note"
   return "CommentryRangeSign" .. suffix:sub(1, 1):upper() .. suffix:sub(2)
 end
 
 ---@param comment_type string
 ---@return string
 local function range_line_hl(comment_type)
-  local suffix = (comment_type == "issue" or comment_type == "suggestion" or comment_type == "praise") and comment_type
-    or "note"
+  local suffix = TYPE_HL[comment_type] and comment_type or "note"
   return "CommentryRangeLine" .. suffix:sub(1, 1):upper() .. suffix:sub(2)
 end
 

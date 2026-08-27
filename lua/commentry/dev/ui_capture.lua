@@ -19,6 +19,7 @@ local LINE_NUMBER = "#98856f"
 local TYPE_COLORS = {
   issue = "#d94841",
   suggestion = "#0f766e",
+  question = "#2563eb",
   praise = "#2f855a",
   note = "#946200",
 }
@@ -617,7 +618,7 @@ end
 local function scenario_card(out_dir)
   local comments = require("commentry.comments")
   comments._set_input_provider_for_tests(function(_, cb)
-    cb("Consider renaming this variable to reflect that it is the reviewed value, not the baseline.", "suggestion")
+    cb("Should this variable name explain the reviewed value instead of the baseline?", "question")
   end)
   wait_for(
     function()

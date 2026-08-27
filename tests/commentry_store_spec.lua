@@ -195,14 +195,24 @@ describe("commentry.store", function()
     assert.is_true(table.concat(invalid_errors, "\n"):find("unresolved_reason", 1, true) ~= nil)
   end)
 
+  it("accepts question comments as a built-in store type", function()
+    local store = sample_store("/tmp/project")
+    store.comments[1].comment_type = "question"
+
+    local ok, errors = Store.validate(store)
+
+    assert.is_true(ok)
+    assert.are.same({}, errors)
+  end)
+
   it("accepts configured custom comment types", function()
     local Config = require("commentry.config")
     local original_comment_types = Config.comment_types
 
-    Config.comment_types = { "note", "question" }
+    Config.comment_types = { "note", "discussion" }
 
     local store = sample_store("/tmp/project")
-    store.comments[1].comment_type = "question"
+    store.comments[1].comment_type = "discussion"
     local ok, errors = Store.validate(store)
 
     Config.comment_types = original_comment_types

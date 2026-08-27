@@ -15,7 +15,7 @@ local state = {
 local current_context
 
 local ROOT_CANDIDATE_KEYS = { "git_root", "toplevel", "root", "cwd", "path" }
-local DEFAULT_COMMENT_TYPES = { "note", "suggestion", "issue", "praise" }
+local DEFAULT_COMMENT_TYPES = { "note", "suggestion", "issue", "praise", "question" }
 
 ---@param root string
 ---@return string|nil

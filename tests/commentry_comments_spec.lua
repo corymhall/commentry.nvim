@@ -85,6 +85,10 @@ describe("commentry.comments helpers", function()
     assert.is_nil(err)
     assert.are.same("issue", updated.comment_type)
 
+    local question, question_err = Comments.update_type(comment, "question")
+    assert.is_nil(question_err)
+    assert.are.same("question", question.comment_type)
+
     local invalid, invalid_err = Comments.update_type(comment, "feedback")
     assert.is_nil(invalid)
     assert.is_true(invalid_err:find("comment_type", 1, true) ~= nil)

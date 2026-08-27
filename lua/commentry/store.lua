@@ -4,7 +4,7 @@ local Util = require("commentry.util")
 local M = {}
 
 local uv = vim.uv or vim.loop
-local DEFAULT_COMMENT_TYPES = { "note", "suggestion", "issue", "praise" }
+local DEFAULT_COMMENT_TYPES = { "note", "suggestion", "issue", "praise", "question" }
 
 ---@param value any
 ---@return boolean
