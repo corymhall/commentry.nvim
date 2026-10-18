@@ -23,7 +23,7 @@ describe("commentry plugin entrypoint", function()
 
   it("routes :Commentry without re-running setup()", function()
     local command_cb = nil
-    local called_cmd = false
+    local received_args
 
     vim.api.nvim_create_user_command = function(name, cb)
       if name == "Commentry" then
@@ -37,8 +37,8 @@ describe("commentry plugin entrypoint", function()
       end,
     }
     package.loaded["commentry.commands"] = {
-      cmd = function()
-        called_cmd = true
+      cmd = function(args)
+        received_args = args
       end,
       complete = function()
         return {}
@@ -48,9 +48,8 @@ describe("commentry plugin entrypoint", function()
     dofile(vim.fs.normalize(vim.uv.cwd() .. "/plugin/commentry.lua"))
 
     assert.is_not_nil(command_cb)
-    assert.has_no.errors(function()
-      command_cb({ args = "" })
-    end)
-    assert.is_true(called_cmd)
+    command_cb({ args = "inbox unread", range = 0 })
+    assert.are.same("inbox unread", received_args.args)
+    assert.are.same(0, received_args.range)
   end)
 end)

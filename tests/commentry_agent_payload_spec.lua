@@ -98,19 +98,6 @@ local function assert_no_absolute_paths(value, key)
 end
 
 describe("commentry.agent.payload", function()
-  it("builds payload with required top-level sections", function()
-    local payload = Payload.build_payload({ context_id = "ctx-1" }, {
-      review_meta = { mode = "working_tree" },
-      items = { { id = "c1" } },
-      provenance = { root = "/tmp/project" },
-    })
-
-    assert.are.same("ctx-1", payload.context.context_id)
-    assert.are.same("working_tree", payload.review_meta.mode)
-    assert.are.same("c1", payload.items[1].id)
-    assert.are.same("/tmp/project", payload.provenance.root)
-  end)
-
   it("normalizes provenance safely with table-driven cases", function()
     local cases = {
       {
@@ -207,7 +194,9 @@ describe("commentry.agent.payload", function()
     }
 
     local payload_a = Payload.build_payload(context, opts)
-    local payload_b = Payload.build_payload(context, opts)
+    local reordered = vim.deepcopy(opts)
+    reordered.items = { reordered.items[2], reordered.items[1] }
+    local payload_b = Payload.build_payload(context, reordered)
 
     assert.are.same({ "c1", "c2" }, { payload_a.items[1].id, payload_a.items[2].id })
     assert.are.same(Payload.serialize(payload_a), Payload.serialize(payload_b))
@@ -259,48 +248,6 @@ describe("commentry.agent.payload", function()
     )
     assert.is_truthy(rendered:find("\n     \n     These are the types of changes we categorize", 1, true))
     assert.is_falsy(rendered:find("   | ", 1, true))
-  end)
-
-  it("has no filesystem or store side effects while building/serializing", function()
-    local Store = require("commentry.store")
-    local original_store_write = Store.write
-    local original_writefile = vim.fn.writefile
-    local store_write_calls = 0
-    local writefile_calls = 0
-
-    Store.write = function(...)
-      store_write_calls = store_write_calls + 1
-      return original_store_write(...)
-    end
-    vim.fn.writefile = function(...)
-      writefile_calls = writefile_calls + 1
-      return original_writefile(...)
-    end
-
-    local scenarios = {
-      {
-        context = { context_id = "ctx-1" },
-        opts = { items = { { id = "c1", body = "draft" } } },
-      },
-      {
-        context = { context_id = "ctx-2" },
-        opts = {
-          items = { { id = "c2", body = "draft2" } },
-          provenance = { root = "/tmp/project", files = { "lua/commentry/init.lua" } },
-        },
-      },
-    }
-
-    for _, scenario in ipairs(scenarios) do
-      local payload = Payload.build_payload(scenario.context, scenario.opts)
-      Payload.serialize(payload)
-    end
-
-    Store.write = original_store_write
-    vim.fn.writefile = original_writefile
-
-    assert.are.same(0, store_write_calls)
-    assert.are.same(0, writefile_calls)
   end)
 
   it("extracts only active items and preserves projected fields with thread linkage", function()

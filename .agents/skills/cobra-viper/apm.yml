@@ -1,0 +1,10 @@
+name: cobra-viper
+version: 1.0.0
+description: Definitive guide to building CLI applications with Cobra and Viper —
+  command-first architecture, configuration management, environment variable binding,
+  and in-memory CLI testing. Written by spf13, the original creator of both libraries.
+author: Steve Francia
+license: MIT
+repository: https://github.com/spf13/go-skills
+homepage: https://github.com/spf13/go-skills
+type: hybrid

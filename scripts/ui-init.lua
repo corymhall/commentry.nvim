@@ -25,6 +25,14 @@ end
 vim.opt.runtimepath:prepend(plugin_root)
 vim.opt.runtimepath:prepend(diffview_root)
 
+-- Optional local theme inputs for visual checks; CI uses Neovim defaults.
+if vim.env.COMMENTRY_UI_THEME_RTP and vim.env.COMMENTRY_UI_THEME_RTP ~= "" then
+  vim.opt.runtimepath:append(vim.env.COMMENTRY_UI_THEME_RTP)
+end
+if vim.env.COMMENTRY_UI_COLORSCHEME and vim.env.COMMENTRY_UI_COLORSCHEME ~= "" then
+  vim.cmd.colorscheme(vim.env.COMMENTRY_UI_COLORSCHEME)
+end
+
 local helptags = diffview_root .. "/doc/tags"
 if not vim.uv.fs_stat(helptags) then
   pcall(vim.cmd.helptags, diffview_root .. "/doc")

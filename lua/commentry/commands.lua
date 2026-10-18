@@ -214,6 +214,26 @@ function M.setup()
   end
   initialized = true
 
+  M.register("inbox", function(_, scope)
+    if not vim.tbl_contains({ "", "all", "unread", "read", "open", "resolved", "queued" }, scope) then
+      Util.error("Use :Commentry inbox [all|unread|read|open|resolved|queued]")
+      return
+    end
+    require("commentry.inbox").open(scope)
+  end)
+
+  M.register("comment", function(args)
+    require("commentry.inbox").comment(args)
+  end)
+
+  M.register("capture-text", function(_, register)
+    require("commentry.inbox").capture_text(register)
+  end)
+
+  M.register("new-thread", function()
+    require("commentry.inbox").new_thread()
+  end)
+
   M.register("open", function(_, cmd_args)
     if not Config.diffview.enabled then
       Util.warn("Diff view is disabled in config")

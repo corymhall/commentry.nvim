@@ -1,6 +1,10 @@
 local M = {}
 
 local public_command_refs = {
+  ":Commentry inbox",
+  ":Commentry comment",
+  ":Commentry capture-text",
+  ":Commentry new-thread",
   ":Commentry open",
   ":Commentry add-range-comment",
   ":Commentry list-comments",
@@ -26,6 +30,7 @@ local required_help_tags = {
   "commentry.unresolved",
   "commentry.v1-boundaries",
   "commentry.persistence",
+  "commentry.inbox",
   "commentry.troubleshooting",
 }
 
@@ -106,7 +111,7 @@ function M.check()
   validate_public_surface(errors, "README.md", readme)
   validate_public_surface(errors, "doc/commentry.txt", help)
 
-  expect_contains(errors, "README.md", "Validate docs: `./scripts/docs`", readme)
+  expect_contains(errors, "README.md", "Validate docs: `mise run docs`", readme)
   expect_contains(errors, "README.md", "Required:", readme)
   expect_contains(errors, "README.md", "Optional integrations:", readme)
 

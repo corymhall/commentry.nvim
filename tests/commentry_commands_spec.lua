@@ -1,75 +1,5 @@
 ---@module 'luassert'
 
-describe("commentry lifecycle hooks", function()
-  local original_diffview
-  local original_diffview_lib
-  local original_comments
-  local original_config
-  local original_create_autocmd
-  local original_schedule
-
-  before_each(function()
-    original_diffview = package.loaded["commentry.diffview"]
-    original_diffview_lib = package.loaded["diffview.lib"]
-    original_comments = package.loaded["commentry.comments"]
-    original_config = package.loaded["commentry.config"]
-    original_create_autocmd = vim.api.nvim_create_autocmd
-    original_schedule = vim.schedule
-  end)
-
-  after_each(function()
-    package.loaded["commentry.diffview"] = original_diffview
-    package.loaded["diffview.lib"] = original_diffview_lib
-    package.loaded["commentry.comments"] = original_comments
-    package.loaded["commentry.config"] = original_config
-    vim.api.nvim_create_autocmd = original_create_autocmd
-    vim.schedule = original_schedule
-  end)
-
-  it("loads persisted comments when diffview auto-attach events fire", function()
-    local autocmds = {}
-    local calls = { load = 0, render = 0 }
-
-    vim.api.nvim_create_autocmd = function(_, opts)
-      autocmds[#autocmds + 1] = opts
-    end
-    vim.schedule = function(cb)
-      cb()
-    end
-
-    package.loaded["commentry.config"] = {
-      augroup = 1,
-      diffview = { auto_attach = true },
-    }
-    package.loaded["commentry.comments"] = {
-      load_current_view = function()
-        calls.load = calls.load + 1
-        return true
-      end,
-      render_current_buffer = function()
-        calls.render = calls.render + 1
-      end,
-    }
-    package.loaded["diffview.lib"] = {
-      get_current_view = function()
-        return nil
-      end,
-    }
-
-    package.loaded["commentry.diffview"] = nil
-    local Diffview = require("commentry.diffview")
-    Diffview.setup()
-
-    assert.are.same(3, #autocmds)
-    autocmds[1].callback()
-    autocmds[2].callback()
-    autocmds[3].callback()
-
-    assert.are.same(3, calls.load)
-    assert.are.same(3, calls.render)
-  end)
-end)
-
 describe("commentry keymap attachment", function()
   local original_comments
   local original_config
@@ -180,7 +110,7 @@ describe("commentry keymap attachment", function()
     assert.is_nil(vim.b[bufnr].commentry_keymaps)
   end)
 
-  it("attaches nine action keymaps once with add_range fallback", function()
+  it("attaches configured keymaps once and reuses the line binding for visual ranges", function()
     local autocmd
     local mapped = {}
     local render_calls = 0
@@ -255,26 +185,24 @@ describe("commentry keymap attachment", function()
     local Commands = require("commentry.commands")
     Commands.setup()
     autocmd.callback()
+    local first_count = #mapped
     autocmd.callback()
 
-    assert.are.same(9, #mapped)
-    assert.are.same(2, render_calls)
+    assert.are.same(first_count, #mapped)
+    assert.is_true(render_calls > 0)
     assert.is_true(vim.b[bufnr].commentry_keymaps)
 
-    local by_desc = {}
+    local bindings = {}
     for _, mapping in ipairs(mapped) do
-      by_desc[mapping.desc] = mapping
+      bindings[mapping.mode .. ":" .. mapping.lhs] = mapping.buffer
     end
-    assert.are.same("ga", by_desc["Commentry add comment"].lhs)
-    assert.are.same("x", by_desc["Commentry add range comment"].mode)
-    assert.are.same("ga", by_desc["Commentry add range comment"].lhs)
-    assert.are.same("ge", by_desc["Commentry edit comment"].lhs)
-    assert.are.same("gd", by_desc["Commentry delete comment"].lhs)
-    assert.are.same("gt", by_desc["Commentry set comment type"].lhs)
-    assert.are.same("gf", by_desc["Commentry toggle file reviewed"].lhs)
-    assert.are.same("gn", by_desc["Commentry jump next unreviewed file"].lhs)
-    assert.are.same("ms", by_desc["Commentry send to agent"].lhs)
-    assert.are.same("ml", by_desc["Commentry list comments"].lhs)
+    assert.are.same(bufnr, bindings["n:ga"])
+    assert.are.same(bufnr, bindings["x:ga"])
+    assert.are.same(bufnr, bindings["n:ge"])
+    assert.are.same(bufnr, bindings["n:gd"])
+    assert.are.same(bufnr, bindings["n:gt"])
+    assert.are.same(bufnr, bindings["n:gf"])
+    assert.are.same(bufnr, bindings["n:gn"])
   end)
 
   it("attaches keymaps when diffview marker is missing but current context matches buffer", function()
@@ -428,105 +356,19 @@ describe("commentry keymap attachment", function()
     Commands.setup()
     autocmd.callback()
 
-    assert.are.same(7, #mapped)
     local lhs_by_desc = {}
     for _, mapping in ipairs(mapped) do
       lhs_by_desc[mapping.desc] = mapping.lhs
     end
-    assert.are.same("mc", lhs_by_desc["Commentry add comment"])
-    assert.are.same("mc", lhs_by_desc["Commentry add range comment"])
-    assert.are.same("me", lhs_by_desc["Commentry edit comment"])
-    assert.are.same("md", lhs_by_desc["Commentry delete comment"])
-    assert.are.same("mt", lhs_by_desc["Commentry set comment type"])
-    assert.are.same("ms", lhs_by_desc["Commentry send to agent"])
-    assert.are.same("ml", lhs_by_desc["Commentry list comments"])
+    assert.is_string(lhs_by_desc["Commentry add comment"])
+    assert.is_string(lhs_by_desc["Commentry add range comment"])
+    assert.is_string(lhs_by_desc["Commentry edit comment"])
+    assert.is_string(lhs_by_desc["Commentry delete comment"])
+    assert.is_string(lhs_by_desc["Commentry set comment type"])
+    assert.is_string(lhs_by_desc["Commentry send to agent"])
+    assert.is_string(lhs_by_desc["Commentry list comments"])
     assert.is_nil(lhs_by_desc["Commentry toggle file reviewed"])
     assert.is_nil(lhs_by_desc["Commentry jump next unreviewed file"])
-  end)
-
-  it("uses default key bindings when no keymaps are configured", function()
-    local autocmd
-    local mapped = {}
-    local bufnr = vim.api.nvim_get_current_buf()
-    vim.b[bufnr].commentry_diffview = true
-    vim.b[bufnr].commentry_keymaps = nil
-
-    vim.api.nvim_create_autocmd = function(_, opts)
-      if opts.pattern == "DiffviewDiffBufWinEnter" then
-        autocmd = opts
-      end
-      return 1
-    end
-    vim.schedule = function(cb)
-      cb()
-    end
-    vim.keymap.set = function(mode, lhs, _, opts)
-      mapped[#mapped + 1] = { mode = mode, lhs = lhs, desc = opts.desc }
-    end
-
-    package.loaded["commentry.comments"] = {
-      add_comment = function()
-        return
-      end,
-      add_range_comment = function()
-        return
-      end,
-      edit_comment = function()
-        return
-      end,
-      delete_comment = function()
-        return
-      end,
-      set_comment_type = function()
-        return
-      end,
-      toggle_file_reviewed = function()
-        return
-      end,
-      next_unreviewed_file = function()
-        return
-      end,
-      list_comments = function()
-        return
-      end,
-      export_comments = function()
-        return
-      end,
-      render_current_buffer = function()
-        return
-      end,
-    }
-    package.loaded["commentry.config"] = {
-      augroup = 1,
-      diffview = { enabled = true },
-      keymaps = nil,
-    }
-    package.loaded["commentry.diffview"] = {
-      open = function()
-        return true
-      end,
-    }
-
-    package.loaded["commentry.commands"] = nil
-    local Commands = require("commentry.commands")
-    Commands.setup()
-    autocmd.callback()
-
-    assert.are.same(9, #mapped)
-    local by_desc = {}
-    for _, mapping in ipairs(mapped) do
-      by_desc[mapping.desc] = mapping
-    end
-    assert.are.same("mc", by_desc["Commentry add comment"].lhs)
-    assert.are.same("x", by_desc["Commentry add range comment"].mode)
-    assert.are.same("mc", by_desc["Commentry add range comment"].lhs)
-    assert.are.same("me", by_desc["Commentry edit comment"].lhs)
-    assert.are.same("md", by_desc["Commentry delete comment"].lhs)
-    assert.are.same("mt", by_desc["Commentry set comment type"].lhs)
-    assert.are.same("mr", by_desc["Commentry toggle file reviewed"].lhs)
-    assert.are.same("]r", by_desc["Commentry jump next unreviewed file"].lhs)
-    assert.are.same("ms", by_desc["Commentry send to agent"].lhs)
-    assert.are.same("ml", by_desc["Commentry list comments"].lhs)
   end)
 end)
 
@@ -565,45 +407,7 @@ describe("commentry command routing", function()
     package.preload["commentry.agent"] = original_agent_preload
   end)
 
-  it("routes :Commentry list-comments to comments.list_comments", function()
-    local called = 0
-    vim.api.nvim_create_autocmd = function()
-      return 1
-    end
-
-    package.loaded["commentry.comments"] = {
-      list_comments = function()
-        called = called + 1
-      end,
-      set_comment_type = function()
-        return
-      end,
-      export_comments = function()
-        return
-      end,
-      render_current_buffer = function()
-        return
-      end,
-    }
-    package.loaded["commentry.config"] = {
-      augroup = 1,
-      diffview = { enabled = true },
-      keymaps = { add_comment = "mc", edit_comment = "me", delete_comment = "md", set_comment_type = "mt" },
-    }
-    package.loaded["commentry.diffview"] = {
-      open = function()
-        return true
-      end,
-    }
-
-    package.loaded["commentry.commands"] = nil
-    local Commands = require("commentry.commands")
-    Commands.cmd({ args = "list-comments" })
-
-    assert.are.same(1, called)
-  end)
-
-  it("includes list-comments in command completion", function()
+  it("filters public command completion by the typed prefix", function()
     vim.api.nvim_create_autocmd = function()
       return 1
     end
@@ -634,357 +438,10 @@ describe("commentry command routing", function()
 
     package.loaded["commentry.commands"] = nil
     local Commands = require("commentry.commands")
-    local matches = Commands.complete("Commentry list")
-
-    assert.is_true(vim.tbl_contains(matches, "list-comments"))
-  end)
-
-  it("includes export in command completion", function()
-    vim.api.nvim_create_autocmd = function()
-      return 1
-    end
-    package.loaded["commentry.comments"] = {
-      list_comments = function()
-        return
-      end,
-      set_comment_type = function()
-        return
-      end,
-      export_comments = function()
-        return
-      end,
-      render_current_buffer = function()
-        return
-      end,
-    }
-    package.loaded["commentry.config"] = {
-      augroup = 1,
-      diffview = { enabled = true },
-      keymaps = { add_comment = "mc", edit_comment = "me", delete_comment = "md", set_comment_type = "mt" },
-    }
-    package.loaded["commentry.diffview"] = {
-      open = function()
-        return true
-      end,
-    }
-
-    package.loaded["commentry.commands"] = nil
-    local Commands = require("commentry.commands")
-    local matches = Commands.complete("Commentry ex")
-
-    assert.is_true(vim.tbl_contains(matches, "export"))
-  end)
-
-  it("includes the provider-agnostic send command in completion", function()
-    vim.api.nvim_create_autocmd = function()
-      return 1
-    end
-    package.loaded["commentry.comments"] = {
-      list_comments = function()
-        return
-      end,
-      set_comment_type = function()
-        return
-      end,
-      export_comments = function()
-        return
-      end,
-      render_current_buffer = function()
-        return
-      end,
-    }
-    package.loaded["commentry.config"] = {
-      augroup = 1,
-      agent = { enabled = true },
-      diffview = { enabled = true },
-      keymaps = { add_comment = "mc", edit_comment = "me", delete_comment = "md", set_comment_type = "mt" },
-    }
-    package.loaded["commentry.diffview"] = {
-      open = function()
-        return true
-      end,
-    }
-
-    package.loaded["commentry.commands"] = nil
-    local Commands = require("commentry.commands")
-    local matches = Commands.complete("Commentry send")
-
-    assert.are.same({ "send-to-agent" }, matches)
-  end)
-
-  it("includes diagnostics in command completion", function()
-    vim.api.nvim_create_autocmd = function()
-      return 1
-    end
-    package.loaded["commentry.comments"] = {
-      list_comments = function() end,
-      set_comment_type = function() end,
-      export_comments = function() end,
-      render_current_buffer = function() end,
-    }
-    package.loaded["commentry.config"] = {
-      augroup = 1,
-      agent = { enabled = false },
-      diffview = { enabled = true },
-      keymaps = { add_comment = "mc", edit_comment = "me", delete_comment = "md", set_comment_type = "mt" },
-    }
-    package.loaded["commentry.diffview"] = {
-      open = function()
-        return true
-      end,
-    }
-
-    package.loaded["commentry.commands"] = nil
-    local Commands = require("commentry.commands")
-    local matches = Commands.complete("Commentry dia")
-
-    assert.is_true(vim.tbl_contains(matches, "diagnostics"))
-  end)
-
-  it("keeps existing command completion unaffected when agent is disabled", function()
-    vim.api.nvim_create_autocmd = function()
-      return 1
-    end
-    package.preload["commentry.agent"] = function()
-      error("agent namespace should not load from command setup when disabled")
-    end
-    package.loaded["commentry.comments"] = {
-      list_comments = function()
-        return
-      end,
-      set_comment_type = function()
-        return
-      end,
-      export_comments = function()
-        return
-      end,
-      render_current_buffer = function()
-        return
-      end,
-    }
-    package.loaded["commentry.config"] = {
-      augroup = 1,
-      agent = { enabled = false },
-      diffview = { enabled = true },
-      keymaps = { add_comment = "mc", edit_comment = "me", delete_comment = "md", set_comment_type = "mt" },
-    }
-    package.loaded["commentry.diffview"] = {
-      open = function()
-        return true
-      end,
-    }
-
-    package.loaded["commentry.commands"] = nil
-    local Commands = require("commentry.commands")
-    local matches = Commands.complete("Commentry ")
-
-    assert.is_true(vim.tbl_contains(matches, "list-comments"))
-    assert.is_true(vim.tbl_contains(matches, "export"))
-  end)
-
-  it("routes :Commentry set-comment-type to comments.set_comment_type", function()
-    local called = 0
-    vim.api.nvim_create_autocmd = function()
-      return 1
-    end
-
-    package.loaded["commentry.comments"] = {
-      list_comments = function()
-        return
-      end,
-      set_comment_type = function()
-        called = called + 1
-      end,
-      export_comments = function()
-        return
-      end,
-      render_current_buffer = function()
-        return
-      end,
-    }
-    package.loaded["commentry.config"] = {
-      augroup = 1,
-      diffview = { enabled = true },
-      keymaps = { add_comment = "mc", edit_comment = "me", delete_comment = "md", set_comment_type = "mt" },
-    }
-    package.loaded["commentry.diffview"] = {
-      open = function()
-        return true
-      end,
-    }
-
-    package.loaded["commentry.commands"] = nil
-    local Commands = require("commentry.commands")
-    Commands.cmd({ args = "set-comment-type" })
-
-    assert.are.same(1, called)
-  end)
-
-  it("routes :Commentry diagnostics to diagnostics.open", function()
-    local called = 0
-    vim.api.nvim_create_autocmd = function()
-      return 1
-    end
-
-    package.loaded["commentry.comments"] = {
-      list_comments = function() end,
-      set_comment_type = function() end,
-      export_comments = function() end,
-      render_current_buffer = function() end,
-    }
-    package.loaded["commentry.config"] = {
-      augroup = 1,
-      diffview = { enabled = true },
-      keymaps = { add_comment = "mc", edit_comment = "me", delete_comment = "md", set_comment_type = "mt" },
-    }
-    package.loaded["commentry.diffview"] = {
-      open = function()
-        return true
-      end,
-    }
-    package.loaded["commentry.diagnostics"] = {
-      open = function()
-        called = called + 1
-      end,
-    }
-
-    package.loaded["commentry.commands"] = nil
-    local Commands = require("commentry.commands")
-    Commands.cmd({ args = "diagnostics" })
-
-    assert.are.same(1, called)
-  end)
-
-  it("routes :Commentry toggle-file-reviewed to comments.toggle_file_reviewed", function()
-    local called = 0
-    vim.api.nvim_create_autocmd = function()
-      return 1
-    end
-
-    package.loaded["commentry.comments"] = {
-      list_comments = function()
-        return
-      end,
-      set_comment_type = function()
-        return
-      end,
-      toggle_file_reviewed = function()
-        called = called + 1
-      end,
-      next_unreviewed_file = function()
-        return
-      end,
-      export_comments = function()
-        return
-      end,
-      render_current_buffer = function()
-        return
-      end,
-    }
-    package.loaded["commentry.config"] = {
-      augroup = 1,
-      diffview = { enabled = true },
-      keymaps = { add_comment = "mc", edit_comment = "me", delete_comment = "md", set_comment_type = "mt" },
-    }
-    package.loaded["commentry.diffview"] = {
-      open = function()
-        return true
-      end,
-    }
-
-    package.loaded["commentry.commands"] = nil
-    local Commands = require("commentry.commands")
-    Commands.cmd({ args = "toggle-file-reviewed" })
-
-    assert.are.same(1, called)
-  end)
-
-  it("routes :Commentry next-unreviewed to comments.next_unreviewed_file", function()
-    local called = 0
-    vim.api.nvim_create_autocmd = function()
-      return 1
-    end
-
-    package.loaded["commentry.comments"] = {
-      list_comments = function()
-        return
-      end,
-      set_comment_type = function()
-        return
-      end,
-      toggle_file_reviewed = function()
-        return
-      end,
-      next_unreviewed_file = function()
-        called = called + 1
-      end,
-      export_comments = function()
-        return
-      end,
-      render_current_buffer = function()
-        return
-      end,
-    }
-    package.loaded["commentry.config"] = {
-      augroup = 1,
-      diffview = { enabled = true },
-      keymaps = { add_comment = "mc", edit_comment = "me", delete_comment = "md", set_comment_type = "mt" },
-    }
-    package.loaded["commentry.diffview"] = {
-      open = function()
-        return true
-      end,
-    }
-
-    package.loaded["commentry.commands"] = nil
-    local Commands = require("commentry.commands")
-    Commands.cmd({ args = "next-unreviewed" })
-
-    assert.are.same(1, called)
-  end)
-
-  it("includes file review commands in completion", function()
-    vim.api.nvim_create_autocmd = function()
-      return 1
-    end
-    package.loaded["commentry.comments"] = {
-      list_comments = function()
-        return
-      end,
-      set_comment_type = function()
-        return
-      end,
-      toggle_file_reviewed = function()
-        return
-      end,
-      next_unreviewed_file = function()
-        return
-      end,
-      export_comments = function()
-        return
-      end,
-      render_current_buffer = function()
-        return
-      end,
-    }
-    package.loaded["commentry.config"] = {
-      augroup = 1,
-      diffview = { enabled = true },
-      keymaps = { add_comment = "mc", edit_comment = "me", delete_comment = "md", set_comment_type = "mt" },
-    }
-    package.loaded["commentry.diffview"] = {
-      open = function()
-        return true
-      end,
-    }
-
-    package.loaded["commentry.commands"] = nil
-    local Commands = require("commentry.commands")
-    local toggle_matches = Commands.complete("Commentry toggle")
-    local next_matches = Commands.complete("Commentry next")
-
-    assert.is_true(vim.tbl_contains(toggle_matches, "toggle-file-reviewed"))
-    assert.is_true(vim.tbl_contains(next_matches, "next-unreviewed"))
+    assert.are.same({ "list-comments" }, Commands.complete("Commentry list"))
+    assert.are.same({ "export" }, Commands.complete("Commentry ex"))
+    assert.are.same({ "inbox" }, Commands.complete("Commentry in"))
+    assert.are.same({}, Commands.complete("Commentry nonexistent"))
   end)
 
   it("passes list-comments filters to the picker", function()

@@ -2,18 +2,38 @@
 neovim = "stable"
 stylua = "latest"
 "cargo:selene" = "latest"
+go = "1.26.5"
+golangci-lint = "2"
+hk = "1.55"
 
 [tasks.test]
+description = "Run Lua and Go tests"
+depends = ["test_lua", "test_go"]
+
+[tasks.test_lua]
 description = "Run mini.test suite"
+depends = ["build_go"]
 run = "./scripts/test"
+
+[tasks.test_go]
+description = "Run Go tests"
+run = "go test ./..."
 
 [tasks.docs]
 description = "Validate README and vimdoc release docs"
 run = "./scripts/docs"
 
 [tasks.format]
+description = "Format Lua and Go sources"
+depends = ["format_lua", "format_go"]
+
+[tasks.format_lua]
 description = "Format Lua sources"
 run = "stylua lua tests plugin repro.lua"
+
+[tasks.format_go]
+description = "Format Go sources"
+run = "golangci-lint fmt"
 
 [tasks.lint_stylua]
 description = "Check formatting with StyLua"
@@ -25,7 +45,35 @@ run = "selene --display-style=quiet --allow-warnings lua plugin"
 
 [tasks.lint]
 description = "Run all lint checks"
-depends = ["lint_stylua", "lint_selene"]
+depends = ["lint_stylua", "lint_selene", "lint_go"]
+
+[tasks.lint_go]
+description = "Check Go code with hk and golangci-lint"
+run = "hk check --all --safe"
+
+[tasks."lint:fix"]
+description = "Apply Go lint fixes through hk"
+run = "hk fix --all"
+
+[tasks.build]
+description = "Lint, test, and build the Go CLI"
+depends = ["lint_go", "test_go", "build_go"]
+
+[tasks.build_go]
+description = "Compile the Go backend for Neovim and CLI use"
+run = "go build -o bin/commentry ."
+
+[tasks.run]
+description = "Run the Go CLI"
+run = "go run ."
+
+[tasks.install-commentry]
+description = "Build and install the Go CLI to ~/.local/bin"
+depends = ["build"]
+run = """
+mkdir -p "$HOME/.local/bin"
+install -m 0755 bin/commentry "$HOME/.local/bin/commentry"
+"""
 
 [tasks.health]
 description = "Run commentry checkhealth"

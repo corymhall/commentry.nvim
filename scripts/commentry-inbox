@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+COMMENTRY_PLUGIN_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+if [[ -n "${COMMENTRY_CLI:-}" ]]; then
+  exec "$COMMENTRY_CLI" rpc
+elif [[ -x "$COMMENTRY_PLUGIN_ROOT/bin/commentry" ]]; then
+  exec "$COMMENTRY_PLUGIN_ROOT/bin/commentry" rpc
+elif command -v commentry >/dev/null 2>&1; then
+  exec commentry rpc
+fi
+printf '%s\n' 'Commentry backend is missing. Run mise run build or install the commentry binary.' >&2
+exit 1

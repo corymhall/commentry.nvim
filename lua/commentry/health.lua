@@ -147,6 +147,12 @@ function M.check()
   end
 
   store_writable_health()
+  local backend = require("commentry.inbox.store").executable()
+  if backend and backend ~= "" and vim.fn.executable(backend) == 1 then
+    ok("inbox Go backend available: " .. backend)
+  else
+    warn("inbox requires the commentry binary; run mise run build or install it on PATH")
+  end
   log_health(log_config())
   agent_health(agent_config())
 end

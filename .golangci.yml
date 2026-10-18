@@ -1,0 +1,60 @@
+# Validate with:
+#   golangci-lint config verify -c .golangci.yml
+version: "2"
+
+linters:
+  # includes: errcheck, govet, ineffassign, staticcheck, unused
+  default: standard
+  settings:
+    gocognit:
+      # Minimal code complexity to report.
+      # Default: 30 (but we recommend 10-20)
+      min-complexity: 15
+    goconst:
+      # Repetition is useful only after it is likely to represent one concept.
+      min-len: 4
+      min-occurrences: 5
+      # Do not count fixture values as application repetition.
+      ignore-tests: true
+    godoclint:
+      default: all
+  enable:
+    - goconst
+    - gocognit
+    - gochecknoglobals
+    - ineffassign
+    - unconvert
+
+    - errname
+
+    # Test helper quality.
+    - thelper
+    - tparallel
+
+    - sloglint
+    - iface
+    - gosec
+
+    # Import/name/doc consistency.
+    - importas
+    - godoclint
+
+    # Modernization checks from golang/tools modernize suite.
+    - modernize
+
+formatters:
+  settings:
+    gofumpt:
+      module-path: github.com/corymhall/commentry.nvim
+  enable:
+    - goimports
+    - gofumpt
+    - gci
+
+run:
+  tests: true
+  timeout: 5m
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

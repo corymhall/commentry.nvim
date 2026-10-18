@@ -7,6 +7,158 @@ draft persistence, typed/range comments, reviewed-file tracking, and an
 optional provider-agnostic agent handoff path.
 Minimum Neovim version: 0.10+.
 
+UNIVERSAL INBOX                                   *commentry.inbox*
+
+The project inbox works without Diffview or Snacks.
+
+:Commentry comment
+    Comment on the current file line. A command range captures the selected
+    lines, for example :'<,'>Commentry comment. The multiline editor uses
+    Ctrl-s to save and normal-mode q to cancel.
+
+:Commentry capture-text [register]
+    Comment on copied text without a file anchor. Defaults to the unnamed
+    register. Use + for the system clipboard when a provider is installed.
+
+:Commentry inbox [all]
+    Open project threads beside their focused source comparison. The default
+    scope is the canonical Git worktree root, or the containing directory
+    outside Git. The all scope includes every project. Branch provenance is
+    recorded but does not filter threads. Worktrees have separate scopes.
+
+:Commentry new-thread
+    Create a standalone project conversation with no file or copied excerpt.
+    Also available as n inside the inbox.
+
+Inbox-local keys:
+    j/k   Select a thread in the list.
+    r     Reply in a multiline editor.
+    n     New standalone thread.
+    Enter Open the conversation and mark displayed messages read.
+    u     Toggle read/unread.
+    f     Filter all/unread/read/open/resolved/queued.
+    m     Choose queue or steer send mode.
+    s     Queue or send the selected thread.
+    S     Ask Sidekick to process the current project's queue.
+    d     Remove the oldest pending request from the selected thread.
+    Ctrl-d Save and dispatch from the composer. Ctrl-s only saves locally.
+    Ctrl-h/j/k/l Move between panels, keeping plain h/j/k/l for text.
+    x     Resolve or reopen. The thread stays in the list.
+    c     Choose since, original, or agent comparison.
+    e     Expand or collapse context from four to sixteen surrounding lines.
+    i     Inspect thread ID, capture details and Git provenance.
+    ?     Show inbox help.
+    R     Refresh external writes and current file contents.
+    q     Close the inbox tab.
+
+Native window commands that close a panel also close the inbox view. Reopen it
+with :Commentry inbox. Comparison attachments are listed in the conversation
+with their label and author. Press c and choose agent to view the attached diff.
+
+File captures preserve the entire buffer, including unsaved changes, selected
+range, and available Git HEAD, branch and original blob. The source pane shows
+the relevant surrounding region. Edited selections remain visible as Outdated
+with an approximate diff. Missing files retain the original excerpt. Original
+captures never change. Conversation resolution and location state are separate.
+Narrow editors stack source and conversation beside the list.
+At 140 columns and above they sit side by side. Resizing adapts the layout.
+Commentry does not set a colorscheme. Use your normal Neovim configuration to
+inherit its theme and integrations.
+Titles and compact location/status labels keep the inbox scannable. Diffs show
+original/current line numbers and theme-linked addition/deletion highlights.
+Conversation headers emphasize authors with quiet timestamps. Provenance is
+available through i. CommentryInbox highlight groups inherit the colorscheme.
+
+Unread activity is marked *. Incoming messages/comparisons have an author other
+than You. Own replies do not clear unread activity. List previews never mark a
+thread read. Enter or entering the conversation panel acknowledges only the
+displayed incoming version. New concurrent replies remain unread. CLI read is
+non-consuming. Use u to toggle read/unread. :Commentry inbox unread opens a
+project filter. The other project filters are read, open, resolved, queued.
+Use :Commentry inbox all then f to filter all projects. A read thread remains
+visible in the unread filter until R or a filter change. External writes refresh
+about every 1.5 seconds in normal mode while the inbox is active, preserving
+selection and scroll position.
+
+Queue mode persists requests in Commentry, independently of Sidekick. Identical
+pending/claimed requests are deduplicated. S delegates queue-worker instructions
+to Sidekick, requiring agent.enabled=true. The agent claims work, replies through
+the CLI, completes claims, and checks for more work until the queue has been empty
+for 60 seconds. This is an agent workflow, not a guaranteed background scheduler.
+Steer submits a message through Sidekick immediately; the harness controls its
+effect on an active turn. Native steering and follow-up adapters are not provided.
+Sidekick can select configured Pi, Codex, or OpenCode tools. Delegation is not a
+delivery receipt. Cancelled selection never completes queued work.
+Agent payloads retain the original first/last selection coordinates.
+excerpt_first maps lines[0] to its original file line in a focused excerpt.
+
+External agents and capture tools can invoke scripts/commentry-inbox from the
+plugin checkout. It reads one JSON request from stdin and returns one JSON
+response, by forwarding to the Go backend with commentry rpc. Neovim is not
+required by the external CLI. Build with mise run build or install with
+mise run install-commentry. The inbox uses bin/commentry from the checkout,
+then commentry on PATH. Override the executable with COMMENTRY_CLI.
+Supported requests include:
+>
+  {"action":"create","project":"/project","text":"excerpt","body":"comment"}
+  {"action":"list","project":"/project"}
+  {"action":"read","thread":"t-..."}
+  {"action":"reply","thread":"t-...","author":"Agent","body":"reply"}
+  {"action":"comparison","thread":"t-...","author":"Agent","label":"Refactor","before":"old\n","after":"new\n"}
+  {"action":"resolve","thread":"t-...","resolved":true}
+  {"action":"list","project":"/project","filter":"unread","summary":true}
+  {"action":"read-state","thread":"t-...","read":true,"seen":"e-incoming-version"}
+  {"action":"queue","thread":"t-..."}
+  {"action":"claim","project":"/project","author":"Agent"}
+  {"action":"complete","thread":"t-...","claim_id":"claim-..."}
+  {"action":"cancel","thread":"t-...","queue_id":"e-..."}
+<
+Creation returns the stable thread ID as result. Project defaults to the
+invoking directory for create. Omit project from list to list every project.
+Comparison text is stored verbatim and never edits source files. Select agent
+with c to show the latest attached comparison with author and timestamp.
+Authors are caller-provided labels. Failed requests return ok=false and exit
+nonzero. R refreshes incoming messages. FocusGained also refreshes the inbox.
+summary excludes full snapshots from list output. Claims are project-scoped and
+serialized, and return an immutable message. Completion does not resolve the
+thread. Claimed work remains claimed until completed or explicitly cancelled.
+SQLite transactions recover incomplete writes after a crash. Committed claims
+are never automatically reassigned.
+
+The SQLite database is stdpath("data")/commentry/inbox/inbox.sqlite3. Override
+with COMMENTRY_INBOX_DIR or the CLI's --directory flag. The standalone CLI uses
+$XDG_DATA_HOME/nvim/commentry/inbox or ~/.local/share/nvim/commentry/inbox,
+respecting NVIM_APPNAME. Neovim passes its actual data directory explicitly.
+WAL transactions protect concurrent replies and queue claims, with a five-second
+busy timeout. Corrupt databases and unsupported schema versions report errors.
+The earlier prototype event files are left untouched and are not imported.
+There is no deletion interface yet. Removing this directory resets inbox data
+without affecting existing Diffview drafts.
+
+The standalone binary exposes list, read, create, reply, resolve, comparison,
+read-state, queue, claim, complete, cancel, revision, changes, watch, and rpc.
+All data commands return JSON. Examples:
+>
+  commentry list --project . --filter unread --summary
+  commentry create --project . --body "Explain this" --text "Copied output"
+  commentry reply t-THREAD --author Codex --body "Here is the answer"
+  commentry claim --project . --author Codex
+  commentry complete t-THREAD --claim-id claim-CLAIM
+  commentry comparison t-THREAD --author Codex --label Refactor --before-file old.lua --after-file new.lua
+  commentry watch --project . --after 0 --timeout 60s
+<
+watch emits an initial JSON page, then streams committed changes until cancelled
+or the optional timeout expires. Resume with --after CURSOR from the same
+database. changes --after CURSOR returns up to 100 changes with a cursor and
+revision. JSON equivalents are action=changes with cursor, and action=revision.
+Reading and watching do not mark messages read. read-state --read --seen
+e-VERSION acknowledges only the displayed incoming version; --read=false marks
+unread. Authors are caller-provided labels, not authentication.
+
+This first implementation has separate inbox and Diffview review stores.
+Review linking, native harness steering/follow-up adapters, reattachment, branch
+comparison mode and a system-wide capture shortcut are not implemented yet.
+
 INSTALL                                           *commentry.install*
 
 Required dependencies:

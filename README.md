@@ -1,7 +1,187 @@
 # commentry.nvim
 
-Neovim plugin for local diff review workflows, draft persistence, and optional
-agent handoff from inside Neovim.
+Neovim plugin for a project-scoped conversation inbox, local diff reviews,
+persisted comments, and optional agent handoff.
+
+## Universal inbox
+
+The first inbox implementation works independently of Diffview and Snacks:
+
+- `:Commentry comment` captures the current file line and opens a multiline
+  comment editor. `:'<,'>Commentry comment` captures a visual line range.
+- `:Commentry capture-text` comments on text from the unnamed register.
+  `:Commentry capture-text +` uses the system clipboard when a clipboard
+  provider is available.
+- `:Commentry inbox` opens the current project's threads with a focused diff
+  beside the selected conversation. `:Commentry inbox all` shows all projects.
+- `:Commentry new-thread` starts a project conversation with no selection,
+  clipboard contents, or file anchor. Press `n` inside the inbox for the same action.
+
+The editor uses `Ctrl-s` to save and normal-mode `q` to cancel. The inbox uses
+`j`/`k` in its list to select a thread, `r` to reply, `x` to resolve or reopen,
+`c` to choose a comparison, `e` to expand or collapse surrounding code,
+`i` to inspect capture and Git details, `?` for help, `R` to refresh,
+and `q` to close. `Ctrl-h/j/k/l` moves between panels. Plain `h/j/k/l` retains
+normal text navigation. Closing an inbox panel with a native window command
+closes the inbox view; `:Commentry inbox` opens it again.
+Source and conversation stack below 140 editor columns
+and sit side by side at larger widths. The layout adapts when resized. No
+global maps or colorscheme overrides are added. Open Commentry in your normal
+Neovim configuration to use your theme and configured integrations.
+
+### Read state and filters
+
+`*` marks unread activity. Messages and comparisons authored by anyone other
+than the local `You` label are incoming activity. Own replies do not clear unread
+messages. List previews leave unread state intact. `Enter`, or moving into the
+conversation panel, marks the displayed activity read. Agent comparisons appear
+as labeled attachments with instructions for viewing them using `c`.
+A newer concurrent reply
+stays unread. `u` explicitly toggles read/unread. Agent CLI reads never consume
+the human reader's unread state.
+
+Press `f` for all, unread, read, open, resolved, or queued filters. Commands such
+as `:Commentry inbox unread` open a project filter directly. `:Commentry inbox
+all` still selects all projects; use `f` to filter that scope. A thread opened
+from the unread filter remains visible while you read it. `R` or changing filters
+reapplies the filter. External writes refresh approximately every 1.5 seconds
+while the inbox is active in normal mode, retaining the selected thread and
+scroll position. `R` also refreshes comparisons after source edits.
+
+### Reply and send through Sidekick
+
+The composer uses `Ctrl-s` to save locally and `Ctrl-d` to save and dispatch.
+Press `m` in the inbox to select a send mode, then `s` to dispatch the selected
+thread. Queue is the default.
+
+- **Queue** persists an immutable request in Commentry. Keep reviewing and queue
+  more threads. Duplicate pending or claimed requests with identical content are
+  not added again. `d` removes the oldest pending request from the selected thread.
+- **Steer** hands the thread directly to Sidekick with prompt submission enabled,
+  keeping focus in the inbox where possible. The harness decides how a submitted
+  message affects an active turn. This does not force an interrupt.
+
+Press `S` to ask Sidekick to process the current project's queue. Requires
+`agent.enabled = true` and Sidekick. Sidekick supports Pi, Codex and OpenCode
+when configured. The worker prompt instructs the agent to claim queued requests,
+reply to their original threads, complete each claim, and check for more work
+while you review. It asks the worker to stop after 60 seconds of an empty queue.
+This is an agent-driven workflow, not a daemon or a guaranteed scheduler.
+
+The queue belongs to Commentry, rather than the harness's native input queue.
+Sidekick's generic API does not expose universal native steer/follow-up controls.
+Sidekick delegation is not a delivery receipt: cancellation leaves queued work
+pending, and only an explicit worker completion acknowledges it. Sending an
+entire thread includes its messages and the captured source excerpt.
+For file excerpts, `first` and `last` identify the original selection, while
+`excerpt_first` identifies the original file line represented by `lines[0]`.
+
+The list shows titles above compact location/status labels. Diffs show original
+and current line numbers with theme-linked addition and deletion highlights.
+Conversations emphasize authors and message bodies; detailed provenance is
+available through `i`. Surrounding code expands from four to sixteen lines
+with `e`. Highlight groups use the `CommentryInbox` prefix and inherit the
+active colorscheme.
+
+File captures preserve the entire buffer, including unsaved changes, the exact
+selected range, and available Git HEAD, branch, and original blob identity.
+The source pane compares the surrounding region with the current buffer or
+file. Changes above the selected region are accounted for. When the selected
+code changes, the thread remains in the list with an `Outdated` label and an
+explicitly approximate diff. Missing files retain the original excerpt.
+Original captures remain available through `c`. Resolution and location state
+are independent. Complex moves can require an agent-authored comparison.
+
+Projects use the canonical Git worktree root, or the containing directory
+outside Git. Inbox scope is project-wide across branches. Captured branch
+information is provenance, not a filter. Separate worktrees currently have
+separate project scopes.
+
+### Capture and agent replies outside Neovim
+
+Build the Go backend with `mise run build`, or install it with
+`mise run install-commentry`. The inbox requires this binary. Neovim uses the
+checkout's `bin/commentry` first, then `commentry` on PATH. `COMMENTRY_CLI` can
+select an explicit executable.
+
+`commentry rpc` reads one JSON request from standard input and returns one JSON
+response. `scripts/commentry-inbox` forwards to that binary. Neither interface
+requires Neovim to run.
+Use an absolute project directory to choose a project, or omit it on creation
+to use the invoking directory. For example, from this checkout:
+
+```bash
+./scripts/commentry-inbox <<'JSON'
+{"action":"create","title":"Explain this output","text":"Found two matching excerpts.","body":"Show both candidate locations."}
+JSON
+```
+
+The response contains `{"ok":true,"result":"t-..."}`. Use that returned ID:
+
+```json
+{"action":"list","project":"/absolute/project/path"}
+{"action":"read","thread":"t-..."}
+{"action":"reply","thread":"t-...","author":"Agent","body":"Here are the two candidates."}
+{"action":"comparison","thread":"t-...","author":"Agent","label":"Split implementation","before":"old code\n","after":"new code\n"}
+{"action":"resolve","thread":"t-...","resolved":true}
+{"action":"list","project":"/absolute/project/path","filter":"unread","summary":true}
+{"action":"read-state","thread":"t-...","read":true,"seen":"e-incoming-version-from-read"}
+{"action":"queue","thread":"t-..."}
+{"action":"claim","project":"/absolute/project/path","author":"Agent"}
+{"action":"complete","thread":"t-...","claim_id":"claim-..."}
+{"action":"cancel","thread":"t-...","queue_id":"e-queued-request"}
+```
+
+Omit `project` from `list` to list every project. Comparison text is recorded
+verbatim. Select `agent` with `c` to view the latest attached comparison, labeled
+with its author and timestamp. This never overwrites the original capture or
+edits source files. Authors are caller-provided labels. Failed requests return
+`ok: false` and exit nonzero. `summary: true` excludes full buffer snapshots from
+list output. Claims are serialized and project-scoped; a claim returns an
+immutable message and a claim ID. Completing it does not resolve its thread.
+Cancelled work cannot later be completed. SQLite transactions serialize claims
+and recover unfinished writes after a crash. A committed claim remains visible
+until completed or explicitly cancelled; it is never automatically reassigned.
+
+The SQLite database lives at `stdpath("data")/commentry/inbox/inbox.sqlite3`.
+The standalone CLI defaults to `$XDG_DATA_HOME/nvim/commentry/inbox` or
+`~/.local/share/nvim/commentry/inbox`, respecting `NVIM_APPNAME`. Set
+`COMMENTRY_INBOX_DIR` or pass `--directory` to select another inbox. Neovim
+always passes its actual data directory to the backend. Replies, read state,
+comparisons, queue transitions, and change records commit transactionally.
+The database uses WAL with a five-second busy timeout. Corrupt databases and
+unsupported schema versions report errors. There is no deletion interface yet.
+Earlier prototype event files are left untouched and are not imported.
+
+The same operations have shell commands with JSON output:
+
+```bash
+./bin/commentry create --project . --title 'Explain this' --body 'How does this work?'
+./bin/commentry list --project . --filter unread --summary
+./bin/commentry reply t-THREAD --author Codex --body 'Here is the explanation.'
+./bin/commentry queue t-THREAD
+./bin/commentry claim --project . --author Codex
+./bin/commentry complete t-THREAD --claim-id claim-CLAIM
+./bin/commentry comparison t-THREAD --author Codex --label 'Updated code' --before-file old.lua --after-file new.lua
+./bin/commentry watch --project . --after 0 --timeout 60s
+```
+
+`watch` streams JSON lines containing committed changes, an opaque integer
+`cursor`, and the latest `revision`. It emits an initial page, then waits for
+activity until interrupted or the optional timeout expires. Resume with
+`--after CURSOR`, using a cursor from the same database. `changes --after CURSOR`
+returns one page of up to 100 changes. `revision` reads the latest sequence.
+The equivalent JSON requests use `action: "changes"` with `cursor`, or
+`action: "revision"`. Reading threads and watching changes never marks them read.
+Use `read-state --read --seen e-VERSION` to acknowledge the version displayed,
+or `read-state --read=false` to mark unread. Author labels are not authentication.
+Neovim detects committed revisions automatically while the inbox is idle.
+
+The existing Diffview review store and send-to-agent flow remain separate.
+Review-to-inbox linking, native harness steering/follow-up adapters, reattachment,
+branch comparison mode, and a system-wide capture shortcut are follow-up work.
+Removing the new inbox directory resets only the inbox data. Existing review
+drafts remain in their original store.
 
 ## Preview
 
@@ -30,7 +210,8 @@ one implementation; both expose the same `diffview` module and commands.
 Required:
 
 - Neovim `0.10+`
-- `dlyongemallo/diffview-plus.nvim` or `sindrets/diffview.nvim` for the diff UI
+- `dlyongemallo/diffview-plus.nvim` or `sindrets/diffview.nvim` for Diffview reviews.
+  The universal inbox does not require either implementation.
 
 Optional integrations:
 
@@ -173,11 +354,30 @@ require("commentry").setup({
 
 ## Development
 
-- Run tests: `./scripts/test`
-- Validate docs: `./scripts/docs`
+- Install development tools: `mise install`
+- Format Lua and Go: `mise run format`
+- Lint Lua and Go: `mise run lint`
+- Run Lua and Go tests: `mise run test`
+- Validate docs: `mise run docs`
+- Full local checks: `mise run ci`
+- Build the standalone Go CLI: `mise run build`
+- Run its help: `mise run run -- --help`
+- Install it to `~/.local/bin/commentry`: `mise run install-commentry`
 - First release checklist: `docs/release-checklist.md`
 - Canonical feature/design plans: `docs/plans/`
 - Legacy Speckit archive (read-only history): `docs/archive/speckit/`
+
+The Go CLI owns the SQLite inbox backend, JSON protocol, and shell commands.
+Go tooling is adapted from `~/personal/evaler`,
+including Go 1.26.5, golangci-lint v2, its lint and formatter rules, hk 1.55,
+and the Cobra/Viper skill in `.agents/skills/cobra-viper`.
+The backend uses the pure Go `modernc.org/sqlite` driver. Viper is not needed yet.
+Lua tests build the backend automatically. `mise run build_go` compiles it without
+running checks.
+
+Use `mise run format_go`, `mise run lint_go`, and `mise run test_go` for Go-only
+work. `mise run lint:fix` applies Go lint fixes through hk. Install the optional
+git hooks with `mise exec -- hk install`.
 
 ## Behavior Notes
 

@@ -54,6 +54,51 @@ local ok, err = xpcall(function()
   }, 5000)
 
   bridge:wait_for_flush(5000)
+  if scenario == "inbox" then
+    bridge:request("nvim_exec_lua", {
+      [[
+        vim.env.COMMENTRY_INBOX_DIR = vim.fn.getcwd() .. "/inbox-data"
+        vim.cmd.edit("demo.lua")
+        local buf = vim.api.nvim_get_current_buf()
+        vim.api.nvim_buf_set_lines(buf, 0, -1, false, {
+          "local function request(url, retries)",
+          "  for attempt = 1, retries do",
+          "    local result = fetch(url)",
+          "    if result.ok then return result end",
+          "  end",
+          "end",
+        })
+        local store = require("commentry.inbox.store")
+        local capture = assert(require("commentry.inbox.source").capture(buf, 2, 4))
+        capture.body = "Can we cap the total time spent retrying?"
+        capture.title = "Cap total retry time"
+        local id = assert(store.create(capture))
+        assert(store.update(id, { kind = "reply", author = "Agent", body = "Added a shared deadline. Retries now stop after ten seconds." }))
+        assert(store.update(id, {
+          kind = "comparison",
+          author = "Agent",
+          label = "Shared retry deadline",
+          before = "for attempt = 1, retries do\n  local result = fetch(url)\nend\n",
+          after = "local deadline = clock() + 10\nfor attempt = 1, retries do\n  if clock() >= deadline then return nil end\n  local result = fetch(url)\nend\n",
+        }))
+        vim.api.nvim_buf_set_lines(buf, 1, 1, false, {
+          "  local deadline = clock() + 10",
+        })
+        vim.api.nvim_buf_set_lines(buf, 3, 3, false, {
+          '    if clock() >= deadline then return nil, "timeout" end',
+        })
+        assert(store.create({project = capture.project, title = "Explain this test failure", body = "Include both candidate locations in this error.", source = {kind = "text", lines = {"Found two matching excerpts.", "Unable to choose a destination."}}}))
+        assert(store.create({project = capture.project, title = "A general project question", body = "Can we make the next milestone smaller?", source = {kind = "text", lines = {}, origin = "general"}}))
+        require("commentry.inbox").open()
+        return true
+      ]],
+      {},
+    }, 5000)
+    bridge:wait_for_flush(5000)
+    local snapshot = bridge.screen:snapshot("rpc-inbox")
+    Bridge.write_snapshot_files(snapshot, bridge.screen, out_dir, "rpc-inbox")
+    return
+  end
   bridge:request("nvim_command", { "Commentry open" }, 5000)
 
   bridge:wait_until(5000, function()

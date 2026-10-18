@@ -3,6 +3,7 @@
 /.tests
 /.commentry/
 /build
+/bin/
 /debug
 /doc/tags
 foo.*

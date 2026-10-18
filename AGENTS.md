@@ -6,8 +6,8 @@ This file defines the operating contract for humans and AI agents working in thi
 
 - Project: `commentry.nvim` Neovim plugin.
 - Runtime target: Neovim `0.10+`.
-- Primary language: Lua.
-- Test framework: `mini.test`.
+- Languages: Lua for Neovim, Go for the standalone CLI.
+- Test frameworks: `mini.test` for Lua, `go test` for Go.
 - Task runner: `mise` (`mise run <task>` is canonical).
 - Docs are maintained manually; `lua/commentry/docs.lua` validates README/vimdoc/help parity for release-facing surfaces.
 
@@ -21,6 +21,13 @@ This file defines the operating contract for humans and AI agents working in thi
 - `tests/minit.lua`: test harness/bootstrap.
 - `scripts/test`: local test runner wrapper.
 - `scripts/docs`: docs runner wrapper.
+- `main.go`: standalone Go CLI entrypoint.
+- `cmd/`: Cobra command factories. Keep inbox logic independent of Cobra.
+- `inbox/`: SQLite storage, request validation, thread state, and change cursors.
+- `lua/commentry/inbox/store.lua`: Neovim adapter to the Go JSON interface.
+- `.golangci.yml`: Go lint, modernization, and formatter configuration.
+- `hk.pkl`: Go checks and optional git hooks, adapted from Evaler.
+- `.agents/skills/cobra-viper/`: Go CLI architecture guidance, shared with Claude via symlink.
 
 ## Command Canon (Use These)
 
@@ -32,6 +39,28 @@ Run commands from repo root.
 - Validate docs: `mise run docs`
 - Run health checks: `mise run health`
 - Full local gate: `mise run ci` (runs lint + test + health + docs)
+- Build the Go CLI: `mise run build` (Go lint + tests, outputs `bin/commentry`)
+- Compile the backend only: `mise run build_go`
+- Run the Go CLI: `mise run run -- --help`
+- Install the Go CLI: `mise run install-commentry`
+- Go-only checks: `mise run format_go`, `mise run lint_go`, `mise run test_go`
+- Apply Go lint fixes: `mise run lint:fix`
+
+## Go Workflow
+
+- Use Go 1.26.5 and golangci-lint v2 through mise, matching Evaler's scaffold.
+- Read `.agents/skills/cobra-viper/SKILL.md` when implementing commands.
+- Build commands with factories and pass command contexts into domain code.
+- Add Viper when configuration requires it. Commands currently use Cobra flags and environment variables.
+- Use `modernc.org/sqlite` for the inbox database. Each mutation and its change record must share a transaction.
+- Keep original captures immutable, incoming versions distinct from read acknowledgements, and queue claims atomic.
+- Lua tests build the Go binary automatically. Tests use isolated data directories and never mutate the user's inbox.
+- `mise run lint_go` includes the modernize analyzer and the configured formatters.
+- Before changing Go files, inspect planned checks with `mise exec -- hk run check --safe --plan --json`.
+- Scope agent checks to changed Go files. For exact paths, pass a NUL-delimited file list with `--files0-from`.
+- Use `--safe` for read-only hk checks and inspect command effects before applying fixes.
+- Consume hk JSON or JSONL diagnostics and retain raw output when investigating failures.
+- Git hooks are optional. Install explicitly with `mise exec -- hk install`.
 
 ## Visual Validation
 
@@ -75,6 +104,7 @@ Stop and ask for direction when any of these occur:
 
 - If you change formatting/style config or broad Lua edits, run: `mise run format` then `mise run lint`.
 - If you change runtime/plugin behavior, run: `mise run test`.
+- If you change Go code or tooling, run: `mise run format_go`, `mise run lint_go`, and `mise run build`.
 - If you change docs/readme generation paths, run: `mise run docs`.
 - If you change plugin wiring/health surfaces, run: `mise run health`.
 - Before handoff, report exact commands run and pass/fail results.

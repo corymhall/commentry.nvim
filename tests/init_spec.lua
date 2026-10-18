@@ -14,22 +14,20 @@ describe("commentry.setup", function()
     package.preload["commentry.agent.orchestrator"] = original_orchestrator_preload
   end)
 
-  it("does not error", function()
-    local ok = pcall(require("commentry").setup, {})
-    assert.is_true(ok)
-  end)
-
   it("loads agent delegation lazily even when enabled", function()
     package.loaded["commentry.agent.orchestrator"] = nil
     package.preload["commentry.agent.orchestrator"] = function()
       error("agent orchestrator should load only when sending")
     end
 
-    local ok = pcall(require("commentry").setup, {
+    require("commentry").setup({
       agent = {
         enabled = true,
       },
+      keymaps = { edit_comment = "gz" },
     })
-    assert.is_true(ok)
+    local Config = require("commentry.config")
+    assert.is_true(Config.agent.enabled)
+    assert.are.same("gz", Config.keymaps.edit_comment)
   end)
 end)

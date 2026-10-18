@@ -15,7 +15,7 @@ SINGLE_SCENARIO=""
 CWD=""
 CLEANUP_REPO=""
 
-SCENARIOS=(popup card range review)
+SCENARIOS=(popup card range review inbox)
 
 cleanup() {
   if [[ -n ${CLEANUP_REPO:-} && -d ${CLEANUP_REPO:-} ]]; then
@@ -55,6 +55,9 @@ scenario_name() {
     review)
       printf '%s\n' "rpc-review-progress"
       ;;
+    inbox)
+      printf '%s\n' "rpc-inbox"
+      ;;
     *)
       echo "Unknown scenario: $1" >&2
       exit 1
@@ -76,6 +79,9 @@ scenario_title() {
     review)
       printf '%s\n' "RPC Review Progress"
       ;;
+    inbox)
+      printf '%s\n' "RPC Universal Inbox"
+      ;;
     *)
       echo "Unknown scenario: $1" >&2
       exit 1
@@ -96,6 +102,9 @@ scenario_caption() {
       ;;
     review)
       printf '%s\n' "Commentry-owned reviewed marks rendered independently from Diffview selections."
+      ;;
+    inbox)
+      printf '%s\n' "Project inbox with a focused snapshot diff beside its conversation."
       ;;
     *)
       echo "Unknown scenario: $1" >&2
@@ -200,7 +209,7 @@ const links = presets
   .map((preset) => `<li><a href="${preset}/index.html">${preset}</a></li>`)
   .join("\n");
 
-const compareLinks = ["popup", "card", "range", "review"]
+const compareLinks = ["popup", "card", "range", "review", "inbox"]
   .map((scenario) => `<li><a href="compare/${scenario}.html">compare ${scenario}</a></li>`)
   .join("\n");
 
@@ -274,6 +283,12 @@ const scenarios = [
     title: "Review Progress Comparison",
     image: "rpc-review-progress.png",
     caption: "Content-addressed reviewed marks rendered in the Diffview panel and active diff.",
+  },
+  {
+    key: "inbox",
+    title: "Universal Inbox Comparison",
+    image: "rpc-inbox.png",
+    caption: "A focused snapshot diff beside its conversation, independent of Diffview.",
   },
 ];
 

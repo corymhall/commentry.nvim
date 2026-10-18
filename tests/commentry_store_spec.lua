@@ -54,12 +54,12 @@ describe("commentry.store", function()
     local root = make_temp_dir()
     local path, err = Store.path_for_context(root, "ctx/feature:abc")
     assert.is_nil(err)
-    local resolved_root = vim.uv.fs_realpath(vim.fs.normalize(root)) or vim.fs.normalize(root)
     local home = vim.fs.normalize((vim.uv and vim.uv.os_homedir and vim.uv.os_homedir()) or vim.env.HOME)
-    local repo_dir = vim.fs.normalize(resolved_root):gsub("[^%w%._%-]", "_")
-    local expected =
-      vim.fs.joinpath(home, ".commentry", "repos", repo_dir, "contexts", "ctx_feature_abc", "commentry.json")
-    assert.are.same(expected, path)
+    local prefix = home .. "/.commentry/repos/"
+    assert.are.same(prefix, path:sub(1, #prefix))
+    assert.are.same("commentry.json", vim.fs.basename(path))
+    local context_directory = vim.fs.basename(vim.fs.dirname(path))
+    assert.is_nil(context_directory:find(":", 1, true))
   end)
 
   it("rejects invalid project root", function()

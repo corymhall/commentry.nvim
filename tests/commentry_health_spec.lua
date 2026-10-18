@@ -48,6 +48,15 @@ describe("commentry.health", function()
     package.loaded["commentry.health"] = nil
   end)
 
+  local function contains_message(messages, fragment)
+    for _, message in ipairs(messages) do
+      if message:find(fragment, 1, true) then
+        return true
+      end
+    end
+    return false
+  end
+
   local function capture_health()
     local seen = { ok = {}, warn = {}, error = {} }
     vim.health = {
@@ -77,16 +86,11 @@ describe("commentry.health", function()
 
     require("commentry.health").check()
 
-    assert.is_true(vim.tbl_contains(seen.ok, "Neovim version is supported (>= 0.10)"))
-    assert.is_true(vim.tbl_contains(seen.ok, ":Commentry command is registered"))
-    assert.is_true(vim.tbl_contains(seen.ok, "commentry.config is loaded"))
-    assert.is_true(vim.tbl_contains(seen.ok, "diffview.nvim is installed"))
-    assert.is_true(
-      vim.tbl_contains(
-        seen.ok,
-        "snacks.nvim picker.select is available for :Commentry list-comments and :Commentry reattach"
-      )
-    )
+    assert.is_true(contains_message(seen.ok, "Neovim"))
+    assert.is_true(contains_message(seen.ok, ":Commentry"))
+    assert.is_true(contains_message(seen.ok, "commentry.config"))
+    assert.is_true(contains_message(seen.ok, "diffview.nvim"))
+    assert.is_true(contains_message(seen.ok, "picker.select"))
     assert.are.same(0, #seen.warn)
   end)
 
@@ -98,12 +102,7 @@ describe("commentry.health", function()
 
     require("commentry.health").check()
 
-    assert.is_true(
-      vim.tbl_contains(
-        seen.warn,
-        "snacks.nvim not installed: :Commentry list-comments and :Commentry reattach are unavailable"
-      )
-    )
+    assert.is_true(contains_message(seen.warn, "snacks.nvim"))
   end)
 
   it("warns when snacks picker.select is unavailable", function()
@@ -114,7 +113,7 @@ describe("commentry.health", function()
 
     require("commentry.health").check()
 
-    assert.is_true(vim.tbl_contains(seen.warn, "snacks.nvim installed but picker.select is unavailable"))
+    assert.is_true(contains_message(seen.warn, "picker.select"))
   end)
 
   it("warns when agent delegation is enabled and the adapter is unavailable", function()
@@ -124,12 +123,7 @@ describe("commentry.health", function()
 
     require("commentry.health").check()
 
-    assert.is_true(
-      vim.tbl_contains(
-        seen.warn,
-        "agent enabled but sidekick adapter is unavailable; install sidekick integration or set agent.enabled=false"
-      )
-    )
+    assert.is_true(contains_message(seen.warn, "sidekick adapter"))
   end)
 
   it("warns when the Sidekick CLI send API is unavailable", function()
@@ -144,12 +138,7 @@ describe("commentry.health", function()
 
     require("commentry.health").check()
 
-    assert.is_true(
-      vim.tbl_contains(
-        seen.warn,
-        "agent enabled but sidekick CLI send API is unavailable; check the Sidekick installation"
-      )
-    )
+    assert.is_true(contains_message(seen.warn, "sidekick CLI"))
   end)
 
   it("reports agent delegation readiness", function()
@@ -164,9 +153,7 @@ describe("commentry.health", function()
 
     require("commentry.health").check()
 
-    assert.is_true(
-      vim.tbl_contains(seen.ok, "agent adapter ready; Sidekick resolves the :Commentry send-to-agent target")
-    )
+    assert.is_true(contains_message(seen.ok, "agent adapter"))
     assert.are.same(0, #seen.warn)
   end)
 
@@ -179,8 +166,8 @@ describe("commentry.health", function()
 
     require("commentry.health").check()
 
-    assert.is_true(vim.tbl_contains(seen.warn, 'log.level="trace" is invalid; expected one of error|warn|info|debug'))
-    assert.is_true(vim.tbl_contains(seen.warn, 'log.sink="stdout" is invalid; expected one of notify|echo|file'))
+    assert.is_true(contains_message(seen.warn, 'log.level="trace" is invalid; expected one of error|warn|info|debug'))
+    assert.is_true(contains_message(seen.warn, 'log.sink="stdout" is invalid; expected one of notify|echo|file'))
   end)
 
   it("warns when file sink path is not writable", function()

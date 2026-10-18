@@ -44,3 +44,11 @@ jobs:
       - uses: jdx/mise-action@v3
       - name: Run docs command
         run: mise run docs
+
+  build-go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v3
+      - name: Build and check the Go CLI
+        run: mise run build

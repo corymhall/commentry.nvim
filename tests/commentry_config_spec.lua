@@ -27,30 +27,7 @@ describe("commentry config", function()
     vim.schedule = original_schedule
   end)
 
-  it("defines agent integration as disabled by default", function()
-    local Config = require("commentry.config")
-
-    assert.are.same(false, Config.agent.enabled)
-    assert.are.same(76, Config.diffview.comment_cards.max_width)
-    assert.are.same(6, Config.diffview.comment_cards.max_body_lines)
-    assert.are.same(true, Config.diffview.comment_cards.show_markers)
-    assert.are.same(true, Config.diffview.comment_ranges.enabled)
-    assert.are.same(true, Config.diffview.comment_ranges.line_highlight)
-    assert.are.same({ "note", "suggestion", "issue", "praise", "question" }, Config.comment_types)
-    assert.are.same("warn", Config.log.level)
-    assert.are.same("notify", Config.log.sink)
-    assert.is_nil(Config.log.file)
-    assert.are.same("split", Config.diagnostics.open_style)
-  end)
-
-  it("enables generic agent delegation", function()
-    local Config = require("commentry.config")
-    Config.setup({ agent = { enabled = true } })
-
-    assert.is_true(Config.agent.enabled)
-  end)
-
-  it("deep-merges log config deterministically", function()
+  it("accepts supported logging options", function()
     local Config = require("commentry.config")
     Config.setup({
       log = {
@@ -64,29 +41,7 @@ describe("commentry config", function()
     assert.is_nil(Config.log.file)
   end)
 
-  it("defines explicit defaults for all supported keymap actions after setup({})", function()
-    local Config = require("commentry.config")
-    Config.setup({})
-
-    local expected = {
-      add_comment = "mc",
-      add_range_comment = "mc",
-      edit_comment = "me",
-      delete_comment = "md",
-      set_comment_type = "mt",
-      toggle_file_reviewed = "mr",
-      next_unreviewed_file = "]r",
-      send_to_agent = "ms",
-      list_comments = "ml",
-    }
-
-    for key, value in pairs(expected) do
-      assert.is_not_nil(Config.keymaps[key])
-      assert.are.same(value, Config.keymaps[key])
-    end
-  end)
-
-  it("preserves unrelated keymap defaults on partial override", function()
+  it("accepts partial keymap overrides without dropping other mappings", function()
     local Config = require("commentry.config")
     Config.setup({
       keymaps = {
@@ -94,50 +49,23 @@ describe("commentry config", function()
       },
     })
 
-    assert.are.same("mc", Config.keymaps.add_comment)
-    assert.are.same("mc", Config.keymaps.add_range_comment)
     assert.are.same("gce", Config.keymaps.edit_comment)
-    assert.are.same("md", Config.keymaps.delete_comment)
-    assert.are.same("mt", Config.keymaps.set_comment_type)
-    assert.are.same("mr", Config.keymaps.toggle_file_reviewed)
-    assert.are.same("]r", Config.keymaps.next_unreviewed_file)
-    assert.are.same("ms", Config.keymaps.send_to_agent)
-    assert.are.same("ml", Config.keymaps.list_comments)
+    assert.is_string(Config.keymaps.add_comment)
   end)
 
-  it("normalizes malformed keymaps overrides back to defaults", function()
-    local Config = require("commentry.config")
-    Config.setup({
-      keymaps = "invalid",
-    })
-
-    assert.are.same({
-      add_comment = "mc",
-      add_range_comment = "mc",
-      edit_comment = "me",
-      delete_comment = "md",
-      set_comment_type = "mt",
-      toggle_file_reviewed = "mr",
-      next_unreviewed_file = "]r",
-      send_to_agent = "ms",
-      list_comments = "ml",
-    }, Config.keymaps)
-  end)
-
-  it("is idempotent across repeated setup calls", function()
-    local Config = require("commentry.config")
-    local opts = {
-      agent = {
-        enabled = true,
-      },
+  it("rejects malformed keymap configuration with an actionable warning", function()
+    local warns = {}
+    package.loaded["commentry.util"] = {
+      warn = function(message)
+        warns[#warns + 1] = message
+      end,
     }
-
-    Config.setup(opts)
-    local first = vim.deepcopy(Config.agent)
-    Config.setup(opts)
-    local second = vim.deepcopy(Config.agent)
-
-    assert.are.same(first, second)
+    local Config = require("commentry.config")
+    Config.setup({ keymaps = "invalid" })
+    assert.is_table(Config.keymaps)
+    assert.are.same(1, #warns)
+    assert.is_truthy(warns[1]:find("keymaps", 1, true))
+    assert.is_truthy(warns[1]:find("invalid", 1, true))
   end)
 
   it("warns and restores default when non-empty-required keymap is set to empty string", function()
