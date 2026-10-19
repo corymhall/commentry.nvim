@@ -29,7 +29,7 @@ depends = ["format_lua", "format_go"]
 
 [tasks.format_lua]
 description = "Format Lua sources"
-run = "stylua lua tests plugin repro.lua"
+run = "stylua lua tests plugin capture integrations repro.lua"
 
 [tasks.format_go]
 description = "Format Go sources"
@@ -37,7 +37,7 @@ run = "golangci-lint fmt"
 
 [tasks.lint_stylua]
 description = "Check formatting with StyLua"
-run = "stylua --check lua tests plugin repro.lua"
+run = "stylua --check lua tests plugin capture integrations repro.lua"
 
 [tasks.lint_selene]
 description = "Lint Lua with Selene"

@@ -39,7 +39,9 @@ Inbox-local keys:
     f     Filter all/unread/read/open/resolved/queued.
     m     Choose queue or steer send mode.
     s     Queue or send the selected thread.
-    S     Ask Sidekick to process the current project's queue.
+    S     Attach an existing Pi or Codex session in this project.
+    a     Attached session status, focus and delivery controls.
+    t     Retry a failed request after inspecting partial work.
     d     Remove the oldest pending request from the selected thread.
     Ctrl-d Save and dispatch from the composer. Ctrl-s only saves locally.
     Ctrl-h/j/k/l Move between panels, keeping plain h/j/k/l for text.
@@ -80,17 +82,113 @@ visible in the unread filter until R or a filter change. External writes refresh
 about every 1.5 seconds in normal mode while the inbox is active, preserving
 selection and scroll position.
 
-Queue mode persists requests in Commentry, independently of Sidekick. Identical
-pending/claimed requests are deduplicated. S delegates queue-worker instructions
-to Sidekick, requiring agent.enabled=true. The agent claims work, replies through
-the CLI, completes claims, and checks for more work until the queue has been empty
-for 60 seconds. This is an agent workflow, not a guaranteed background scheduler.
-Steer submits a message through Sidekick immediately; the harness controls its
-effect on an active turn. Native steering and follow-up adapters are not provided.
-Sidekick can select configured Pi, Codex, or OpenCode tools. Delegation is not a
-delivery receipt. Cancelled selection never completes queued work.
-Agent payloads retain the original first/last selection coordinates.
-excerpt_first maps lines[0] to its original file line in a focused excerpt.
+S selects an existing Pi or Codex process in Rex, scoped to this project.
+Rex supplies discovery, status and terminal input. Sidekick and agent.enabled
+only apply to the separate legacy :Commentry send-to-agent review command.
+
+Load the general-purpose actions in Rex init.lua, then rex config reload:
+>
+  dofile(os.getenv("HOME") .. "/plugins/commentry.nvim/integrations/rex/agents.lua").setup()
+<
+These actions also work independently of Commentry:
+>
+  rex do agent_list
+  rex do agent_list project=/absolute/project/path
+  rex do agent_get target=TARGET_ID_FROM_LIST
+  rex do agent_queue target=TARGET_ID_FROM_LIST text='Review this'
+  rex do agent_steer target=TARGET_ID_FROM_LIST text='Also check cancellation'
+  rex do agent_read target=TARGET_ID_FROM_LIST
+  rex do agent_focus target=TARGET_ID_FROM_LIST
+<
+Targets identify session, pane and foreground process. Restarting or replacing
+the agent requires selecting its new target. agent_list filters by an absolute
+directory and descendants. Commentry additionally resolves Git roots.
+agent_get returns status. agent_read returns terminal text, not a structured
+conversation transcript. OpenCode is not implemented.
+
+Queue and steer both submit immediately, including while working. Codex uses
+Tab for its native queue and Enter for steering. Pi uses Alt-Enter for native
+follow-ups and Enter for direct submission. An idle agent may start immediately.
+The harness owns scheduling. No Commentry worker waits for idle or starts agents.
+Messages use bracketed paste followed by the submission key in one PTY write.
+The existing composer should be clear of unfinished drafts. Blocked, unknown or
+error states require attention before sending. Agent status must be reported by
+the foreground process. Approvals and questions stay in the agent interface.
+
+Customized keybindings can be supplied as terminal byte sequences:
+>
+  dofile("/path/to/agents.lua").setup({ adapters = {
+    codex = { queue = "\t", steer = "\r" },
+    pi = { queue = "\27\r", steer = "\r" },
+  } })
+<
+Commentry keeps immutable snapshots, inbox thread IDs and claim IDs. Requests
+include instructions for finish through the CLI or JSON RPC, saving the reply
+and completing the claim atomically. Terminal writes and status changes do not
+complete inbox requests. Pending means locally waiting for delivery, Sent means
+submitted to the harness. Completion does not resolve conversations. Comparisons
+can be attached through the CLI while preserving the original capture.
+
+Sending an unchanged active request shows "Nothing new to send. There are no
+new messages." Without a selected agent, requests remain locally pending.
+Selecting an agent
+or using a to deliver pending requests sends them to its native queue. Press a
+for status, focus, selection or detach. Detaching leaves delivered work intact.
+Failed or partial writes are never replayed automatically. Inspect the agent
+before retrying with t. Sending the same failed snapshot keeps its failure
+visible. A late agent answer can finish its original claim until explicitly
+retried. Cancelling a delivered inbox claim does not remove work
+from the harness's native queue.
+
+Rex clipboard capture:
+Install the binary with mise run install-commentry. In Rex init.lua:
+>
+  dofile(os.getenv("HOME") .. "/plugins/commentry.nvim/integrations/rex/commentry.lua")
+  rex.bind("ctrl+a>a", "commentry_capture")
+  rex.bind("ctrl+a>shift+a", "commentry_new")
+  rex.bind("ctrl+a>i", "commentry_inbox")
+<
+The first action snapshots the macOS clipboard, reads the originating pane's
+project directory, and opens a temporary New comment tab. Captured text appears
+above a multiline editor using your Neovim configuration and theme. Ctrl-p
+changes project. Ctrl-s saves. Ctrl-d saves and queues. Normal-mode q or :q
+cancels. Saving or cancelling returns to the originating tab. Failed saves
+retain the draft. The second action starts without a clipboard attachment.
+If sending fails after saving, the editor stays open with delivery guidance.
+Ctrl-s closes the saved capture. Inspect the inbox before retrying delivery.
+commentry_inbox reuses Neovim in the current pane or an immediately adjacent
+pane to the left or right in the same Rex window. Otherwise it creates a
+right-hand pane and starts Neovim there. Existing editors use RPC when available,
+otherwise a Normal-mode command.
+Both paths retain unsaved buffers and the working directory. Invoking from
+a recognized agent pane selects that agent for the project without submitting
+pending requests. The equivalent shell command is commentry rex inbox.
+The Lua entry point accepts an explicit project:
+>
+  require("commentry.inbox").open(nil, { project = "/path/to/project" })
+<
+The bindings work while Rex is focused, not as OS-wide hotkeys.
+
+The same composer runs with commentry capture --project . or --empty.
+commentry rex capture opens it in Rex using REX_SESSION and REX_BLOCK.
+Use --client when several Rex apps are connected. COMMENTRY_REX overrides
+the Rex executable. Capture currently requires local macOS and Neovim 0.10+.
+
+Existing session commands:
+>
+  commentry agent --project . list
+  commentry agent --project . attach TARGET_ID_FROM_LIST
+  commentry agent --project . status
+  commentry agent --project . dispatch
+  commentry agent --project . steer t-THREAD
+  commentry agent --project . detach
+  commentry retry t-THREAD --queue-id e-REQUEST
+  commentry finish t-THREAD --claim-id claim-ID --author codex --body 'Reply'
+<
+There is one selected existing session per project. Selection is independent
+of delivered work. All discovery and delivery go through the Rex actions.
+Agent payloads retain original first/last selection coordinates. excerpt_first
+maps lines[0] to the original file line in a focused excerpt.
 
 External agents and capture tools can invoke scripts/commentry-inbox from the
 plugin checkout. It reads one JSON request from stdin and returns one JSON
@@ -121,7 +219,8 @@ Authors are caller-provided labels. Failed requests return ok=false and exit
 nonzero. R refreshes incoming messages. FocusGained also refreshes the inbox.
 summary excludes full snapshots from list output. Claims are project-scoped and
 serialized, and return an immutable message. Completion does not resolve the
-thread. Claimed work remains claimed until completed or explicitly cancelled.
+thread. Claimed work remains visible until completed, explicitly cancelled,
+or explicitly marked failed after uncertain delivery.
 SQLite transactions recover incomplete writes after a crash. Committed claims
 are never automatically reassigned.
 
@@ -136,7 +235,8 @@ There is no deletion interface yet. Removing this directory resets inbox data
 without affecting existing Diffview drafts.
 
 The standalone binary exposes list, read, create, reply, resolve, comparison,
-read-state, queue, claim, complete, cancel, revision, changes, watch, and rpc.
+read-state, queue, claim, complete, cancel, retry, revision, changes, watch, rpc,
+capture, rex, and agent.
 All data commands return JSON. Examples:
 >
   commentry list --project . --filter unread --summary
@@ -156,8 +256,8 @@ e-VERSION acknowledges only the displayed incoming version; --read=false marks
 unread. Authors are caller-provided labels, not authentication.
 
 This first implementation has separate inbox and Diffview review stores.
-Review linking, native harness steering/follow-up adapters, reattachment, branch
-comparison mode and a system-wide capture shortcut are not implemented yet.
+Review linking, OpenCode, anchor reattachment,
+branch comparison mode and an OS-wide capture shortcut are not implemented yet.
 
 INSTALL                                           *commentry.install*
 

@@ -140,9 +140,16 @@ local function send_thread(id, mode)
   if not report(result, err) then
     return
   end
-  Util.info(
-    mode == "queue" and "Added to the Commentry queue" or "Delegated thread to Sidekick; delivery is not confirmed"
-  )
+  if not result.delivery_error then
+    if result.skipped then
+      Util.info("Nothing new to send. There are no new messages.")
+    else
+      Util.info(
+        mode == "queue" and (result.status == "claimed" and "Sent to the agent queue" or "Saved for delivery")
+          or "Steering submitted"
+      )
+    end
+  end
   if active and vim.api.nvim_tabpage_is_valid(active.tab) then
     refresh(active)
   end
@@ -318,6 +325,7 @@ end
 local function window(buf)
   vim.api.nvim_win_set_buf(0, buf)
   vim.wo.number, vim.wo.relativenumber = false, false
+  vim.wo.list = false
   vim.wo.signcolumn = "no"
   vim.wo.wrap = true
   vim.wo.linebreak = true
@@ -369,12 +377,12 @@ local function layout(view)
   view.reflowing = false
 end
 
-function M.open(scope)
+function M.open(scope, opts)
   Render.highlights()
   if active and active.closed then
     close_view(active)
   end
-  local project = Source.project()
+  local project = Source.project(opts and opts.project)
   if scope == "all" then
     project = nil
   end
@@ -547,12 +555,47 @@ function M.open(scope)
       },
       S = {
         function()
-          local result, err = require("commentry.inbox.agent").worker(view.project)
-          if report(result, err) then
-            Util.info("Delegated queue worker instructions to Sidekick")
+          local target_project = view.project or (selected(view) and selected(view).project)
+          if not target_project then
+            Util.warn("Select a project thread first")
+            return
+          end
+          require("commentry.inbox.agent").choose(target_project)
+        end,
+        "Attach an existing project agent",
+      },
+      a = {
+        function()
+          local target_project = view.project or (selected(view) and selected(view).project)
+          if target_project then
+            require("commentry.inbox.agent").controls(target_project)
           end
         end,
-        "Ask Sidekick to process the project queue",
+        "Attached agent status and delivery",
+      },
+      t = {
+        function()
+          local thread = selected(view)
+          if not thread then
+            return
+          end
+          for _, item in ipairs(thread.queue) do
+            if item.status == "failed" then
+              vim.ui.select(
+                { "Keep failed", "Retry request" },
+                { prompt = item.error or "Inspect partial work before retrying" },
+                function(choice)
+                  if choice == "Retry request" then
+                    update({ kind = "retry", queue_id = item.id })
+                  end
+                end
+              )
+              return
+            end
+          end
+          Util.info("No failed requests in this thread")
+        end,
+        "Retry a failed request after inspecting partial work",
       },
       d = {
         function()
@@ -601,7 +644,9 @@ function M.open(scope)
             "f       Filter threads",
             "m       Choose queue or steer mode",
             "s       Queue or send the selected thread",
-            "S       Ask Sidekick to process the queue",
+            "S       Attach an existing project agent",
+            "a       Attached agent status and delivery",
+            "t       Retry a failed request",
             "d       Remove the oldest pending queue request",
             "Ctrl-d  Save and send from the composer",
             "Ctrl-h/j/k/l  Move between panels",

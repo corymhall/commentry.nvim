@@ -56,8 +56,12 @@ function M.list(view)
       status = status .. " / Outdated"
     end
     for _, item in ipairs(thread.queue) do
+      if item.status == "failed" then
+        status = status .. " / Failed"
+        break
+      end
       if item.status == "pending" or item.status == "claimed" then
-        status = status .. " / " .. (item.status == "pending" and "Queued" or "Working")
+        status = status .. " / " .. (item.status == "pending" and "Pending" or "Sent")
         break
       end
     end
@@ -156,6 +160,12 @@ function M.conversation(view, thread)
   end
   local rows =
     { thread.title, status .. " / " .. (thread.unread and "Unread / " or "") .. #thread.messages .. " messages", "" }
+  for _, item in ipairs(thread.queue) do
+    if item.status == "failed" then
+      vim.list_extend(rows, vim.split("Request failed: " .. (item.error or "Delivery failed"), "\n", { plain = true }))
+      vim.list_extend(rows, { "Inspect partial work, then press t to retry.", "" })
+    end
+  end
   local comparison = thread.comparisons[#thread.comparisons]
   if comparison then
     vim.list_extend(rows, {

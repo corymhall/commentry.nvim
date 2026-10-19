@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"time"
 
-	_ "modernc.org/sqlite" // Registers the pure-Go SQLite driver.
+	"modernc.org/sqlite" // Registers the pure-Go SQLite driver.
 )
 
 // Store owns a SQLite connection pool. Call Close when its caller finishes.
@@ -73,7 +73,7 @@ func Open(ctx context.Context, directory string) (*Store, error) {
 	}
 	db.SetMaxOpenConns(1)
 	store := &Store{db: db}
-	if err = store.initialize(ctx); err != nil {
+	if err = store.initializeWaiting(ctx); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("open inbox: %w", err)
 	}
@@ -85,10 +85,10 @@ func (s *Store) initialize(ctx context.Context) error {
 	if err := s.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
 		return err
 	}
-	if version > 1 {
+	if version > 2 {
 		return fmt.Errorf("unsupported inbox database version %d", version)
 	}
-	if version == 1 {
+	if version == 2 {
 		return nil
 	}
 	_, err := s.db.ExecContext(ctx, `BEGIN IMMEDIATE;
@@ -107,7 +107,12 @@ func (s *Store) initialize(ctx context.Context) error {
  at TEXT NOT NULL
  );
  CREATE INDEX IF NOT EXISTS changes_project ON changes(project,sequence);
- PRAGMA user_version=1;
+ CREATE TABLE IF NOT EXISTS agents (
+ project TEXT PRIMARY KEY,
+ id TEXT NOT NULL,
+ state TEXT NOT NULL CHECK(json_valid(state))
+ );
+ PRAGMA user_version=2;
  COMMIT;`)
 	return err
 }
@@ -219,4 +224,23 @@ func save(ctx context.Context, tx *sql.Tx, thread Thread, kind string) error {
 	}
 	_, err = tx.ExecContext(ctx, "INSERT INTO changes(thread,project,kind,at) VALUES(?,?,?,?)", thread.ID, thread.Project, kind, time.Now().UTC().Format(time.RFC3339Nano))
 	return err
+}
+
+// Independent first-time readers can race the WAL transition before any
+// schema exists. Retry only SQLite contention, using a bounded startup budget.
+func (s *Store) initializeWaiting(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	for {
+		err := s.initialize(ctx)
+		var issue *sqlite.Error
+		if !errors.As(err, &issue) || (issue.Code()&0xff != 5 && issue.Code()&0xff != 6) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return errors.Join(err, ctx.Err())
+		case <-time.After(25 * time.Millisecond):
+		}
+	}
 }

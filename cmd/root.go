@@ -9,11 +9,15 @@ import (
 	"os"
 	"time"
 
+	"github.com/corymhall/commentry.nvim/agent"
 	"github.com/corymhall/commentry.nvim/inbox"
 	"github.com/spf13/cobra"
 )
 
 const (
+	actionRead       = "read"
+	actionQueue      = "queue"
+	actionFinish     = "finish"
 	actionResolve    = "resolve"
 	actionComparison = "comparison"
 	actionReadState  = "read-state"
@@ -28,10 +32,10 @@ func NewRootCmd() *cobra.Command {
 		RunE: func(command *cobra.Command, _ []string) error { return command.Help() },
 	}
 	root.PersistentFlags().StringVar(&directory, "directory", "", "Inbox data directory, defaults to COMMENTRY_INBOX_DIR or Neovim's data directory")
-	for _, action := range []string{"list", "read", "create", "reply", actionResolve, actionComparison, actionReadState, "queue", "claim", "complete", "cancel", "revision", "changes"} {
+	for _, action := range []string{"list", actionRead, "create", "reply", actionFinish, actionResolve, actionComparison, actionReadState, actionQueue, "claim", "complete", "cancel", "retry", "revision", "changes"} {
 		root.AddCommand(newAction(action, &directory))
 	}
-	root.AddCommand(newRPC(&directory), newWatch(&directory))
+	root.AddCommand(newRPC(&directory), newWatch(&directory), newCapture(&directory), newRex(&directory), newAgent(&directory))
 	return root
 }
 
@@ -58,7 +62,38 @@ func execute(command *cobra.Command, directory string, request inbox.Request) (r
 		return nil, err
 	}
 	defer func() { err = errors.Join(err, store.Close()) }()
-	return store.Execute(command.Context(), request)
+	result, err = store.Execute(command.Context(), request)
+	if err != nil || request.Action != actionQueue {
+		return result, err
+	}
+	queued := result.(inbox.Queued)
+	if queued.Status != "pending" {
+		return queued, nil
+	}
+	value, err := store.Execute(command.Context(), inbox.Request{Action: actionRead, Thread: request.Thread})
+	if err != nil {
+		return result, err
+	}
+	thread := value.(inbox.Thread)
+	sent, deliveryErr := agent.Dispatch(command.Context(), directory, thread.Project, thread.ID, queued.ID)
+	if sent > 0 {
+		queued.Skipped = false
+	}
+	if deliveryErr != nil {
+		queued.DeliveryError = deliveryErr.Error()
+	}
+	value, err = store.Execute(command.Context(), inbox.Request{Action: actionRead, Thread: request.Thread})
+	if err != nil {
+		return result, err
+	}
+	for _, current := range value.(inbox.Thread).Queue {
+		if current.ID == queued.ID {
+			current.DeliveryError = queued.DeliveryError
+			current.Skipped = queued.Skipped
+			return current, nil
+		}
+	}
+	return queued, nil
 }
 
 func newRPC(directory *string) *cobra.Command {
@@ -98,7 +133,7 @@ func newAction(action string, directory *string) *cobra.Command {
 	command := &cobra.Command{Use: action, Short: actionDescription(action), Args: cobra.NoArgs}
 	flags := command.Flags()
 	switch action {
-	case "read", "reply", actionResolve, actionComparison, actionReadState, "queue", "complete", "cancel":
+	case actionRead, "reply", actionFinish, actionResolve, actionComparison, actionReadState, actionQueue, "complete", "cancel", "retry":
 		command.Use += " <thread>"
 		command.Args = cobra.ExactArgs(1)
 	}
@@ -134,21 +169,26 @@ func bindActionFlags(command *cobra.Command, options *actionOptions) {
 		flags.StringVar(&request.Body, "body", "", "Comment body")
 		flags.StringVar(&options.text, "text", "", "Copied text to capture")
 		flags.StringVar(&options.sourceFile, "source-file", "", "JSON file containing an immutable source capture")
-	case "reply":
+	case "reply", "finish":
 		flags.StringVar(&request.Body, "body", "", "Reply body")
+		if action == actionFinish {
+			flags.StringSliceVar(&request.ClaimIDs, "claim-id", nil, "Active claim IDs completed atomically with this reply")
+		}
 	case actionResolve:
 		flags.BoolVar(&options.resolved, "resolved", true, "Set false to reopen")
 	case actionReadState:
-		flags.BoolVar(&options.read, "read", true, "Set false to mark unread")
+		flags.BoolVar(&options.read, actionRead, true, "Set false to mark unread")
 		flags.StringVar(&request.Seen, "seen", "", "Incoming version displayed to the reader")
 	case actionComparison:
 		flags.StringVar(&options.beforeFile, "before-file", "", "File containing the comparison's before text")
 		flags.StringVar(&options.afterFile, "after-file", "", "File containing the comparison's after text")
 		flags.StringVar(&request.Label, "label", "", "Comparison label")
-	case "queue":
+	case actionQueue:
 		flags.StringVar(&request.Message, "message", "", "Explicit immutable request, otherwise capture thread context")
 	case "complete":
 		flags.StringVar(&request.ClaimID, "claim-id", "", "Active claim ID")
+	case "retry":
+		flags.StringVar(&request.QueueID, "queue-id", "", "Failed request to retry after inspecting partial work")
 	case "cancel":
 		flags.StringVar(&request.QueueID, "queue-id", "", "Queued request ID")
 		flags.BoolVar(&request.PendingOnly, "pending-only", false, "Refuse to cancel claimed work")
@@ -207,11 +247,13 @@ func readInputFile(filename string) ([]byte, error) {
 
 func actionDescription(action string) string {
 	descriptions := map[string]string{
-		"list": "List project threads and filter their state", "read": "Read a thread without marking it read",
+		"list": "List project threads and filter their state", actionRead: "Read a thread without marking it read",
 		"create": "Create a standalone or captured-text thread", "reply": "Reply to a thread", actionResolve: "Resolve or reopen a conversation",
+		"finish":         "Reply and complete the specified active claims in one transaction",
 		actionComparison: "Attach an agent-authored before/after comparison", actionReadState: "Mark a displayed incoming version read, or mark unread",
-		"queue": "Queue an immutable request for an agent", "claim": "Atomically claim the oldest pending request in a project",
+		actionQueue: "Queue an immutable request for an agent", "claim": "Atomically claim the oldest pending request in a project",
 		"complete": "Complete an active claim without resolving its thread", "cancel": "Cancel a pending or claimed request",
+		"retry":    "Retry a failed request after inspecting partial work",
 		"revision": "Read the current change sequence", "changes": "Read a page of committed changes after a cursor",
 	}
 	return descriptions[action]

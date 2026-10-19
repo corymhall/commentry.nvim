@@ -54,6 +54,22 @@ local ok, err = xpcall(function()
   }, 5000)
 
   bridge:wait_for_flush(5000)
+  if scenario == "capture" then
+    bridge:request("nvim_exec_lua", {
+      [[
+        local config = vim.fn.getcwd() .. "/capture.json"
+        vim.fn.writefile({vim.json.encode({project=vim.fn.getcwd(), text="Error: found two matching excerpts.\nUnable to choose a destination.\nPlease narrow the selected range.", executable=vim.env.COMMENTRY_REPO_ROOT .. "/bin/commentry", directory=vim.fn.getcwd() .. "/inbox-data"})}, config)
+        vim.env.COMMENTRY_CAPTURE_CONFIG = config
+        dofile(vim.env.COMMENTRY_REPO_ROOT .. "/capture/composer.lua")
+        vim.api.nvim_buf_set_lines(0,0,-1,false,{"Can we make this error more useful?", "", "Show both candidate locations so I can choose the right one."})
+        return true
+      ]], {},
+    },5000)
+    bridge:wait_for_flush(5000)
+    local snapshot = bridge.screen:snapshot("rpc-capture")
+    Bridge.write_snapshot_files(snapshot,bridge.screen,out_dir,"rpc-capture")
+    return
+  end
   if scenario == "inbox" then
     bridge:request("nvim_exec_lua", {
       [[

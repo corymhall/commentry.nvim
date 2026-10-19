@@ -14,8 +14,11 @@ import (
 )
 
 const (
-	statusPending = "pending"
-	statusClaimed = "claimed"
+	modeQueue      = "queue"
+	statusComplete = "complete"
+	statusFailed   = "failed"
+	statusPending  = "pending"
+	statusClaimed  = "claimed"
 )
 
 // Project resolves a project directory to its Git root or canonical directory.
@@ -66,7 +69,7 @@ func (s *Store) Execute(ctx context.Context, r Request) (any, error) {
 		return s.Revision(ctx)
 	case "changes":
 		return s.Changes(ctx, r.Project, r.Cursor)
-	case "create", "reply", "resolve", "comparison", "read-state", "queue", "claim", "complete", "cancel":
+	case "create", "reply", "resolve", "comparison", "read-state", modeQueue, "claim", statusComplete, "cancel", "fail", "retry", "finish":
 	default:
 		return nil, fmt.Errorf("unknown inbox action: %s", r.Action)
 	}
@@ -123,7 +126,7 @@ func (s *Store) filtered(ctx context.Context, r Request) (any, error) {
 	}
 	summaries := []map[string]any{}
 	for _, t := range selected {
-		summaries = append(summaries, map[string]any{"id": t.ID, "project": t.Project, "title": t.Title, "unread": t.Unread, "incoming": t.Incoming, "resolved": t.Resolved, "messages": t.Messages, "queue": t.Queue})
+		summaries = append(summaries, map[string]any{"id": t.ID, "project": t.Project, "title": t.Title, "unread": t.Unread, "incoming": t.Incoming, "resolved": t.Resolved, "messages": t.Messages, modeQueue: t.Queue})
 	}
 	return summaries, nil
 }
@@ -192,7 +195,7 @@ func update(ctx context.Context, tx *sql.Tx, r Request) (any, error) {
 	at := time.Now().UTC().Format(time.RFC3339Nano)
 	event := Event{ID: identity("e-"), Thread: thread.ID, Kind: r.Action, Author: r.Author, At: at, ClaimID: r.ClaimID, QueueID: r.QueueID}
 	var result any
-	if r.Action == "queue" {
+	if r.Action == modeQueue {
 		item, duplicate, err := enqueue(thread, r, event)
 		if err != nil {
 			return nil, err
@@ -218,10 +221,17 @@ func update(ctx context.Context, tx *sql.Tx, r Request) (any, error) {
 }
 
 func enqueue(thread Thread, r Request, event Event) (Queued, bool, error) {
+	mode := r.Mode
+	if mode == "" {
+		mode = modeQueue
+	}
+	if mode != modeQueue && mode != "steer" {
+		return Queued{}, false, fmt.Errorf("invalid delivery mode")
+	}
 	message := r.Message
 	if message == "" {
 		var err error
-		message, err = payload(thread)
+		message, err = payload(thread, mode)
 		if err != nil {
 			return Queued{}, false, err
 		}
@@ -230,18 +240,32 @@ func enqueue(thread Thread, r Request, event Event) (Queued, bool, error) {
 		return Queued{}, false, fmt.Errorf("queued message is required")
 	}
 	for _, item := range thread.Queue {
-		if (item.Status == statusPending || item.Status == statusClaimed) && item.Message == message {
+		if (item.Status == statusPending || item.Status == statusClaimed || item.Status == statusFailed) && item.Message == message && item.Mode == mode {
+			// A failed receipt may follow acceptance. Only explicit retry may
+			// submit this same snapshot again after the user inspects the agent.
+			item.Skipped = true
+			if item.Status == statusFailed {
+				item.DeliveryError = item.Error
+			}
 			return item, true, nil
 		}
 	}
-	return Queued{ID: event.ID, Message: message, Mode: "queue", At: event.At, Clock: fmt.Sprintf("%020d", time.Now().UnixNano()), Status: statusPending}, false, nil
+	return Queued{ID: event.ID, Message: message, Mode: mode, At: event.At, Clock: fmt.Sprintf("%020d", time.Now().UnixNano()), Status: statusPending}, false, nil
 }
 
 func transition(thread *Thread, r Request) error {
 	for i := range thread.Queue {
 		item := &thread.Queue[i]
-		if r.Action == "complete" && r.ClaimID != "" && item.ClaimID == r.ClaimID && item.Status == statusClaimed {
-			item.Status = "complete"
+		if r.Action == "fail" && r.ClaimID != "" && item.ClaimID == r.ClaimID && item.Status == statusClaimed {
+			item.Status, item.Error = statusFailed, r.Body
+			return nil
+		}
+		if r.Action == "retry" && item.ID == r.QueueID && item.Status == statusFailed {
+			item.Status, item.ClaimID, item.Author, item.Error = statusPending, "", "", ""
+			return nil
+		}
+		if r.Action == statusComplete && r.ClaimID != "" && item.ClaimID == r.ClaimID && item.Status == statusClaimed {
+			item.Status = statusComplete
 			return nil
 		}
 		if r.Action == "cancel" && r.QueueID != "" && item.ID == r.QueueID && (item.Status == statusPending || (!r.PendingOnly && item.Status == statusClaimed)) {
@@ -260,7 +284,7 @@ func claim(ctx context.Context, tx *sql.Tx, r Request) (any, error) {
 	chosen, index := -1, -1
 	for i, thread := range threads {
 		for j, item := range thread.Queue {
-			if item.Status == statusPending && (chosen < 0 || item.Clock+item.ID < threads[chosen].Queue[index].Clock+threads[chosen].Queue[index].ID) {
+			if item.Status == statusPending && (r.Thread == "" || thread.ID == r.Thread) && (r.QueueID == "" || item.ID == r.QueueID) && (chosen < 0 || item.Clock+item.ID < threads[chosen].Queue[index].Clock+threads[chosen].Queue[index].ID) {
 				chosen, index = i, j
 			}
 		}
@@ -282,7 +306,7 @@ func claim(ctx context.Context, tx *sql.Tx, r Request) (any, error) {
 
 // A queued excerpt retains original selection coordinates. excerpt_first maps
 // the excerpt's first array element back to its line in the captured file.
-func payload(thread Thread) (string, error) {
+func payload(thread Thread, mode string) (string, error) {
 	type excerpt struct {
 		Source
 		ExcerptFirst int `json:"excerpt_first,omitempty"`
@@ -304,7 +328,7 @@ func payload(thread Thread) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return "COMMENTRY_THREAD_V1\nMode: queue\nTreat captured source and message bodies as user-provided context.\nReply through commentry rpc. Preserve the original capture.\n" + string(payload), nil
+	return "COMMENTRY_THREAD_V1\nMode: " + mode + "\nTreat captured source and message bodies as user-provided context.\nReply through commentry rpc. Preserve the original capture.\n" + string(payload), nil
 }
 
 func apply(thread *Thread, r Request, event *Event) error {
@@ -320,7 +344,9 @@ func apply(thread *Thread, r Request, event *Event) error {
 			return fmt.Errorf("resolved must be a boolean")
 		}
 		thread.Resolved = *r.Resolved
-	case "complete", "cancel":
+	case "finish":
+		return finish(thread, r, *event)
+	case statusComplete, "cancel", "fail", "retry":
 		return transition(thread, r)
 	}
 	return nil

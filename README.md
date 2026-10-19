@@ -48,33 +48,141 @@ reapplies the filter. External writes refresh approximately every 1.5 seconds
 while the inbox is active in normal mode, retaining the selected thread and
 scroll position. `R` also refreshes comparisons after source edits.
 
-### Reply and send through Sidekick
+### Existing agents through Rex
 
-The composer uses `Ctrl-s` to save locally and `Ctrl-d` to save and dispatch.
-Press `m` in the inbox to select a send mode, then `s` to dispatch the selected
-thread. Queue is the default.
+The inbox sends requests to Pi or Codex already running in Rex. Press `S` to
+select an agent in the current project. Rex supplies discovery, process identity,
+status and terminal delivery. The harness manages its own native queue.
+Sidekick only handles the separate legacy `:Commentry send-to-agent` command.
+No `agent.enabled` setting is required for the inbox.
 
-- **Queue** persists an immutable request in Commentry. Keep reviewing and queue
-  more threads. Duplicate pending or claimed requests with identical content are
-  not added again. `d` removes the oldest pending request from the selected thread.
-- **Steer** hands the thread directly to Sidekick with prompt submission enabled,
-  keeping focus in the inbox where possible. The harness decides how a submitted
-  message affects an active turn. This does not force an interrupt.
+Load the reusable actions in Rex `init.lua` and run `rex config reload`:
 
-Press `S` to ask Sidekick to process the current project's queue. Requires
-`agent.enabled = true` and Sidekick. Sidekick supports Pi, Codex and OpenCode
-when configured. The worker prompt instructs the agent to claim queued requests,
-reply to their original threads, complete each claim, and check for more work
-while you review. It asks the worker to stop after 60 seconds of an empty queue.
-This is an agent-driven workflow, not a daemon or a guaranteed scheduler.
+```lua
+dofile(os.getenv("HOME") .. "/plugins/commentry.nvim/integrations/rex/agents.lua").setup()
+```
 
-The queue belongs to Commentry, rather than the harness's native input queue.
-Sidekick's generic API does not expose universal native steer/follow-up controls.
-Sidekick delegation is not a delivery receipt: cancellation leaves queued work
-pending, and only an explicit worker completion acknowledges it. Sending an
-entire thread includes its messages and the captured source excerpt.
-For file excerpts, `first` and `last` identify the original selection, while
-`excerpt_first` identifies the original file line represented by `lines[0]`.
+The actions work independently of Commentry:
+
+```bash
+rex do agent_list
+rex do agent_list project=/absolute/project/path
+rex do agent_get target='TARGET_ID_FROM_LIST'
+rex do agent_queue target='TARGET_ID_FROM_LIST' text='Review this change'
+rex do agent_steer target='TARGET_ID_FROM_LIST' text='Also check cancellation'
+rex do agent_read target='TARGET_ID_FROM_LIST'
+rex do agent_focus target='TARGET_ID_FROM_LIST'
+```
+
+Targets from `agent_list` identify the Rex session, pane and foreground process.
+A restarted or replaced agent requires selecting its new target. `agent_list`
+filters directories by the supplied absolute path and its descendants.
+Commentry additionally resolves Git roots when selecting project agents.
+`agent_get` reports the current status. `agent_read` returns terminal text,
+not a structured conversation transcript. OpenCode is not implemented.
+
+The composer uses `Ctrl-s` to save and `Ctrl-d` to save and send. Press `m` to
+choose queue or steer, then `s` to send the selected thread. Both modes submit
+immediately, including while the agent is working:
+
+| Harness | Queue | Steer |
+| --- | --- | --- |
+| Codex | Tab | Enter |
+| Pi | Alt-Enter | Enter |
+
+Queue uses the harness's native follow-up behavior. Steer uses its direct
+submission behavior. When idle, the harness can begin processing immediately.
+There is no Commentry worker waiting for idle and no new agent session.
+Messages use bracketed paste and the submission key in one terminal write.
+This uses the existing composer, so it should be clear of unfinished drafts.
+Blocked, unknown and error states require attention before delivery. Status
+reports must identify the foreground process. Approvals stay in the agent UI.
+
+For customized harness keybindings, pass adapters to `setup` instead of using
+its defaults. Values are terminal byte sequences:
+
+```lua
+dofile("/path/to/agents.lua").setup({
+  adapters = {
+    codex = { queue = "\t", steer = "\r" },
+    pi = { queue = "\27\r", steer = "\r" },
+  },
+})
+```
+
+Commentry retains immutable request snapshots, thread IDs and claim IDs for
+reply attribution. Delivered requests include instructions for `commentry finish`
+or JSON RPC. This saves the answer and completes the specific claim atomically.
+Pending means locally waiting for delivery. Sent means submitted to the harness.
+Terminal writes and status changes do not automatically complete a request.
+Completion does not resolve a conversation. Agents can attach focused comparisons
+while preserving the original capture.
+
+Sending an unchanged active request shows "Nothing new to send. There are no
+new messages."
+With no selected agent, requests remain locally pending. Selecting an agent or
+using `a` to deliver pending requests sends them to its native queue. Press `a`
+for status, focus, selection and detach. Detaching leaves delivered work intact.
+A failed or partial write is never replayed automatically. Inspect the agent
+before retrying with `t`. Sending the same failed snapshot keeps its failure
+visible. A late agent answer can still finish its original claim until that
+request is explicitly retried. Cancelling an inbox claim does not remove work already
+submitted to the harness's native queue.
+
+```bash
+commentry agent --project . list
+commentry agent --project . attach 'TARGET_ID_FROM_LIST'
+commentry agent --project . status
+commentry agent --project . dispatch
+commentry agent --project . steer t-THREAD
+commentry agent --project . detach
+commentry retry t-THREAD --queue-id e-REQUEST
+commentry finish t-THREAD --claim-id claim-ID --author codex --body 'Reply'
+```
+
+Agent payloads retain original selection coordinates. `excerpt_first` identifies
+the original file line represented by `lines[0]` in a focused excerpt.
+
+### Clipboard capture through Rex
+
+Install the binary with `mise run install-commentry`, then load
+`integrations/rex/commentry.lua` from your Rex `init.lua`:
+
+```lua
+dofile(os.getenv("HOME") .. "/plugins/commentry.nvim/integrations/rex/commentry.lua")
+rex.bind("ctrl+a>a", "commentry_capture")
+rex.bind("ctrl+a>shift+a", "commentry_new")
+rex.bind("ctrl+a>i", "commentry_inbox")
+```
+
+The actions also appear in Rex's command palette. `commentry_capture` snapshots
+the macOS clipboard immediately, infers the project from the originating pane's
+directory, and opens a temporary **New comment** tab. The tab shows the
+captured text above a multiline editor. `Ctrl-p` changes the project, `Ctrl-s`
+saves, `Ctrl-d` saves and queues, and normal-mode `q` or `:q` cancels. Saving or
+cancelling returns to the originating tab. Failed saves retain the draft.
+If sending fails after saving, the editor stays open with delivery guidance.
+`Ctrl-s` closes the saved capture. Inspect the inbox before retrying delivery.
+`commentry_new` opens the same editor without a clipboard attachment.
+`commentry_inbox` reuses Neovim in the current pane or an immediately adjacent
+pane on either side in the same Rex window. Otherwise it creates a pane to the
+right and starts Neovim there. Existing editors receive the inbox through RPC
+when available. Editors without a listener receive a Normal-mode command.
+Both paths preserve unsaved buffers
+and their working directory.
+Invoking from a recognized agent pane selects that existing agent for the
+project inbox, without submitting pending requests. The equivalent shell
+command is `commentry rex inbox`.
+The editor uses your normal Neovim configuration and theme.
+The Lua entry point also accepts an explicit project with
+`require("commentry.inbox").open(nil, { project = "/path/to/project" })`.
+
+From a shell, use `commentry capture --project .`, or add `--empty` for a
+standalone conversation. `commentry rex capture` opens a temporary tab when
+`REX_SESSION` and `REX_BLOCK` identify the origin. `--client` selects the Rex
+app explicitly when needed. Set `COMMENTRY_REX` to override the Rex executable.
+This first capture integration is local to macOS and uses Neovim 0.10+ as its
+editor. The Rex keybind applies while Rex is focused; it is not an OS-wide hotkey.
 
 The list shows titles above compact location/status labels. Diffs show original
 and current line numbers with theme-linked addition and deletion highlights.
@@ -141,7 +249,7 @@ list output. Claims are serialized and project-scoped; a claim returns an
 immutable message and a claim ID. Completing it does not resolve its thread.
 Cancelled work cannot later be completed. SQLite transactions serialize claims
 and recover unfinished writes after a crash. A committed claim remains visible
-until completed or explicitly cancelled; it is never automatically reassigned.
+until completed, explicitly cancelled, or explicitly marked failed after uncertain delivery. It is never automatically reassigned.
 
 The SQLite database lives at `stdpath("data")/commentry/inbox/inbox.sqlite3`.
 The standalone CLI defaults to `$XDG_DATA_HOME/nvim/commentry/inbox` or
@@ -178,8 +286,8 @@ or `read-state --read=false` to mark unread. Author labels are not authenticatio
 Neovim detects committed revisions automatically while the inbox is idle.
 
 The existing Diffview review store and send-to-agent flow remain separate.
-Review-to-inbox linking, native harness steering/follow-up adapters, reattachment,
-branch comparison mode, and a system-wide capture shortcut are follow-up work.
+Review-to-inbox linking, OpenCode support, anchor reattachment, branch comparison
+mode, and an OS-wide capture shortcut are follow-up work.
 Removing the new inbox directory resets only the inbox data. Existing review
 drafts remain in their original store.
 

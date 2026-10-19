@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -92,5 +93,25 @@ func TestWatchReceivesExternalChangesAndCancels(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("watch ignored cancellation")
+	}
+}
+
+// TestCaptureRejectsInvalidSnapshotsWithoutRemovingThem protects input files.
+func TestCaptureRejectsInvalidSnapshotsWithoutRemovingThem(t *testing.T) {
+	t.Parallel()
+	filename := t.TempDir() + "/notes.txt"
+	original := []byte("My unsaved notes")
+	if err := os.WriteFile(filename, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	root := cmd.NewRootCmd()
+	root.SetArgs([]string{"rex", "capture-editor", "--input", filename})
+	if err := root.ExecuteContext(t.Context()); err == nil {
+		t.Fatal("accepted an invalid capture snapshot")
+	}
+	// #nosec G304 -- This path is a fixture created in the test's private directory.
+	remaining, err := os.ReadFile(filename)
+	if err != nil || !bytes.Equal(remaining, original) {
+		t.Fatalf("invalid capture destroyed input: %s, %v", remaining, err)
 	}
 }

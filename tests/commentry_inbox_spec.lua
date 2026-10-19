@@ -91,6 +91,17 @@ describe("universal inbox", function()
     assert.is_true(vim.api.nvim_buf_is_valid(view.thread_buf))
   end)
 
+  it("opens an external project's inbox without changing the editor directory", function()
+    local cwd = vim.fn.getcwd()
+    local id = create("From the agent project")
+    create("Another project", root .. "/other")
+    local view = require("commentry.inbox").open(nil, { project = root })
+    assert.are.same(root, view.project)
+    assert.are.same(1, #view.threads)
+    assert.are.same(id, view.threads[1].id)
+    assert.are.same(cwd, vim.fn.getcwd())
+  end)
+
   it("creates standalone threads inside the inbox and can filter new activity", function()
     local view = require("commentry.inbox").open("all")
     keys(view).n()
@@ -246,30 +257,91 @@ describe("universal inbox", function()
     assert.is_nil(Store.update(id, { kind = "complete", claim_id = second.claim_id }))
   end)
 
-  it("delegates steering literally without consuming queue work on selector cancellation", function()
+  it("explains skipped sends and allows sending after a new reply", function()
     local id = create()
-    local previous = package.loaded["sidekick.cli"]
-    local Config = require("commentry.config")
-    local enabled = Config.agent.enabled
-    local received
-    Config.agent.enabled = true
-    package.loaded["sidekick.cli"] = {
-      send = function(opts)
-        received = opts
-      end,
-    }
-    local Agent = require("commentry.inbox.agent")
-    local ok, failure = pcall(function()
-      assert(Agent.send(id, "queue"))
-      assert(Agent.send(id, "steer"))
-      assert.is_true(received.submit)
-      assert.is_false(received.focus)
-      assert.is_truthy(vim.inspect(received.text):find(id, 1, true))
-      assert.are.same("pending", assert(Store.get(id)).queue[1].status)
+    assert(Store.enqueue(id))
+    assert(Store.claim(root, "Agent"))
+    local view = require("commentry.inbox").open("all")
+    local Util = require("commentry.util")
+    local original, messages = Util.info, {}
+    Util.info = function(message)
+      messages[#messages + 1] = message
+    end
+    local ok, err = pcall(function()
+      keys(view).s()
+      assert.are.same("Nothing new to send. There are no new messages.", messages[#messages])
+      assert.are.same(1, #assert(Store.get(id)).queue)
+      assert(Store.update(id, { kind = "reply", body = "One more thing to check" }))
+      keys(view).s()
+      assert.are.same("Saved for delivery", messages[#messages])
+      assert.are.same(2, #assert(Store.get(id)).queue)
     end)
-    package.loaded["sidekick.cli"] = previous
-    Config.agent.enabled = enabled
-    assert.is_true(ok, failure)
+    Util.info = original
+    assert.is_true(ok, tostring(err))
+  end)
+
+  it("reports when attaching or delivering pending requests sends nothing", function()
+    local Agent = require("commentry.inbox.agent")
+    local Util = require("commentry.util")
+    local original_command, original_select, original_info = Store.command, vim.ui.select, Util.info
+    local messages, sent = {}, 0
+    local agent = { id = "existing", harness = "codex", name = "Existing Codex", rex_block = "block" }
+    Store.command = function(args)
+      local action = args[4]
+      if action == "list" then
+        return { sessions = { agent } }
+      elseif action == "status" then
+        return { state = "working", agent = agent }
+      elseif action == "attach" or action == "dispatch" then
+        return { sent = sent }
+      end
+      error("Unexpected action: " .. action)
+    end
+    vim.ui.select = function(items, _, callback)
+      callback(type(items[1]) == "table" and items[1] or "Deliver pending requests")
+    end
+    Util.info = function(message)
+      messages[#messages + 1] = message
+    end
+    local ok, err = pcall(function()
+      Agent.choose(root)
+      assert.are.same(
+        "Nothing new to send. There are no pending requests. Attached to codex / Existing Codex",
+        messages[#messages]
+      )
+      Agent.controls(root)
+      assert.are.same("Nothing new to send. There are no pending requests.", messages[#messages])
+      sent = 2
+      Agent.choose(root)
+      assert.are.same("Sent 2 request(s). Attached to codex / Existing Codex", messages[#messages])
+    end)
+    Store.command, vim.ui.select, Util.info = original_command, original_select, original_info
+    assert.is_true(ok, tostring(err))
+  end)
+
+  it("shows multiline worker failures without breaking the conversation", function()
+    local id = create()
+    assert(Store.enqueue(id))
+    local claim = assert(Store.claim(root, "worker"))
+    assert(
+      Store.update(id, { kind = "fail", claim_id = claim.claim_id, body = "Provider unavailable\nTry again later" })
+    )
+    local view = require("commentry.inbox").open("all")
+    local contents = table.concat(vim.api.nvim_buf_get_lines(view.thread_buf, 0, -1, false), "\n")
+    assert.is_truthy(contents:find("Provider unavailable\nTry again later", 1, true))
+    assert.are.same("failed", assert(Store.get(id)).queue[1].status)
+  end)
+
+  it("keeps queued requests pending when no existing session is selected", function()
+    local id = create()
+    local Agent = require("commentry.inbox.agent")
+    assert(Agent.send(id, "queue"))
+    local value, err = Agent.send(id, "steer")
+    assert.is_nil(value)
+    assert.is_truthy(err:find("no project agent", 1, true))
+    local thread = assert(Store.get(id))
+    assert.are.same(1, #thread.queue)
+    assert.are.same("pending", thread.queue[1].status)
   end)
 
   it("preserves independent projects, conversation history and the original capture", function()

@@ -348,3 +348,52 @@ func TestQueuedExcerptMapsSelectionToOriginalLines(t *testing.T) {
 		t.Fatal("excerpt extraction changed the original capture")
 	}
 }
+
+// TestFinishIsAtomic prevents cancelled work from acquiring a reply or receipt.
+func TestFinishIsAtomic(t *testing.T) {
+	t.Parallel()
+	store := openStore(t, t.TempDir())
+	project := t.TempDir()
+	id := run(t, store, inbox.Request{Action: "create", Project: project, Body: "Review this"}).(string)
+	item := run(t, store, inbox.Request{Action: "queue", Thread: id}).(inbox.Queued)
+	claim := run(t, store, inbox.Request{Action: "claim", Project: project, Author: "worker"}).(map[string]string)
+	run(t, store, inbox.Request{Action: "cancel", Thread: id, QueueID: item.ID})
+	revision := run(t, store, inbox.Request{Action: "revision"})
+	if _, err := store.Execute(t.Context(), inbox.Request{Action: "finish", Thread: id, Author: "Codex", Body: "A late answer", ClaimIDs: []string{claim["claim_id"]}}); err == nil {
+		t.Fatal("finished cancelled work")
+	}
+	thread := run(t, store, inbox.Request{Action: "read", Thread: id}).(inbox.Thread)
+	if len(thread.Messages) != 1 || thread.Unread || run(t, store, inbox.Request{Action: "revision"}) != revision {
+		t.Fatal("failed finish leaked a reply or change record")
+	}
+}
+
+// TestConcurrentFirstOpen checks independent clients bootstrapping one inbox.
+func TestConcurrentFirstOpen(t *testing.T) {
+	t.Parallel()
+	directory, project := t.TempDir(), t.TempDir()
+	ready := make(chan struct{})
+	results := make(chan error, 8)
+	for i := range 8 {
+		go func() {
+			<-ready
+			store, err := inbox.Open(t.Context(), directory)
+			if err == nil {
+				_, err = store.Execute(t.Context(), inbox.Request{Action: "create", Project: project, Body: fmt.Sprintf("Comment %d", i)})
+				err = errors.Join(err, store.Close())
+			}
+			results <- err
+		}()
+	}
+	close(ready)
+	for range 8 {
+		if err := <-results; err != nil {
+			t.Fatal(err)
+		}
+	}
+	store := openStore(t, directory)
+	threads := run(t, store, inbox.Request{Action: "list"}).([]inbox.Thread)
+	if len(threads) != 8 {
+		t.Fatalf("first-time clients lost comments: %d", len(threads))
+	}
+}

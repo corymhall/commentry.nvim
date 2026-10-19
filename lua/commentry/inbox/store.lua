@@ -18,6 +18,29 @@ function M.executable()
   return vim.fn.exepath("commentry")
 end
 
+function M.command(args, opts)
+  local executable = M.executable()
+  if not executable or executable == "" then
+    return nil, "Commentry backend is missing"
+  end
+  local argv = { executable, "--directory", M.directory(opts) }
+  vim.list_extend(argv, args)
+  local launched, result = pcall(function()
+    return vim.system(argv, { text = true }):wait(40000)
+  end)
+  if not launched then
+    return nil, "Commentry backend failed: " .. tostring(result)
+  end
+  local ok, value = pcall(vim.json.decode, result.stdout or "")
+  if not ok or type(value) ~= "table" then
+    return nil, result.stderr or "Invalid backend response"
+  end
+  if result.code ~= 0 or not value.ok then
+    return nil, value.error or result.stderr
+  end
+  return value.result
+end
+
 local function request(input, opts)
   local executable = M.executable()
   if not executable or executable == "" then
