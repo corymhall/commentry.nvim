@@ -1,4 +1,5 @@
 local M = {}
+local Reply = require("commentry.inbox.reply")
 local ns = vim.api.nvim_create_namespace("commentry.inbox.ui")
 
 function M.highlights()
@@ -157,6 +158,9 @@ function M.source(view, thread, comparison)
 end
 
 function M.conversation(view, thread)
+  if view.reply and view.reply.id == thread.id and vim.bo[view.thread_buf].modified then
+    return
+  end
   local status = thread.resolved and "Resolved" or "Open"
   if view.outdated[thread.id] then
     status = status .. " / Outdated"
@@ -196,7 +200,15 @@ function M.conversation(view, thread)
     vim.list_extend(rows, vim.split(message.body, "\n", { plain = true }))
     vim.list_extend(rows, { "", "" })
   end
+  local dirty
+  rows, dirty = Reply.prepare(view, thread, rows)
   M.write(view.thread_buf, rows, "markdown")
+  vim.bo[view.thread_buf].modifiable = true
+  vim.bo[view.thread_buf].modified = dirty
+  if dirty then
+    return
+  end
+  M.mark(view.thread_buf, #view.reply.prefix - 2, "Accent")
   M.mark(view.thread_buf, 0, "Title")
   M.mark(view.thread_buf, 1, view.outdated[thread.id] and "Warning" or "Muted")
   for _, author in ipairs(authors) do

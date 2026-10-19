@@ -120,6 +120,28 @@ local ok, err = xpcall(function()
     Bridge.write_snapshot_files(snapshot, bridge.screen, out_dir, "rpc-inbox")
     bridge:request("nvim_exec_lua", { [[
       local view = _G.commentry_capture_view
+      vim.api.nvim_set_current_win(view.source_win)
+      for row, line in ipairs(vim.api.nvim_buf_get_lines(view.source_buf, 0, -1, false)) do
+        if line:find('if clock()', 1, true) then
+          vim.api.nvim_win_set_cursor(view.source_win, {row, 0})
+          break
+        end
+      end
+      vim.cmd('normal! Vj')
+      for _, map in ipairs(vim.api.nvim_buf_get_keymap(view.source_buf, 'x')) do
+        if map.lhs == 'r' then map.callback(); break end
+      end
+      vim.cmd.stopinsert()
+      vim.api.nvim_buf_set_lines(view.thread_buf, -2, -1, false, {'Could we make this timeout message clearer?'})
+      vim.api.nvim_win_set_cursor(view.thread_win, {vim.api.nvim_buf_line_count(view.thread_buf), 0})
+      vim.cmd('normal! zb')
+      return true
+    ]], {} }, 5000)
+    bridge:wait_for_flush(5000)
+    local reply = bridge.screen:snapshot("rpc-inbox-reply")
+    Bridge.write_snapshot_files(reply, bridge.screen, out_dir, "rpc-inbox-reply")
+    bridge:request("nvim_exec_lua", { [[
+      local view = _G.commentry_capture_view
       for _, map in ipairs(vim.api.nvim_buf_get_keymap(view.list_buf, "n")) do
         if map.lhs == "gf" then map.callback(); break end
       end

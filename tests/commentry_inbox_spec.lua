@@ -65,6 +65,103 @@ describe("universal inbox", function()
     return result
   end
 
+  it("quotes a visual source selection into an inline reply and saves before sending", function()
+    local thread = file({ "local first = 1", "local second = 2", "return first + second" }, 1, 2)
+    vim.api.nvim_buf_set_lines(buf, 0, 1, false, { "local first = 3" })
+    local view = require("commentry.inbox").open(nil, { project = root, thread = thread.id })
+    vim.api.nvim_set_current_win(view.source_win)
+    local rows = vim.api.nvim_buf_get_lines(view.source_buf, 0, -1, false)
+    local first
+    for index, line in ipairs(rows) do
+      if line == "-local first = 1" then
+        first = index
+      end
+    end
+    assert.is_truthy(first)
+    vim.api.nvim_win_set_cursor(view.source_win, { first, 0 })
+    vim.cmd("normal! Vj")
+    for _, map in ipairs(vim.api.nvim_buf_get_keymap(view.source_buf, "x")) do
+      if map.lhs == "r" then
+        map.callback()
+      end
+    end
+    vim.cmd.stopinsert()
+    assert.are.same(view.thread_buf, vim.api.nvim_get_current_buf())
+    vim.api.nvim_buf_set_lines(view.thread_buf, -2, -1, false, { "Can we combine these?" })
+    vim.cmd.write()
+    local saved = assert(Store.get(thread.id))
+    assert.are.same(
+      "> -local first = 1\n> +local first = 3\n\nCan we combine these?",
+      saved.messages[#saved.messages].body
+    )
+    assert.are.same(thread.source, saved.source)
+    assert.are.same(0, #saved.queue)
+    vim.cmd.write()
+    assert.are.same(2, #assert(Store.get(thread.id)).messages)
+    keys(view).s()
+    saved = assert(Store.get(thread.id))
+    assert.are.same(1, #saved.queue)
+    assert.is_truthy(saved.queue[1].message:find("Can we combine these?", 1, true))
+  end)
+
+  it("retains inline drafts through refreshes switches closure and a failed save", function()
+    local id, other = create("First question"), create("Second question")
+    local Inbox = require("commentry.inbox")
+    local view = Inbox.open(nil, { project = root, thread = id })
+    keys(view).r()
+    vim.cmd.stopinsert()
+    vim.api.nvim_buf_set_lines(view.thread_buf, -2, -1, false, { "A draft reply", "with another line" })
+    assert(Store.update(id, { kind = "reply", author = "Agent", body = "Arrived while drafting" }))
+    keys(view).R()
+    view = Inbox.open(nil, { project = root, thread = other })
+    view = Inbox.open(nil, { project = root, thread = id })
+    local before = vim.api.nvim_buf_get_lines(view.thread_buf, 0, -1, false)
+    assert.are.same({ "A draft reply", "with another line" }, { before[#before - 1], before[#before] })
+    keys(view).q()
+    view = Inbox.open(nil, { project = root, thread = id })
+    assert.are.same(before, vim.api.nvim_buf_get_lines(view.thread_buf, 0, -1, false))
+    keys(view).r()
+    vim.cmd.stopinsert()
+    assert.is_true(assert(Store.get(id)).unread)
+    local original = Store.update
+    Store.update = function()
+      return nil, "Simulated unavailable backend"
+    end
+    local ok, err = pcall(vim.cmd.write)
+    Store.update = original
+    assert.is_true(ok, tostring(err))
+    assert.is_true(vim.bo[view.thread_buf].modified)
+    assert.are.same(before, vim.api.nvim_buf_get_lines(view.thread_buf, 0, -1, false))
+    vim.cmd.write()
+    local saved = assert(Store.get(id))
+    assert.are.same("A draft reply\nwith another line", saved.messages[#saved.messages].body)
+    assert.are.same(1, #assert(Store.get(other)).messages)
+    assert.is_truthy(
+      table
+        .concat(vim.api.nvim_buf_get_lines(view.thread_buf, 0, -1, false), "\n")
+        :find("Arrived while drafting", 1, true)
+    )
+    assert.is_false(vim.bo[view.thread_buf].modified)
+  end)
+
+  it("refuses history edits and sending unsaved inline replies", function()
+    local id = create("Immutable question")
+    local view = require("commentry.inbox").open(nil, { project = root, thread = id })
+    keys(view).r()
+    vim.cmd.stopinsert()
+    vim.api.nvim_buf_set_lines(view.thread_buf, -2, -1, false, { "Unsaved reply" })
+    keys(view).s()
+    assert.are.same(0, #assert(Store.get(id)).queue)
+    local title = vim.api.nvim_buf_get_lines(view.thread_buf, 0, 1, false)
+    vim.api.nvim_buf_set_lines(view.thread_buf, 0, 1, false, { "Rewritten history" })
+    vim.cmd.write()
+    assert.are.same(1, #assert(Store.get(id)).messages)
+    assert.is_true(vim.bo[view.thread_buf].modified)
+    vim.api.nvim_buf_set_lines(view.thread_buf, 0, 1, false, title)
+    vim.cmd.write()
+    assert.are.same("Unsaved reply", assert(Store.get(id)).messages[2].body)
+  end)
+
   it("enriches copied text and navigates moved code without replacing its capture", function()
     local thread = file({ "local before = true", "local selected = 1", "return selected" }, 2)
     local id = create("Where is this handled?")

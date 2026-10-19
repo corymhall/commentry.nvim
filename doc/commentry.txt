@@ -32,7 +32,9 @@ The project inbox works without Diffview or Snacks.
 
 Inbox-local keys:
     j/k   Select a thread in the list.
-    r     Reply in a multiline editor.
+    r     Focus the reply area beneath the conversation.
+    visual r Quote selected source text into the reply.
+    :write Save the inline reply. s sends after saving.
     n     New standalone thread.
     Enter Open the conversation and mark displayed messages read.
     u     Toggle read/unread.
@@ -44,7 +46,7 @@ Inbox-local keys:
     a     Attached session status, focus and delivery controls.
     t     Retry a failed request after inspecting partial work.
     d     Remove the oldest pending request from the selected thread.
-    Ctrl-d Save and dispatch from the composer. Ctrl-s only saves locally.
+    Ctrl-d Save and dispatch from the new-thread composer. Ctrl-s only saves.
     Ctrl-h/j/k/l Move between panels, keeping plain h/j/k/l for text.
     x     Resolve or reopen. The thread stays in the list.
     gl    Choose original capture or a named code attachment.
@@ -66,6 +68,18 @@ requests are delivered without adding copies. With no attached agent, requests
 are saved for delivery. It reports counts and failures, or that nothing is new.
 Failed requests require explicit retry after inspection. gs always uses queue
 mode, independently of m.
+
+Replies are edited directly in the thread buffer below the Reply heading.
+Use :write to save a comment, then s to send the saved conversation. Saving
+again with an empty reply does not add a duplicate. Visual r in the source pane
+quotes the selected text with > prefixes and places the cursor beneath it.
+Diff markers remain in quotes; virtual line numbers are not included.
+Drafts survive switches and inbox closure within the current Neovim session.
+Dirty replies keep their displayed history fixed until saved. Saving reloads
+new messages. Existing history cannot be changed through :write. Undo edits
+above the reply heading before saving. Failed saves retain the draft.
+The thread buffer keeps normal i/a/u/d/x and other text-editing keys. Filtering,
+resolution and other inbox actions remain available in the list/source panes.
 
 Native window commands that close a panel also close the inbox view. Reopen it
 with :Commentry inbox. Comparison attachments are listed in the conversation

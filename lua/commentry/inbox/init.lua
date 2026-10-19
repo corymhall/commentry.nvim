@@ -1,5 +1,6 @@
 local Locations = require("commentry.inbox.locations")
 local Render = require("commentry.inbox.render")
+local Reply = require("commentry.inbox.reply")
 local Source = require("commentry.inbox.source")
 local Store = require("commentry.inbox.store")
 local Util = require("commentry.util")
@@ -8,6 +9,11 @@ local active
 local refresh
 
 local function close_view(view)
+  Reply.remember(view)
+  view.reply = nil
+  if vim.api.nvim_buf_is_valid(view.thread_buf) then
+    vim.bo[view.thread_buf].modified = false
+  end
   view.closed = true
   if active == view then
     if view.group then
@@ -235,8 +241,11 @@ local function render_detail(view)
   local thread = selected(view)
   Locations.set(view.location_threads or view.threads, thread and thread.id)
   if not thread then
+    Reply.remember(view)
+    view.reply = nil
     write(view.source_buf, { "No threads in this scope.", "", ":Commentry comment", ":Commentry capture-text" }, "text")
     write(view.thread_buf, { "Capture code or text to start a conversation." }, "markdown")
+    vim.bo[view.thread_buf].modified = false
     return
   end
   Render.selection(view, vim.api.nvim_win_get_cursor(view.list_win)[1])
@@ -318,7 +327,9 @@ refresh = function(view, select_id)
   end
   local scope_label = view.project and vim.fs.basename(view.project) or "All projects"
   vim.wo[view.list_win].winbar = " " .. scope_label:gsub("%%", "%%%%") .. " / " .. view.filter .. " / " .. #view.threads
-  vim.wo[view.thread_win].winbar = " Conversation %=%#CommentryInboxMuted#" .. view.delivery_mode .. "  s send  gs all "
+  vim.wo[view.thread_win].winbar = " Conversation %=%#CommentryInboxMuted#"
+    .. view.delivery_mode
+    .. "  r reply  :w save  s send  gs all "
   view.stamp = revision
 end
 
@@ -457,17 +468,7 @@ function M.open(scope, opts)
   local function reply()
     local thread = selected(view)
     if thread then
-      local id = thread.id
-      compose("Reply", nil, function(body)
-        local event, err = Store.update(id, { kind = "reply", body = body })
-        if not report(event, err) then
-          return false
-        end
-        refresh(view)
-        return id
-      end, function(reply_id)
-        send_thread(reply_id, view.delivery_mode)
-      end)
+      Reply.focus(view)
     end
   end
   local function comparison()
@@ -495,9 +496,18 @@ function M.open(scope, opts)
     if read and not thread.unread then
       return
     end
-    local event, err = Store.update(thread.id, { kind = "read", read = read, seen = thread.incoming })
+    -- A dirty inline reply still displays its saved history. Never acknowledge
+    -- a newer incoming version that has not been rendered beneath that draft.
+    local seen = thread.incoming
+    if read and view.reply and view.reply.id == thread.id then
+      seen = view.reply.incoming
+      if not seen and thread.incoming then
+        return
+      end
+    end
+    local event, err = Store.update(thread.id, { kind = "read", read = read, seen = seen })
     if report(event, err) then
-      thread.unread = not read
+      thread.unread = not read or thread.incoming ~= seen
       if read and view.filter == "unread" then
         view.pin_id = thread.id
       end
@@ -561,7 +571,7 @@ function M.open(scope, opts)
       s = {
         function()
           local thread = selected(view)
-          if thread then
+          if thread and not Reply.unsaved(view, nil, thread.id) then
             send_thread(thread.id, view.delivery_mode)
           end
         end,
@@ -572,6 +582,9 @@ function M.open(scope, opts)
           local target_project = view.project or (selected(view) and selected(view).project)
           if not target_project then
             Util.warn("Select a project thread first")
+            return
+          end
+          if Reply.unsaved(view, target_project) then
             return
           end
           local result, err = require("commentry.inbox.agent").send_all(target_project)
@@ -730,7 +743,9 @@ function M.open(scope, opts)
             "Inbox keys",
             "",
             "j / k   Select a thread in the list",
-            "r       Reply",
+            "r       Focus the inline reply",
+            "visual r  Quote a source selection into the reply",
+            ":write  Save the reply, then s sends it",
             "n       New standalone project thread",
             "Enter   Open and mark read",
             "u       Toggle read/unread",
@@ -757,7 +772,11 @@ function M.open(scope, opts)
         "Show inbox help",
       },
     }) do
-      vim.keymap.set("n", key, mapping[1], { buffer = buf, desc = mapping[2] })
+      -- The conversation is an editor now. Leave insert, append, undo, change,
+      -- delete and other ordinary text keys available in its normal mode.
+      if buf ~= view.thread_buf or vim.tbl_contains({ "r", "s", "gs", "q", "?", "gf", "gl" }, key) then
+        vim.keymap.set("n", key, mapping[1], { buffer = buf, desc = mapping[2] })
+      end
     end
     for key, direction in pairs({ h = "h", j = "j", k = "k", l = "l" }) do
       vim.keymap.set("n", "<C-" .. key .. ">", function()
@@ -767,6 +786,36 @@ function M.open(scope, opts)
   end
   local group = vim.api.nvim_create_augroup("CommentryInbox", { clear = true })
   view.group = group
+  vim.bo[view.thread_buf].buftype = "acwrite"
+  vim.api.nvim_create_autocmd("BufWriteCmd", {
+    group = group,
+    buffer = view.thread_buf,
+    desc = "Save the inline inbox reply without changing conversation history",
+    callback = function()
+      local id = view.reply and view.reply.id
+      if Reply.save(view) then
+        refresh(view, id)
+      end
+    end,
+  })
+  vim.api.nvim_create_autocmd("BufWipeout", {
+    group = group,
+    buffer = view.thread_buf,
+    desc = "Retain an inline draft when its conversation buffer closes",
+    callback = function()
+      Reply.remember(view)
+    end,
+  })
+  vim.keymap.set("x", "r", function()
+    local lines = vim.fn.getregion(vim.fn.getpos("v"), vim.fn.getpos("."), {
+      type = vim.fn.mode(),
+      exclusive = vim.o.selection == "exclusive",
+    })
+    vim.cmd.normal({ args = { "\27" }, bang = true })
+    if selected(view) then
+      Reply.focus(view, lines)
+    end
+  end, { buffer = view.source_buf, desc = "Quote source selection in an inline reply" })
   vim.api.nvim_create_autocmd("WinClosed", {
     group = group,
     desc = "Dispose of the inbox when a native command closes an owned panel",

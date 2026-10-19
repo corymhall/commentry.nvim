@@ -25,6 +25,16 @@ The editor uses `Ctrl-s` to save and normal-mode `q` to cancel. The inbox uses
 and `q` to close. `Ctrl-h/j/k/l` moves between panels. Plain `h/j/k/l` retains
 normal text navigation. Closing an inbox panel with a native window command
 closes the inbox view; `:Commentry inbox` opens it again.
+Replies live beneath the conversation in the thread buffer. Press `r` to start
+editing, `:write` to save the reply, then `s` to send it. In the source pane,
+select text visually and press `r` to quote it into the reply with `>` prefixes.
+Diff markers are preserved and display-only line numbers are omitted.
+Unsaved replies survive thread switches and closing/reopening the inbox during
+the current Neovim session. While a reply is modified its displayed history stays
+fixed; saving reloads the latest conversation. Changes to existing history are
+rejected on save. Undo those changes and write only beneath the reply heading.
+The thread buffer keeps normal editing keys such as `i`, `a`, `u`, `d`, and `x`.
+Use the list or source pane for filtering, resolution, and other inbox actions.
 Source and conversation stack below 140 editor columns
 and sit side by side at larger widths. The layout adapts when resized. No
 colorscheme overrides are added. Open Commentry in your normal
@@ -179,7 +189,8 @@ attached, requests are saved for delivery. The result reports sent, saved and
 skipped counts, or threads needing attention. Failed requests still require
 explicit retry after inspection.
 
-The composer uses `Ctrl-s` to save and `Ctrl-d` to save and send. Press `m` to
+The new-thread composer uses `Ctrl-s` to save and `Ctrl-d` to save and send.
+Inline replies use `:write` to save, followed by `s` to send. Press `m` to
 choose queue or steer, then `s` to send the selected thread. Both modes submit
 immediately, including while the agent is working:
 
