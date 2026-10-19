@@ -20,6 +20,11 @@ type Agent struct {
 
 // Agent returns a project's selection, including an offline session.
 func (s *Store) Agent(ctx context.Context, project string) (Agent, error) {
+	if s.remote != nil {
+		var a Agent
+		err := s.remote.Call(ctx, "agents.get", map[string]string{"project": project}, &a)
+		return a, err
+	}
 	var raw string
 	err := s.db.QueryRowContext(ctx, "SELECT state FROM agents WHERE project=?", project).Scan(&raw)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -36,6 +41,9 @@ func (s *Store) Agent(ctx context.Context, project string) (Agent, error) {
 // RegisterAgent replaces only the selection observed by its caller. Changing
 // the selection never cancels work already delivered to another session.
 func (s *Store) RegisterAgent(ctx context.Context, a Agent, previous string) error {
+	if s.remote != nil {
+		return s.remote.Call(ctx, "agents.select", map[string]any{"agent": a, "previous": previous}, nil)
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -84,6 +92,9 @@ func finish(thread *Thread, r Request, event Event) error {
 
 // DetachAgent removes a selection while preserving its session and claims.
 func (s *Store) DetachAgent(ctx context.Context, project, expected string) error {
+	if s.remote != nil {
+		return s.remote.Call(ctx, "agents.detach", map[string]string{"project": project, "expected": expected}, nil)
+	}
 	result, err := s.db.ExecContext(ctx, "DELETE FROM agents WHERE project=? AND id=?", project, expected)
 	if err != nil {
 		return err

@@ -16,6 +16,7 @@ import (
 
 const (
 	actionRead       = "read"
+	actionList       = "list"
 	actionQueue      = "queue"
 	actionFinish     = "finish"
 	actionResolve    = "resolve"
@@ -32,10 +33,10 @@ func NewRootCmd() *cobra.Command {
 		RunE: func(command *cobra.Command, _ []string) error { return command.Help() },
 	}
 	root.PersistentFlags().StringVar(&directory, "directory", "", "Inbox data directory, defaults to COMMENTRY_INBOX_DIR or Neovim's data directory")
-	for _, action := range []string{"list", actionRead, "create", "reply", actionFinish, actionResolve, actionComparison, actionReadState, actionQueue, "claim", "complete", "cancel", "retry", "revision", "changes"} {
+	for _, action := range []string{actionList, actionRead, "create", "reply", actionFinish, actionResolve, actionComparison, "attach", actionReadState, actionQueue, "claim", "complete", "cancel", "retry", "revision", "changes"} {
 		root.AddCommand(newAction(action, &directory))
 	}
-	root.AddCommand(newRPC(&directory), newWatch(&directory), newCapture(&directory), newRex(&directory), newAgent(&directory))
+	root.AddCommand(newRPC(&directory), newWatch(&directory), newCapture(&directory), newRex(&directory), newAgent(&directory), newExecutor(&directory))
 	return root
 }
 
@@ -62,8 +63,10 @@ func execute(command *cobra.Command, directory string, request inbox.Request) (r
 		return nil, err
 	}
 	defer func() { err = errors.Join(err, store.Close()) }()
+	deferred := request.DeferDelivery
+	request.DeferDelivery = false // Local transport option, never forwarded to Executor.
 	result, err = store.Execute(command.Context(), request)
-	if err != nil || request.Action != actionQueue {
+	if err != nil || request.Action != actionQueue || deferred {
 		return result, err
 	}
 	queued := result.(inbox.Queued)
@@ -133,7 +136,7 @@ func newAction(action string, directory *string) *cobra.Command {
 	command := &cobra.Command{Use: action, Short: actionDescription(action), Args: cobra.NoArgs}
 	flags := command.Flags()
 	switch action {
-	case actionRead, "reply", actionFinish, actionResolve, actionComparison, actionReadState, actionQueue, "complete", "cancel", "retry":
+	case actionRead, "attach", "reply", actionFinish, actionResolve, actionComparison, actionReadState, actionQueue, "complete", "cancel", "retry":
 		command.Use += " <thread>"
 		command.Args = cobra.ExactArgs(1)
 	}
@@ -169,6 +172,10 @@ func bindActionFlags(command *cobra.Command, options *actionOptions) {
 		flags.StringVar(&request.Body, "body", "", "Comment body")
 		flags.StringVar(&options.text, "text", "", "Copied text to capture")
 		flags.StringVar(&options.sourceFile, "source-file", "", "JSON file containing an immutable source capture")
+	case "attach":
+		flags.StringVar(&options.sourceFile, "source-file", "", "JSON file containing a file snapshot")
+		flags.StringVar(&request.Label, "label", "", "Location label")
+		flags.StringVar(&request.AttachmentID, "attachment-id", "", "Replace this attachment, preserving its ID")
 	case "reply", "finish":
 		flags.StringVar(&request.Body, "body", "", "Reply body")
 		if action == actionFinish {
@@ -184,6 +191,7 @@ func bindActionFlags(command *cobra.Command, options *actionOptions) {
 		flags.StringVar(&options.afterFile, "after-file", "", "File containing the comparison's after text")
 		flags.StringVar(&request.Label, "label", "", "Comparison label")
 	case actionQueue:
+		flags.BoolVar(&request.DeferDelivery, "defer-delivery", false, "Save the request without submitting it to Rex")
 		flags.StringVar(&request.Message, "message", "", "Explicit immutable request, otherwise capture thread context")
 	case "complete":
 		flags.StringVar(&request.ClaimID, "claim-id", "", "Active claim ID")
@@ -247,7 +255,8 @@ func readInputFile(filename string) ([]byte, error) {
 
 func actionDescription(action string) string {
 	descriptions := map[string]string{
-		"list": "List project threads and filter their state", actionRead: "Read a thread without marking it read",
+		"attach":   "Add or replace a named code attachment",
+		actionList: "List project threads and filter their state", actionRead: "Read a thread without marking it read",
 		"create": "Create a standalone or captured-text thread", "reply": "Reply to a thread", actionResolve: "Resolve or reopen a conversation",
 		"finish":         "Reply and complete the specified active claims in one transaction",
 		actionComparison: "Attach an agent-authored before/after comparison", actionReadState: "Mark a displayed incoming version read, or mark unread",

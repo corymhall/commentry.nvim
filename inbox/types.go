@@ -21,6 +21,15 @@ type Source struct {
 	Git      map[string]string `json:"git,omitempty"`
 }
 
+// Attachment is a named code snapshot independent of the original capture.
+type Attachment struct {
+	ID     string `json:"id"`
+	Label  string `json:"label"`
+	Source Source `json:"source"`
+	Author string `json:"author"`
+	At     string `json:"at"`
+}
+
 // Message is a single contribution to a conversation.
 type Message struct {
 	ID     string `json:"id"`
@@ -61,47 +70,50 @@ type Queued struct {
 
 // Thread contains a capture, conversation, comparisons, and read/work state.
 type Thread struct {
-	ID           string    `json:"id"`
-	Project      string    `json:"project"`
-	Title        string    `json:"title"`
-	Source       Source    `json:"source"`
-	CreatedAt    string    `json:"created_at"`
-	UpdatedAt    string    `json:"updated_at"`
-	Resolved     bool      `json:"resolved"`
-	Messages     []Message `json:"messages"`
-	Comparisons  []Event   `json:"comparisons"`
-	Queue        []Queued  `json:"queue"`
-	Unread       bool      `json:"unread"`
-	Incoming     string    `json:"incoming,omitempty"`
-	Seen         string    `json:"seen,omitempty"`
-	ManualUnread bool      `json:"manual_unread"`
+	ID           string       `json:"id"`
+	Project      string       `json:"project"`
+	Title        string       `json:"title"`
+	Source       Source       `json:"source"`
+	Attachments  []Attachment `json:"attachments,omitempty"`
+	CreatedAt    string       `json:"created_at"`
+	UpdatedAt    string       `json:"updated_at"`
+	Resolved     bool         `json:"resolved"`
+	Messages     []Message    `json:"messages"`
+	Comparisons  []Event      `json:"comparisons"`
+	Queue        []Queued     `json:"queue"`
+	Unread       bool         `json:"unread"`
+	Incoming     string       `json:"incoming,omitempty"`
+	Seen         string       `json:"seen,omitempty"`
+	ManualUnread bool         `json:"manual_unread"`
 }
 
 // Request is the shared CLI and Neovim JSON protocol.
 type Request struct {
-	Action      string   `json:"action"`
-	Mode        string   `json:"mode,omitempty"`
-	ClaimIDs    []string `json:"claim_ids,omitempty"`
-	Thread      string   `json:"thread,omitempty"`
-	Project     string   `json:"project,omitempty"`
-	Author      string   `json:"author,omitempty"`
-	Title       string   `json:"title,omitempty"`
-	Body        string   `json:"body,omitempty"`
-	Text        *string  `json:"text,omitempty"`
-	Source      *Source  `json:"source,omitempty"`
-	Filter      string   `json:"filter,omitempty"`
-	Summary     bool     `json:"summary,omitempty"`
-	Resolved    *bool    `json:"resolved,omitempty"`
-	Read        *bool    `json:"read,omitempty"`
-	Seen        string   `json:"seen,omitempty"`
-	Before      *string  `json:"before,omitempty"`
-	After       *string  `json:"after,omitempty"`
-	Label       string   `json:"label,omitempty"`
-	Message     string   `json:"message,omitempty"`
-	ClaimID     string   `json:"claim_id,omitempty"`
-	QueueID     string   `json:"queue_id,omitempty"`
-	PendingOnly bool     `json:"pending_only,omitempty"`
-	Cursor      int64    `json:"cursor,omitempty"`
+	Action        string   `json:"action"`
+	DeferDelivery bool     `json:"defer_delivery,omitempty"`
+	AttachmentID  string   `json:"attachment_id,omitempty"`
+	Mode          string   `json:"mode,omitempty"`
+	ClaimIDs      []string `json:"claim_ids,omitempty"`
+	Thread        string   `json:"thread,omitempty"`
+	Project       string   `json:"project,omitempty"`
+	Author        string   `json:"author,omitempty"`
+	Title         string   `json:"title,omitempty"`
+	Body          string   `json:"body,omitempty"`
+	Text          *string  `json:"text,omitempty"`
+	Source        *Source  `json:"source,omitempty"`
+	Filter        string   `json:"filter,omitempty"`
+	Summary       bool     `json:"summary,omitempty"`
+	Resolved      *bool    `json:"resolved,omitempty"`
+	Read          *bool    `json:"read,omitempty"`
+	Seen          string   `json:"seen,omitempty"`
+	Before        *string  `json:"before,omitempty"`
+	After         *string  `json:"after,omitempty"`
+	Label         string   `json:"label,omitempty"`
+	Message       string   `json:"message,omitempty"`
+	ClaimID       string   `json:"claim_id,omitempty"`
+	QueueID       string   `json:"queue_id,omitempty"`
+	PendingOnly   bool     `json:"pending_only,omitempty"`
+	Cursor        int64    `json:"cursor,omitempty"`
 }
 
 // Change identifies a committed mutation for incremental inbox consumers.

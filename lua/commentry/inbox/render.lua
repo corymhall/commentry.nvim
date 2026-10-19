@@ -91,7 +91,8 @@ end
 function M.source(view, thread, comparison)
   local source = thread.source
   local general = source.kind == "text" and source.origin == "general"
-  local title = general and "Project conversation"
+  local title = view.mode == "agent" and "Attached comparisons"
+    or general and "Project conversation"
     or source.kind == "file" and source.path .. ":" .. source.first .. "-" .. source.last
     or "Captured text"
   local label = view.mode == "agent" and comparison.label
@@ -104,9 +105,11 @@ function M.source(view, thread, comparison)
   local rows = { " " .. title, " " .. label, "" }
   local old, new = comparison.first or 1, comparison.current_first or 1
   local marks, numbers = {}, {}
-  for _, line in ipairs(comparison.lines) do
+  for index, line in ipairs(comparison.lines) do
     local row = #rows
-    if comparison.filetype == "diff" then
+    if comparison.headings and comparison.headings[index] then
+      marks[#marks + 1] = { row, "Title" }
+    elseif comparison.filetype == "diff" and (not comparison.diff_rows or comparison.diff_rows[index]) then
       local old_start, old_count, new_start, new_count = line:match("^@@ %-(%d+),?(%d*) %+(%d+),?(%d*) @@")
       if old_start then
         old = tonumber(old_start) + (comparison.first or 1) - 1
@@ -166,11 +169,19 @@ function M.conversation(view, thread)
       vim.list_extend(rows, { "Inspect partial work, then press t to retry.", "" })
     end
   end
+  if #(thread.attachments or {}) > 0 then
+    rows[#rows + 1] = #thread.attachments .. " code locations / gl choose / gf go to code"
+    for _, attachment in ipairs(thread.attachments) do
+      rows[#rows + 1] = attachment.label .. " / " .. attachment.source.path .. ":" .. attachment.source.first
+    end
+    rows[#rows + 1] = ""
+  end
   local comparison = thread.comparisons[#thread.comparisons]
   if comparison then
     vim.list_extend(rows, {
-      "Comparison attached: " .. comparison.label .. " / " .. comparison.author,
-      "Press c and choose agent to view.",
+      "Comparisons attached: " .. #thread.comparisons,
+      comparison.label .. " / " .. comparison.author,
+      "Press c and choose agent to view all.",
       "",
     })
   end

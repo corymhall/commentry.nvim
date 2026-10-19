@@ -1,0 +1,13 @@
+{
+  "name": "@commentry/inbox",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "apps": "0.0.1-beta.69"
+  },
+  "devDependencies": {
+    "@types/node": "26.0.0",
+    "prettier": "3.9.10",
+    "typescript": "7.0.2"
+  }
+}

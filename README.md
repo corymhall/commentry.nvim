@@ -5,7 +5,7 @@ persisted comments, and optional agent handoff.
 
 ## Universal inbox
 
-The first inbox implementation works independently of Diffview and Snacks:
+The inbox works independently of Diffview and Snacks:
 
 - `:Commentry comment` captures the current file line and opens a multiline
   comment editor. `:'<,'>Commentry comment` captures a visual line range.
@@ -19,6 +19,7 @@ The first inbox implementation works independently of Diffview and Snacks:
 
 The editor uses `Ctrl-s` to save and normal-mode `q` to cancel. The inbox uses
 `j`/`k` in its list to select a thread, `r` to reply, `x` to resolve or reopen,
+`gs` to send all new project comments to the agent queue,
 `c` to choose a comparison, `e` to expand or collapse surrounding code,
 `i` to inspect capture and Git details, `?` for help, `R` to refresh,
 and `q` to close. `Ctrl-h/j/k/l` moves between panels. Plain `h/j/k/l` retains
@@ -26,12 +27,97 @@ normal text navigation. Closing an inbox panel with a native window command
 closes the inbox view; `:Commentry inbox` opens it again.
 Source and conversation stack below 140 editor columns
 and sit side by side at larger widths. The layout adapts when resized. No
-global maps or colorscheme overrides are added. Open Commentry in your normal
+colorscheme overrides are added. Open Commentry in your normal
 Neovim configuration to use your theme and configured integrations.
+
+### From copied text to code
+
+Capture questions, answers or notes from your agent conversation as inbox
+items. Agents can answer the same thread and use Executor's `attach` tool to
+add named code locations with saved file snapshots and Git information.
+The copied text remains the original capture. Supplying `attachment_id`
+replaces that location while preserving its ID. Agent attachment updates become
+unread, and do not resolve the conversation.
+
+Press `gl` to choose the original capture or a code attachment. Its focused
+comparison appears beside the conversation. Press `gf` to open the current
+code in the editing window you came from. Unchanged code can be found after
+insertions or a unique exact block move. Changed, missing or ambiguous locations
+offer the saved snapshot.
+
+Code buffers show gutter markers for open threads loaded from the inbox, with a
+range highlight and short reply preview for the active thread. Markers update
+from cached snapshots as you edit, without backend calls on keystrokes. `gC`
+returns from a visited code buffer to the thread under the cursor, offering a
+picker for overlapping threads. It is installed only if that key is free.
+`<Plug>(CommentryThread)` is also available for your own mapping.
+Inbox refresh loads new attachments and replies.
+
+The CLI equivalent is `commentry attach t-THREAD --label Implementation
+--source-file capture.json --author codex`. The source JSON uses the file capture
+shape, with a project-relative path, one-based first/last lines, the entire
+file's lines, and optional filetype, modified and Git metadata.
+
+### Executor backend
+
+The Commentry Executor app owns inbox conversations, captures, comparisons,
+read state, request claims and agent selections in its SQLite database. Agents
+use the same operations through Executor codemode. The local Go CLI handles
+capture, Git context and Rex terminal delivery, and forwards inbox operations
+to the configured app. Executor never starts or controls local terminals.
+
+Deploy the app source in `integrations/executor` to your Executor instance,
+then sign this machine in:
+
+```sh
+commentry executor login --url https://YOUR_EXECUTOR \
+  --organization ORGANIZATION --app APP_ID
+commentry executor status
+```
+
+Login prints a browser link and code. Approve it in Executor. Credentials stay
+in the local private session file and refresh automatically. No credentials are
+included in agent prompts. The session grants Executor API account access.
+Neovim keeps using the CLI and needs no separate account configuration.
+
+For an existing local inbox, export it before login, keep a backup, then import
+that snapshot after connecting:
+
+```sh
+commentry executor export > inbox-backup.json
+# Run executor login, then:
+commentry executor import --file inbox-backup.json
+```
+
+Import preserves thread/message IDs, timestamps, original captures, read state,
+resolution state and requests. A conflicting existing thread aborts the batch.
+Keep other inbox clients idle during export and cutover. Existing local SQLite
+files stay untouched. An unconfigured directory uses the legacy local backend
+for migration and offline tests; once configured, unavailable Executor calls
+fail visibly and never fall back to local writes. Offline capture is deferred.
+`--directory` selects the local connection/configuration directory.
+
+In codemode, discover tools in the installed app namespace, normally
+`commentry`. Use `list`, `read`, `create`, `reply`, `finish`, `attach`, `comparison`,
+`readState`, `resolve`, `changes`, and `revision`. A delivered request supplies
+its thread and claim IDs. `finish` saves the answer and completes those claims
+atomically without resolving the conversation. `reply` adds a comment without
+completing a delivery claim. The packaged `commentry` skill explains this flow.
+Delivered comments use `requests.read` with the notification's project and items.
+It returns at most five claims per page and 2000 Unicode characters of context
+per claim. Continue with `next_cursor`; use `requests.context` and
+`context.next_offset` for more text. Earlier answered discussion is available
+through its history section. The saved submission excludes later replies.
+Inactive claims return status only. Full `read` remains the editor's complete
+thread protocol. Print Executor's checked execution value rather than both MCP
+response representations.
+
+Project identities are canonical checkout paths supplied by the local client;
+matching other machines' checkout paths is not automatic.
 
 ### Read state and filters
 
-`*` marks unread activity. Messages and comparisons authored by anyone other
+`*` marks unread activity. Messages, code attachments and comparisons authored by anyone other
 than the local `You` label are incoming activity. Own replies do not clear unread
 messages. List previews leave unread state intact. `Enter`, or moving into the
 conversation panel, marks the displayed activity read. Agent comparisons appear
@@ -80,6 +166,18 @@ filters directories by the supplied absolute path and its descendants.
 Commentry additionally resolves Git roots when selecting project agents.
 `agent_get` reports the current status. `agent_read` returns terminal text,
 not a structured conversation transcript. OpenCode is not implemented.
+
+Press `gs` in the inbox to send all open threads with new comments from you,
+including threads hidden by the current filter. It always uses the native agent
+queue as one compact notification. The agent fetches each thread and its
+submitted snapshot through Executor, then replies to each thread separately.
+Comment bodies, captures and repeated delivery instructions are omitted from
+the notification. In the all-projects view it uses the selected thread's project.
+Resolved threads, agent-only notes and already delivered comments are skipped.
+Existing pending requests are delivered without adding copies. With no agent
+attached, requests are saved for delivery. The result reports sent, saved and
+skipped counts, or threads needing attention. Failed requests still require
+explicit retry after inspection.
 
 The composer uses `Ctrl-s` to save and `Ctrl-d` to save and send. Press `m` to
 choose queue or steer, then `s` to send the selected thread. Both modes submit
@@ -207,7 +305,7 @@ separate project scopes.
 
 ### Capture and agent replies outside Neovim
 
-Build the Go backend with `mise run build`, or install it with
+Build the Go client with `mise run build`, or install it with
 `mise run install-commentry`. The inbox requires this binary. Neovim uses the
 checkout's `bin/commentry` first, then `commentry` on PATH. `COMMENTRY_CLI` can
 select an explicit executable.
@@ -241,9 +339,10 @@ The response contains `{"ok":true,"result":"t-..."}`. Use that returned ID:
 ```
 
 Omit `project` from `list` to list every project. Comparison text is recorded
-verbatim. Select `agent` with `c` to view the latest attached comparison, labeled
-with its author and timestamp. This never overwrites the original capture or
-edits source files. Authors are caller-provided labels. Failed requests return
+verbatim. Select `agent` with `c` to view all attached comparisons in one
+scrollable view, each labeled with its author and timestamp. This never
+overwrites the original capture or edits source files. Authors are
+caller-provided labels. Failed requests return
 `ok: false` and exit nonzero. `summary: true` excludes full buffer snapshots from
 list output. Claims are serialized and project-scoped; a claim returns an
 immutable message and a claim ID. Completing it does not resolve its thread.
@@ -251,15 +350,15 @@ Cancelled work cannot later be completed. SQLite transactions serialize claims
 and recover unfinished writes after a crash. A committed claim remains visible
 until completed, explicitly cancelled, or explicitly marked failed after uncertain delivery. It is never automatically reassigned.
 
-The SQLite database lives at `stdpath("data")/commentry/inbox/inbox.sqlite3`.
-The standalone CLI defaults to `$XDG_DATA_HOME/nvim/commentry/inbox` or
-`~/.local/share/nvim/commentry/inbox`, respecting `NVIM_APPNAME`. Set
-`COMMENTRY_INBOX_DIR` or pass `--directory` to select another inbox. Neovim
-always passes its actual data directory to the backend. Replies, read state,
-comparisons, queue transitions, and change records commit transactionally.
-The database uses WAL with a five-second busy timeout. Corrupt databases and
-unsupported schema versions report errors. There is no deletion interface yet.
-Earlier prototype event files are left untouched and are not imported.
+Executor owns the configured inbox database. The local connection files live
+at `stdpath("data")/commentry/inbox/executor.json` and
+`executor-session.json`. The standalone CLI defaults to
+`$XDG_DATA_HOME/nvim/commentry/inbox` or `~/.local/share/nvim/commentry/inbox`,
+respecting `NVIM_APPNAME`. Set `COMMENTRY_INBOX_DIR` or pass `--directory` to
+select another connection directory. Neovim passes its actual data directory.
+Mutations and change records commit in the same Executor SQLite transaction.
+The legacy `inbox.sqlite3` is retained for explicit export and isolated tests.
+Earlier prototype event files remain untouched. There is no deletion interface.
 
 The same operations have shell commands with JSON output:
 
@@ -288,8 +387,8 @@ Neovim detects committed revisions automatically while the inbox is idle.
 The existing Diffview review store and send-to-agent flow remain separate.
 Review-to-inbox linking, OpenCode support, anchor reattachment, branch comparison
 mode, and an OS-wide capture shortcut are follow-up work.
-Removing the new inbox directory resets only the inbox data. Existing review
-drafts remain in their original store.
+Removing local connection files does not delete the Executor inbox. Existing
+Diffview drafts remain in their original store.
 
 ## Preview
 
@@ -462,10 +561,10 @@ require("commentry").setup({
 
 ## Development
 
-- Install development tools: `mise install`
-- Format Lua and Go: `mise run format`
-- Lint Lua and Go: `mise run lint`
-- Run Lua and Go tests: `mise run test`
+- Install development tools: `mise install`, then `mise run setup_executor`
+- Format Lua, Go and TypeScript: `mise run format`
+- Lint Lua, Go and TypeScript: `mise run lint`
+- Run Lua, Go and Executor SQLite tests: `mise run test`
 - Validate docs: `mise run docs`
 - Full local checks: `mise run ci`
 - Build the standalone Go CLI: `mise run build`
@@ -475,12 +574,15 @@ require("commentry").setup({
 - Canonical feature/design plans: `docs/plans/`
 - Legacy Speckit archive (read-only history): `docs/archive/speckit/`
 
-The Go CLI owns the SQLite inbox backend, JSON protocol, and shell commands.
+The Executor app owns the configured inbox database and inbox operations.
+The Go CLI owns the JSON protocol adapter, browser login, capture and Rex delivery.
 Go tooling is adapted from `~/personal/evaler`,
 including Go 1.26.5, golangci-lint v2, its lint and formatter rules, hk 1.55,
 and the Cobra/Viper skill in `.agents/skills/cobra-viper`.
-The backend uses the pure Go `modernc.org/sqlite` driver. Viper is not needed yet.
-Lua tests build the backend automatically. `mise run build_go` compiles it without
+The legacy export backend uses the pure Go `modernc.org/sqlite` driver.
+The Executor app pins its `apps` framework version and uses synchronous SQL
+transactions. Viper is not needed yet.
+Lua tests build the client automatically. `mise run build_go` compiles it without
 running checks.
 
 Use `mise run format_go`, `mise run lint_go`, and `mise run test_go` for Go-only

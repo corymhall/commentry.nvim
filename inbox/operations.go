@@ -60,6 +60,9 @@ func (s *Store) Execute(ctx context.Context, r Request) (any, error) {
 			return nil, err
 		}
 	}
+	if s.remote != nil {
+		return s.remoteExecute(ctx, r)
+	}
 	switch r.Action {
 	case "list":
 		return s.filtered(ctx, r)
@@ -69,7 +72,7 @@ func (s *Store) Execute(ctx context.Context, r Request) (any, error) {
 		return s.Revision(ctx)
 	case "changes":
 		return s.Changes(ctx, r.Project, r.Cursor)
-	case "create", "reply", "resolve", "comparison", "read-state", modeQueue, "claim", statusComplete, "cancel", "fail", "retry", "finish":
+	case "create", "attach", "reply", "resolve", "comparison", "read-state", modeQueue, "claim", statusComplete, "cancel", "fail", "retry", "finish":
 	default:
 		return nil, fmt.Errorf("unknown inbox action: %s", r.Action)
 	}
@@ -195,7 +198,8 @@ func update(ctx context.Context, tx *sql.Tx, r Request) (any, error) {
 	at := time.Now().UTC().Format(time.RFC3339Nano)
 	event := Event{ID: identity("e-"), Thread: thread.ID, Kind: r.Action, Author: r.Author, At: at, ClaimID: r.ClaimID, QueueID: r.QueueID}
 	var result any
-	if r.Action == modeQueue {
+	switch r.Action {
+	case modeQueue:
 		item, duplicate, err := enqueue(thread, r, event)
 		if err != nil {
 			return nil, err
@@ -205,7 +209,12 @@ func update(ctx context.Context, tx *sql.Tx, r Request) (any, error) {
 		}
 		thread.Queue = append(thread.Queue, item)
 		result = item
-	} else {
+	case "attach":
+		result, err = attach(&thread, r, event)
+		if err != nil {
+			return nil, err
+		}
+	default:
 		if err := apply(&thread, r, &event); err != nil {
 			return nil, err
 		}
@@ -305,26 +314,40 @@ func claim(ctx context.Context, tx *sql.Tx, r Request) (any, error) {
 }
 
 // A queued excerpt retains original selection coordinates. excerpt_first maps
-// the excerpt's first array element back to its line in the captured file.
-func payload(thread Thread, mode string) (string, error) {
-	type excerpt struct {
-		Source
-		ExcerptFirst int `json:"excerpt_first,omitempty"`
-	}
-	source := excerpt{Source: thread.Source}
+// its first array element back to its line in the captured file.
+type excerpt struct {
+	Source
+	ExcerptFirst int `json:"excerpt_first,omitempty"`
+}
+
+func sourceExcerpt(source Source) excerpt {
+	result := excerpt{Source: source}
 	if source.Kind == "file" {
-		first := max(0, source.First-5)
-		last := min(len(source.Lines), source.Last+4)
-		source.Lines = source.Lines[first:last]
-		source.ExcerptFirst = first + 1
+		first, last := max(0, source.First-5), min(len(source.Lines), source.Last+4)
+		result.Lines = source.Lines[first:last]
+		result.ExcerptFirst = first + 1
+	}
+	return result
+}
+
+func payload(thread Thread, mode string) (string, error) {
+	type attachmentExcerpt struct {
+		ID     string  `json:"id"`
+		Label  string  `json:"label"`
+		Source excerpt `json:"source"`
+	}
+	attachments := make([]attachmentExcerpt, 0, len(thread.Attachments))
+	for _, attachment := range thread.Attachments {
+		attachments = append(attachments, attachmentExcerpt{attachment.ID, attachment.Label, sourceExcerpt(attachment.Source)})
 	}
 	payload, err := json.Marshal(struct {
-		Thread   string    `json:"thread"`
-		Project  string    `json:"project"`
-		Title    string    `json:"title"`
-		Source   excerpt   `json:"source"`
-		Messages []Message `json:"messages"`
-	}{thread.ID, thread.Project, thread.Title, source, thread.Messages})
+		Thread      string              `json:"thread"`
+		Project     string              `json:"project"`
+		Title       string              `json:"title"`
+		Source      excerpt             `json:"source"`
+		Messages    []Message           `json:"messages"`
+		Attachments []attachmentExcerpt `json:"attachments,omitempty"`
+	}{thread.ID, thread.Project, thread.Title, sourceExcerpt(thread.Source), thread.Messages, attachments})
 	if err != nil {
 		return "", err
 	}
@@ -389,4 +412,39 @@ func markRead(thread *Thread, r Request) error {
 	}
 	thread.ManualUnread = !*r.Read
 	return nil
+}
+
+func attach(thread *Thread, r Request, event Event) (Attachment, error) {
+	if !label(r.Label) || r.Source == nil || r.Source.Kind != "file" {
+		return Attachment{}, fmt.Errorf("attach requires a label and file source")
+	}
+	if err := validateSource(*r.Source); err != nil {
+		return Attachment{}, err
+	}
+	index := -1
+	if r.AttachmentID != "" {
+		for i, a := range thread.Attachments {
+			if a.ID == r.AttachmentID {
+				index = i
+				break
+			}
+		}
+		if index < 0 {
+			return Attachment{}, fmt.Errorf("unknown attachment")
+		}
+	}
+	id := r.AttachmentID
+	if id == "" {
+		id = event.ID
+	}
+	attachment := Attachment{ID: id, Label: r.Label, Source: *r.Source, Author: event.Author, At: event.At}
+	if index < 0 {
+		thread.Attachments = append(thread.Attachments, attachment)
+	} else {
+		thread.Attachments[index] = attachment
+	}
+	if event.Author != "You" {
+		thread.Incoming = event.ID
+	}
+	return attachment, nil
 }

@@ -12,6 +12,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: jdx/mise-action@v3
+      - name: Install Executor development tools
+        run: mise run setup_executor
       - name: Check format drift
         run: |
           mise run format

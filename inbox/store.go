@@ -11,11 +11,16 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/corymhall/commentry.nvim/executor"
 	"modernc.org/sqlite" // Registers the pure-Go SQLite driver.
 )
 
-// Store owns a SQLite connection pool. Call Close when its caller finishes.
-type Store struct{ db *sql.DB }
+// Store routes inbox operations to Executor, or owns a legacy SQLite pool.
+// Call Close when its caller finishes.
+type Store struct {
+	db     *sql.DB
+	remote *executor.Client
+}
 
 // DefaultDirectory matches Neovim's default data directory on Unix systems.
 func DefaultDirectory() (string, error) {
@@ -37,7 +42,7 @@ func DefaultDirectory() (string, error) {
 	return filepath.Join(base, app, "commentry", "inbox"), nil
 }
 
-// Open creates or opens the inbox, with WAL and bounded writer contention.
+// Open selects the configured Executor app or an unconfigured legacy inbox.
 func Open(ctx context.Context, directory string) (*Store, error) {
 	if directory == "" {
 		var err error
@@ -50,6 +55,15 @@ func Open(ctx context.Context, directory string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
+	remote, err := executor.Open(directory)
+	if err == nil {
+		return &Store{remote: remote}, nil
+	}
+	if !executor.IsUnconfigured(err) {
+		return nil, err
+	}
+	// Unconfigured directories retain the legacy store for explicit migration
+	// and isolated offline tests. A configured Executor never falls back here.
 	if err = os.MkdirAll(directory, 0o700); err != nil {
 		return nil, fmt.Errorf("create inbox directory: %w", err)
 	}
@@ -118,11 +132,20 @@ func (s *Store) initialize(ctx context.Context) error {
 }
 
 // Close releases database resources.
-func (s *Store) Close() error { return s.db.Close() }
+func (s *Store) Close() error {
+	if s.remote != nil {
+		return nil
+	}
+	return s.db.Close()
+}
 
 // Revision returns the latest committed change sequence.
 func (s *Store) Revision(ctx context.Context) (int64, error) {
 	var revision int64
+	if s.remote != nil {
+		err := s.remote.Call(ctx, "revision", struct{}{}, &revision)
+		return revision, err
+	}
 	err := s.db.QueryRowContext(ctx, "SELECT COALESCE(MAX(sequence),0) FROM changes").Scan(&revision)
 	return revision, err
 }
@@ -139,6 +162,10 @@ func (s *Store) Changes(ctx context.Context, project string, cursor int64) (Chan
 	}
 	if cursor < 0 {
 		return result, fmt.Errorf("cursor cannot be negative")
+	}
+	if s.remote != nil {
+		err := s.remote.Call(ctx, "changes", map[string]any{"project": project, "cursor": cursor}, &result)
+		return result, err
 	}
 	// Bound the page before querying, so a concurrent commit cannot be skipped
 	// when advancing the cursor past changes from unrelated projects.

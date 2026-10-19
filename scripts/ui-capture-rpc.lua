@@ -105,7 +105,12 @@ local ok, err = xpcall(function()
         })
         assert(store.create({project = capture.project, title = "Explain this test failure", body = "Include both candidate locations in this error.", source = {kind = "text", lines = {"Found two matching excerpts.", "Unable to choose a destination."}}}))
         assert(store.create({project = capture.project, title = "A general project question", body = "Can we make the next milestone smaller?", source = {kind = "text", lines = {}, origin = "general"}}))
-        require("commentry.inbox").open()
+        local question = assert(store.create({project = capture.project, title = "Where is the retry deadline handled?", body = "Can you attach the implementation so I can review it here?", source = {kind = "text", lines = {"From our chat: retries share a ten second deadline."}, origin = "clipboard"}}))
+        local location = assert(require("commentry.inbox.source").capture(buf, 3, 6))
+        assert(store.update(question, {kind = "attach", label = "Retry implementation", source = location.source, author = "Codex"}))
+        assert(store.update(question, {kind = "reply", author = "Codex", body = "The deadline is checked before each attempt. Use gf to inspect this code, then gC to return and reply."}))
+        vim.api.nvim_buf_set_lines(buf, 0, 0, false, {"-- Requests share one deadline across all attempts."})
+        _G.commentry_capture_view = require("commentry.inbox").open(nil, {thread = question})
         return true
       ]],
       {},
@@ -113,6 +118,16 @@ local ok, err = xpcall(function()
     bridge:wait_for_flush(5000)
     local snapshot = bridge.screen:snapshot("rpc-inbox")
     Bridge.write_snapshot_files(snapshot, bridge.screen, out_dir, "rpc-inbox")
+    bridge:request("nvim_exec_lua", { [[
+      local view = _G.commentry_capture_view
+      for _, map in ipairs(vim.api.nvim_buf_get_keymap(view.list_buf, "n")) do
+        if map.lhs == "gf" then map.callback(); break end
+      end
+      return true
+    ]], {} }, 5000)
+    bridge:wait_for_flush(5000)
+    local code = bridge.screen:snapshot("rpc-inbox-code")
+    Bridge.write_snapshot_files(code, bridge.screen, out_dir, "rpc-inbox-code")
     return
   end
   bridge:request("nvim_command", { "Commentry open" }, 5000)

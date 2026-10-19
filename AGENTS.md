@@ -6,8 +6,8 @@ This file defines the operating contract for humans and AI agents working in thi
 
 - Project: `commentry.nvim` Neovim plugin.
 - Runtime target: Neovim `0.10+`.
-- Languages: Lua for Neovim, Go for the standalone CLI.
-- Test frameworks: `mini.test` for Lua, `go test` for Go.
+- Languages: Lua for Neovim, Go for the local CLI, TypeScript for the Executor app.
+- Test frameworks: `mini.test` for Lua, `go test` for Go, Node tests for Executor SQL.
 - Task runner: `mise` (`mise run <task>` is canonical).
 - Docs are maintained manually; `lua/commentry/docs.lua` validates README/vimdoc/help parity for release-facing surfaces.
 
@@ -23,7 +23,9 @@ This file defines the operating contract for humans and AI agents working in thi
 - `scripts/docs`: docs runner wrapper.
 - `main.go`: standalone Go CLI entrypoint.
 - `cmd/`: Cobra command factories. Keep inbox logic independent of Cobra.
-- `inbox/`: SQLite storage, request validation, thread state, and change cursors.
+- `inbox/`: Go inbox protocol/client and legacy SQLite export backend.
+- `executor/`: Authenticated Executor API client and browser device login.
+- `integrations/executor/`: TypeScript app, SQL migrations, and agent skill.
 - `lua/commentry/inbox/store.lua`: Neovim adapter to the Go JSON interface.
 - `.golangci.yml`: Go lint, modernization, and formatter configuration.
 - `hk.pkl`: Go checks and optional git hooks, adapted from Evaler.
@@ -43,6 +45,8 @@ Run commands from repo root.
 - Compile the backend only: `mise run build_go`
 - Run the Go CLI: `mise run run -- --help`
 - Install the Go CLI: `mise run install-commentry`
+- Executor setup: `mise run setup_executor`
+- Executor checks: `mise run test_executor`, `mise run lint_executor`
 - Go-only checks: `mise run format_go`, `mise run lint_go`, `mise run test_go`
 - Apply Go lint fixes: `mise run lint:fix`
 
@@ -52,7 +56,9 @@ Run commands from repo root.
 - Read `.agents/skills/cobra-viper/SKILL.md` when implementing commands.
 - Build commands with factories and pass command contexts into domain code.
 - Add Viper when configuration requires it. Commands currently use Cobra flags and environment variables.
-- Use `modernc.org/sqlite` for the inbox database. Each mutation and its change record must share a transaction.
+- Executor owns the configured inbox database. Each mutation and change record must share a transaction. `modernc.org/sqlite` remains for legacy export and offline tests.
+- The Executor app uses its pinned `apps` version and synchronous `ctx.sql.transaction`. Keep local Git and Rex operations in the client.
+- Run `mise run setup_executor` before formatting or linting on a fresh checkout. Node tests use isolated SQLite and never need the network.
 - Keep original captures immutable, incoming versions distinct from read acknowledgements, and queue claims atomic.
 - Lua tests build the Go binary automatically. Tests use isolated data directories and never mutate the user's inbox.
 - `mise run lint_go` includes the modernize analyzer and the configured formatters.

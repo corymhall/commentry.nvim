@@ -1,5 +1,5 @@
--- Neovim owns capture and presentation. All persisted state belongs to the Go
--- backend so agents and the editor share the same transactions and validation.
+-- Neovim owns capture and presentation. The CLI routes requests to the selected
+-- Executor app so agents and the editor share transactions and validation.
 local M = {}
 
 function M.directory(opts)
@@ -89,13 +89,19 @@ function M.update(id, input, opts)
   if input.kind == "create" or input.kind == "claim" then
     return nil, "Use create or claim to start threads or claim work"
   end
+  if input.source and type(input.source.git) == "table" and vim.tbl_isempty(input.source.git) then
+    input.source.git = vim.empty_dict()
+  end
   input.action = input.kind == "read" and "read-state" or input.kind
   input.kind, input.thread = nil, id
   return request(input, opts)
 end
 
 function M.enqueue(id, message, opts)
-  return request({ action = "queue", thread = id, message = message }, opts)
+  return request(
+    { action = "queue", thread = id, message = message, defer_delivery = opts and opts.defer_delivery or nil },
+    opts
+  )
 end
 
 function M.claim(project, author, opts)

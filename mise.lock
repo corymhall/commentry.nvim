@@ -141,6 +141,10 @@ url = "https://github.com/neovim/neovim/releases/download/stable/nvim-macos-x86_
 [tools.neovim."platforms.windows-x64"]
 url = "https://github.com/neovim/neovim/releases/download/stable/nvim-win64.zip"
 
+[[tools.node]]
+version = "26.7.0"
+backend = "core:node"
+
 [[tools.stylua]]
 version = "2.4.1"
 backend = "aqua:JohnnyMorganz/StyLua"

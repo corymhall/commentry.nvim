@@ -39,6 +39,7 @@ Inbox-local keys:
     f     Filter all/unread/read/open/resolved/queued.
     m     Choose queue or steer send mode.
     s     Queue or send the selected thread.
+    gs    Send all new project comments to the native agent queue.
     S     Attach an existing Pi or Codex session in this project.
     a     Attached session status, focus and delivery controls.
     t     Retry a failed request after inspecting partial work.
@@ -46,6 +47,8 @@ Inbox-local keys:
     Ctrl-d Save and dispatch from the composer. Ctrl-s only saves locally.
     Ctrl-h/j/k/l Move between panels, keeping plain h/j/k/l for text.
     x     Resolve or reopen. The thread stays in the list.
+    gl    Choose original capture or a named code attachment.
+    gf    Go to current code. Changed/missing locations offer a saved snapshot.
     c     Choose since, original, or agent comparison.
     e     Expand or collapse context from four to sixteen surrounding lines.
     i     Inspect thread ID, capture details and Git provenance.
@@ -53,9 +56,37 @@ Inbox-local keys:
     R     Refresh external writes and current file contents.
     q     Close the inbox tab.
 
+gs sends open threads with new comments from You across the project's filters.
+It submits one compact notification with the project, thread IDs and claim IDs.
+The agent fetches the submitted context through Executor and answers each item
+with finish. Captures and conversation bodies are not repeated in the paste.
+In the all-projects view it uses the selected thread's project. Resolved threads,
+agent-only notes and previously delivered comments are skipped. Existing pending
+requests are delivered without adding copies. With no attached agent, requests
+are saved for delivery. It reports counts and failures, or that nothing is new.
+Failed requests require explicit retry after inspection. gs always uses queue
+mode, independently of m.
+
 Native window commands that close a panel also close the inbox view. Reopen it
 with :Commentry inbox. Comparison attachments are listed in the conversation
 with their label and author. Press c and choose agent to view the attached diff.
+
+Copied questions and notes can acquire code locations without replacing their
+original text. Agents use attach with a label and a file source snapshot. The
+source includes a project-relative path, one-based first/last lines, the entire
+file's lines and optional filetype, modified and Git metadata. attachment_id
+replaces a previously read location with the same ID. Agent attachments become
+unread without resolving the thread.
+
+Press gl to select a location or the original capture. gf opens current code in
+the editing window you came from. Unchanged selections map through insertions
+or unique exact moves. Changed, missing and ambiguous code offers its snapshot.
+Code buffers show gutter markers for open threads loaded from the inbox.
+The active thread also has a range highlight and short reply preview.
+Markers track edits using cached snapshots. Refresh the inbox for new activity.
+gC in a visited code buffer opens its thread, or a picker when threads overlap.
+It is installed only when the key is free. <Plug>(CommentryThread) supports your
+own mapping.
 
 File captures preserve the entire buffer, including unsaved changes, selected
 range, and available Git HEAD, branch and original blob. The source pane shows
@@ -71,7 +102,7 @@ original/current line numbers and theme-linked addition/deletion highlights.
 Conversation headers emphasize authors with quiet timestamps. Provenance is
 available through i. CommentryInbox highlight groups inherit the colorscheme.
 
-Unread activity is marked *. Incoming messages/comparisons have an author other
+Unread activity is marked *. Incoming messages/attachments/comparisons have an author other
 than You. Own replies do not clear unread activity. List previews never mark a
 thread read. Enter or entering the conversation panel acknowledges only the
 displayed incoming version. New concurrent replies remain unread. CLI read is
@@ -180,6 +211,8 @@ Existing session commands:
   commentry agent --project . attach TARGET_ID_FROM_LIST
   commentry agent --project . status
   commentry agent --project . dispatch
+  commentry queue t-THREAD --defer-delivery
+  commentry agent --project . dispatch-batch --queue-id e-REQUEST --queue-id e-OTHER
   commentry agent --project . steer t-THREAD
   commentry agent --project . detach
   commentry retry t-THREAD --queue-id e-REQUEST
@@ -214,7 +247,8 @@ Supported requests include:
 Creation returns the stable thread ID as result. Project defaults to the
 invoking directory for create. Omit project from list to list every project.
 Comparison text is stored verbatim and never edits source files. Select agent
-with c to show the latest attached comparison with author and timestamp.
+with c to show all attached comparisons in one scrollable view, each labeled
+with its author and timestamp.
 Authors are caller-provided labels. Failed requests return ok=false and exit
 nonzero. R refreshes incoming messages. FocusGained also refreshes the inbox.
 summary excludes full snapshots from list output. Claims are project-scoped and
@@ -224,19 +258,57 @@ or explicitly marked failed after uncertain delivery.
 SQLite transactions recover incomplete writes after a crash. Committed claims
 are never automatically reassigned.
 
-The SQLite database is stdpath("data")/commentry/inbox/inbox.sqlite3. Override
-with COMMENTRY_INBOX_DIR or the CLI's --directory flag. The standalone CLI uses
-$XDG_DATA_HOME/nvim/commentry/inbox or ~/.local/share/nvim/commentry/inbox,
-respecting NVIM_APPNAME. Neovim passes its actual data directory explicitly.
-WAL transactions protect concurrent replies and queue claims, with a five-second
-busy timeout. Corrupt databases and unsupported schema versions report errors.
-The earlier prototype event files are left untouched and are not imported.
-There is no deletion interface yet. Removing this directory resets inbox data
-without affecting existing Diffview drafts.
+The Executor Commentry app owns the configured inbox in its SQLite database.
+Neovim and the Go CLI call the same operations agents use through codemode.
+Local capture, Git comparisons and Rex terminal delivery stay on this machine.
+Executor never starts local agent sessions. Sign in with:
+>
+  commentry executor login --url https://YOUR_EXECUTOR --organization ORGANIZATION --app APP_ID
+  commentry executor status
+<
+Approve the browser link and code printed by login. The session grants Executor
+API account access. Credentials refresh automatically and stay in private local
+files. Neovim uses the same session through its CLI adapter.
 
-The standalone binary exposes list, read, create, reply, resolve, comparison,
+Connection files are stdpath("data")/commentry/inbox/executor.json and
+executor-session.json. COMMENTRY_INBOX_DIR and --directory select another
+connection directory. The standalone CLI respects NVIM_APPNAME and defaults to
+$XDG_DATA_HOME/nvim/commentry/inbox or ~/.local/share/nvim/commentry/inbox.
+An unconfigured directory retains the legacy SQLite backend for migration and
+isolated tests. A configured remote never falls back to local writes.
+Unavailable Executor reports an error. Offline capture is deferred.
+
+Keep other inbox clients idle during migration. Export the local inbox before
+login, keep the backup, then import after connecting:
+>
+  commentry executor export > inbox-backup.json
+  commentry executor import --file inbox-backup.json
+<
+Import preserves IDs, timestamps, source captures, messages, requests and read
+and resolution state. Conflicts abort the batch. Local SQLite and earlier
+prototype event files remain untouched. Removing connection files does not
+delete the Executor inbox. There is no deletion interface yet.
+
+Agents discover the installed Commentry app in Executor codemode. Its native
+tools are requests.read, requests.context, list, read, create, reply, finish,
+attach, comparison, resolve, readState,
+changes and revision. finish atomically replies and completes the supplied
+claim_ids without resolving the thread. reply only adds a comment. The packaged
+commentry skill describes the flow. Local canonical checkout paths remain the
+project identities; different machines' paths are not automatically linked.
+
+For delivered comments, requests.read accepts the exact project and items from
+the notification. It returns five claims per page and up to 2000 Unicode
+characters per context. next_cursor continues the batch; requests.context uses
+context.next_offset to continue one request. History and source sections expose
+more submitted context. Comparison sections expose current enrichment. Later
+replies never enter the saved submission. Inactive claims return status only.
+Full read remains available for explicit complete-thread inspection.
+When wrapping MCP, emit checked execution.value, avoiding duplicated envelopes.
+
+The standalone binary exposes list, read, create, reply, resolve, attach, comparison,
 read-state, queue, claim, complete, cancel, retry, revision, changes, watch, rpc,
-capture, rex, and agent.
+capture, rex, agent, and executor.
 All data commands return JSON. Examples:
 >
   commentry list --project . --filter unread --summary
@@ -244,6 +316,7 @@ All data commands return JSON. Examples:
   commentry reply t-THREAD --author Codex --body "Here is the answer"
   commentry claim --project . --author Codex
   commentry complete t-THREAD --claim-id claim-CLAIM
+  commentry attach t-THREAD --author Codex --label Implementation --source-file capture.json
   commentry comparison t-THREAD --author Codex --label Refactor --before-file old.lua --after-file new.lua
   commentry watch --project . --after 0 --timeout 60s
 <

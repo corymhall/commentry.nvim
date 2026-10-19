@@ -107,15 +107,34 @@ function M.compare(thread, mode, context)
   context = context or 4
   local source = thread.source
   if mode == "agent" then
-    local comparison = thread.comparisons[#thread.comparisons]
-    if not comparison then
+    if #thread.comparisons == 0 then
       return nil, "No agent comparison attached"
     end
-    local diff = vim.diff(comparison.before, comparison.after, { result_type = "unified", ctxlen = context })
+    local lines, headings, diff_rows = {}, {}, {}
+    local has_diff = false
+    for index, comparison in ipairs(thread.comparisons) do
+      if index > 1 then
+        lines[#lines + 1] = ""
+      end
+      headings[#lines + 1] = true
+      lines[#lines + 1] = ("Comparison %d/%d / %s"):format(index, #thread.comparisons, comparison.label)
+      lines[#lines + 1] = comparison.author .. " / " .. comparison.at
+      lines[#lines + 1] = ""
+      local diff = vim.diff(comparison.before, comparison.after, { result_type = "unified", ctxlen = context })
+      has_diff = has_diff or diff ~= ""
+      for _, line in ipairs(vim.split(diff == "" and comparison.after or diff, "\n", { plain = true })) do
+        if diff ~= "" then
+          diff_rows[#lines + 1] = true
+        end
+        lines[#lines + 1] = line
+      end
+    end
     return {
-      lines = vim.split(diff == "" and comparison.after or diff, "\n", { plain = true }),
-      label = "Agent comparison / " .. comparison.author .. " / " .. comparison.at .. " / " .. comparison.label,
-      filetype = diff == "" and "text" or "diff",
+      lines = lines,
+      headings = headings,
+      diff_rows = diff_rows,
+      label = "Agent comparisons / " .. #thread.comparisons,
+      filetype = has_diff and "diff" or "text",
       outdated = false,
     }
   end
@@ -160,6 +179,70 @@ function M.compare(thread, mode, context)
     first = first,
     current_first = map_line(first, hunks),
   }
+end
+
+-- Attachments share capture comparison logic, but never replace thread.source.
+function M.locations(thread)
+  local locations = {}
+  for _, attachment in ipairs(thread.attachments or {}) do
+    locations[#locations + 1] = attachment
+  end
+  if thread.source.kind == "file" or #thread.source.lines > 0 or #locations == 0 then
+    locations[#locations + 1] = { id = "original", label = "Original capture", source = thread.source }
+  end
+  return locations
+end
+
+function M.with_location(thread, id)
+  local locations = M.locations(thread)
+  local location = locations[1]
+  for _, item in ipairs(locations) do
+    if item.id == id then
+      location = item
+    end
+  end
+  return vim.tbl_extend("force", thread, { source = location.source }), location
+end
+
+-- Only navigate when the selected code survives unchanged. Modified or missing
+-- selections stay available as snapshots instead of guessing a destination.
+function M.locate(thread)
+  if thread.source.kind ~= "file" then
+    return nil, "This item has no code location"
+  end
+  local current = current_lines(thread)
+  if not current then
+    return nil, "Outdated location: file unavailable"
+  end
+  local source = thread.source
+  local hunks = vim.diff(text(source.lines), text(current), { result_type = "indices", algorithm = "histogram" })
+  local first, last = map_line(source.first, hunks), map_line(source.last, hunks, true)
+  if
+    last - first == source.last - source.first
+    and vim.deep_equal(slice(current, first, last), slice(source.lines, source.first, source.last))
+  then
+    return { path = vim.fs.joinpath(thread.project, source.path), first = first, last = last }
+  end
+  -- A block may have moved across other code. Accept a unique exact match.
+  local matches = {}
+  for start = 1, #current - (source.last - source.first) do
+    if
+      vim.deep_equal(
+        slice(current, start, start + source.last - source.first),
+        slice(source.lines, source.first, source.last)
+      )
+    then
+      matches[#matches + 1] = start
+    end
+  end
+  if #matches == 1 then
+    return {
+      path = vim.fs.joinpath(thread.project, source.path),
+      first = matches[1],
+      last = matches[1] + source.last - source.first,
+    }
+  end
+  return nil, "Outdated location: selected code changed or is ambiguous"
 end
 
 return M

@@ -115,3 +115,46 @@ func TestCaptureRejectsInvalidSnapshotsWithoutRemovingThem(t *testing.T) {
 		t.Fatalf("invalid capture destroyed input: %s, %v", remaining, err)
 	}
 }
+
+// TestDeferredQueueDoesNotContactTheSelectedAgent protects staged batches.
+func TestDeferredQueueDoesNotContactTheSelectedAgent(t *testing.T) {
+	directory := t.TempDir()
+	project, err := inbox.Project(t.Context(), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := inbox.Open(t.Context(), directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+	value, err := store.Execute(t.Context(), inbox.Request{Action: "create", Project: project, Body: "Stage this"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread := value.(string)
+	if err = store.RegisterAgent(t.Context(), inbox.Agent{ID: "existing", Project: project, Harness: "codex"}, ""); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("COMMENTRY_REX", directory+"/missing-rex")
+	root := cmd.NewRootCmd()
+	root.SetArgs([]string{"--directory", directory, "rpc"})
+	input, _ := json.Marshal(inbox.Request{Action: "queue", Thread: thread, DeferDelivery: true})
+	root.SetIn(bytes.NewReader(input))
+	var output bytes.Buffer
+	root.SetOut(&output)
+	root.SetErr(&output)
+	if err = root.ExecuteContext(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	var response struct {
+		OK     bool         `json:"ok"`
+		Result inbox.Queued `json:"result"`
+	}
+	if err = json.Unmarshal(output.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if !response.OK || response.Result.Status != "pending" || response.Result.DeliveryError != "" {
+		t.Fatalf("staged request attempted delivery: %s", output.String())
+	}
+}

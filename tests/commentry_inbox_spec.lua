@@ -65,6 +65,68 @@ describe("universal inbox", function()
     return result
   end
 
+  it("enriches copied text and navigates moved code without replacing its capture", function()
+    local thread = file({ "local before = true", "local selected = 1", "return selected" }, 2)
+    local id = create("Where is this handled?")
+    local attachment =
+      assert(Store.update(id, { kind = "attach", label = "Implementation", source = thread.source, author = "Agent" }))
+    local enriched = assert(Store.get(id))
+    assert.are.same({ "Selected output" }, enriched.source.lines)
+    assert.is_true(enriched.unread)
+    assert.are.same(attachment.id, enriched.attachments[1].id)
+    vim.api.nvim_buf_set_lines(buf, 0, 0, false, { "-- inserted above" })
+    vim.api.nvim_set_current_buf(buf)
+    local origin = vim.api.nvim_get_current_win()
+    local view = require("commentry.inbox").open(nil, { project = root, thread = id })
+    assert.are.same(id, view.threads[vim.api.nvim_win_get_cursor(view.list_win)[1]].id)
+    keys(view).gf()
+    assert.are.same(origin, vim.api.nvim_get_current_win())
+    assert.are.same({ 3, 0 }, vim.api.nvim_win_get_cursor(0))
+    local ns = vim.api.nvim_get_namespaces()["commentry.inbox.locations"]
+    local marks = vim.api.nvim_buf_get_extmarks(buf, ns, 0, -1, { details = true })
+    assert.is_true(#marks > 0)
+    assert.are.same(2, marks[#marks][2])
+    local select = vim.ui.select
+    vim.ui.select = function(items, _, callback)
+      for _, item in ipairs(items) do
+        if item.id == id then
+          callback(item)
+          return
+        end
+      end
+    end
+    local ok, err = pcall(require("commentry.inbox.locations").open_at_cursor)
+    vim.ui.select = select
+    assert.is_true(ok, err)
+    assert.are.same(view.tab, vim.api.nvim_get_current_tabpage())
+    assert.are.same(id, view.threads[vim.api.nvim_win_get_cursor(view.list_win)[1]].id)
+    require("commentry.inbox").open(nil, { project = root, thread = thread.id })
+    local previews = {}
+    for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(buf, ns, 0, -1, { details = true })) do
+      if mark[4].virt_text then
+        previews[#previews + 1] = mark[4].virt_text[1][1]
+      end
+    end
+    assert.are.same({ "  You: Explain this code" }, previews)
+    vim.api.nvim_buf_set_lines(buf, 2, 3, false, { "local replacement = 2" })
+    local located = Source.with_location(assert(Store.get(id)))
+    local target, err = Source.locate(located)
+    assert.is_nil(target)
+    assert.matches("Outdated", err)
+    require("commentry.inbox.locations").set({}, nil)
+  end)
+
+  it("finds uniquely moved code and refuses ambiguous or unavailable destinations", function()
+    local thread = file({ "start", "unique code", "end" }, 2)
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "start", "end", "", "unique code" })
+    assert.are.same(4, assert(Source.locate(thread)).first)
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "start", "replacement", "end", "unique code", "unique code" })
+    assert.is_nil(Source.locate(thread))
+    vim.api.nvim_buf_delete(buf, { force = true })
+    vim.fn.delete(root .. "/example.lua")
+    assert.is_nil(Source.locate(thread))
+  end)
+
   it("reflows on resize and navigates panels without changing plain text motions", function()
     create()
     vim.o.columns = 200
@@ -78,6 +140,7 @@ describe("universal inbox", function()
     end
     assert.is_nil(plain.h)
     assert.is_nil(plain.j)
+    assert.is_nil(plain.l)
     local control = keys(view)["<C-L>"] or keys(view)["<C-l>"]
     control()
     assert.are.same(view.source_win, vim.api.nvim_get_current_win())
@@ -275,6 +338,67 @@ describe("universal inbox", function()
       keys(view).s()
       assert.are.same("Saved for delivery", messages[#messages])
       assert.are.same(2, #assert(Store.get(id)).queue)
+    end)
+    Util.info = original
+    assert.is_true(ok, tostring(err))
+  end)
+
+  it("sends new project comments across filters without replaying answered threads", function()
+    local ids = {}
+    for index = 1, 5 do
+      ids[index] = create("Question " .. index)
+    end
+    for index = 1, 2 do
+      assert(Store.enqueue(ids[index]))
+      local claim = assert(Store.claim(root, "Agent"))
+      assert(
+        Store.update(ids[index], { kind = "finish", claim_ids = { claim.claim_id }, body = "Answer", author = "Agent" })
+      )
+    end
+    assert(Store.update(ids[2], { kind = "reply", body = "A follow-up" }))
+    local cancelled = assert(Store.enqueue(ids[3]))
+    assert(Store.update(ids[3], { kind = "cancel", queue_id = cancelled.id, pending_only = true }))
+    assert(Store.update(ids[4], { kind = "resolve", resolved = true }))
+    local failed = create("Uncertain delivery")
+    assert(Store.enqueue(failed))
+    local failed_claim = assert(Store.claim(root, "Agent"))
+    assert(Store.update(failed, { kind = "fail", claim_id = failed_claim.claim_id, body = "Acceptance unknown" }))
+    assert(Store.enqueue(ids[5]))
+    local other = create("Another project", root .. "/other")
+    local agent_only = assert(Store.create({ project = root, body = "Agent note", author = "Agent" }))
+    local view = require("commentry.inbox").open("unread", { project = root })
+    local Util = require("commentry.util")
+    local original, message = Util.info, nil
+    Util.info = function(value)
+      message = value
+    end
+    local ok, err = pcall(function()
+      keys(view).gs()
+      assert.matches("saved 3 for delivery", message)
+      assert.are.same(1, #assert(Store.get(ids[1])).queue)
+      assert.are.same(2, #assert(Store.get(ids[2])).queue)
+      assert.are.same(2, #assert(Store.get(ids[3])).queue)
+      assert.are.same(0, #assert(Store.get(ids[4])).queue)
+      assert.are.same(1, #assert(Store.get(ids[5])).queue)
+      assert.are.same(0, #assert(Store.get(other)).queue)
+      assert.are.same(0, #assert(Store.get(agent_only)).queue)
+      assert.are.same("failed", assert(Store.get(failed)).queue[1].status)
+      -- A repeated batch may deliver pending work but never adds copies.
+      keys(view).gs()
+      assert.are.same(2, #assert(Store.get(ids[2])).queue)
+      assert.are.same(2, #assert(Store.get(ids[3])).queue)
+      assert.are.same(1, #assert(Store.get(ids[5])).queue)
+      for _ = 1, 3 do
+        local pending = assert(Store.claim(root, "Agent"))
+        assert(
+          Store.update(
+            pending.thread,
+            { kind = "finish", claim_ids = { pending.claim_id }, body = "Done", author = "Agent" }
+          )
+        )
+      end
+      keys(view).gs()
+      assert.are.same("Nothing new to send. There are no new comments.", message)
     end)
     Util.info = original
     assert.is_true(ok, tostring(err))

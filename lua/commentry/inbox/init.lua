@@ -1,3 +1,4 @@
+local Locations = require("commentry.inbox.locations")
 local Render = require("commentry.inbox.render")
 local Source = require("commentry.inbox.source")
 local Store = require("commentry.inbox.store")
@@ -232,17 +233,22 @@ local function render_detail(view)
     return
   end
   local thread = selected(view)
+  Locations.set(view.location_threads or view.threads, thread and thread.id)
   if not thread then
     write(view.source_buf, { "No threads in this scope.", "", ":Commentry comment", ":Commentry capture-text" }, "text")
     write(view.thread_buf, { "Capture code or text to start a conversation." }, "markdown")
     return
   end
   Render.selection(view, vim.api.nvim_win_get_cursor(view.list_win)[1])
-  local comparison, err = Source.compare(thread, view.mode, view.context)
+  local located, attachment = Source.with_location(thread, view.locations[thread.id])
+  local comparison, err = Source.compare(located, view.mode, view.context)
   if not comparison then
     comparison = { lines = { err }, label = "Comparison unavailable", filetype = "text" }
   end
-  Render.source(view, thread, comparison)
+  Render.source(view, located, comparison)
+  vim.wo[view.source_win].winbar = " "
+    .. attachment.label:gsub("%%", "%%%%")
+    .. " %=%#CommentryInboxMuted#gl locations  gf code "
   Render.conversation(view, thread)
 end
 
@@ -265,6 +271,7 @@ refresh = function(view, select_id)
     return
   end
   view.threads, view.outdated = threads, {}
+  view.location_threads = threads
   view.threads = vim.tbl_filter(function(thread)
     if view.filter == "unread" then
       return thread.unread or view.pin_id == thread.id
@@ -290,7 +297,8 @@ refresh = function(view, select_id)
   end, threads)
   local row = 1
   for index, thread in ipairs(view.threads) do
-    local comparison = Source.compare(thread, "since")
+    local located = Source.with_location(thread, view.locations[thread.id])
+    local comparison = Source.compare(located, "since")
     view.outdated[thread.id] = comparison and comparison.outdated == true
     if thread.id == (select_id or (old and old.id)) then
       row = index
@@ -310,7 +318,7 @@ refresh = function(view, select_id)
   end
   local scope_label = view.project and vim.fs.basename(view.project) or "All projects"
   vim.wo[view.list_win].winbar = " " .. scope_label:gsub("%%", "%%%%") .. " / " .. view.filter .. " / " .. #view.threads
-  vim.wo[view.thread_win].winbar = " Conversation %=%#CommentryInboxMuted#" .. view.delivery_mode .. "  s send "
+  vim.wo[view.thread_win].winbar = " Conversation %=%#CommentryInboxMuted#" .. view.delivery_mode .. "  s send  gs all "
   view.stamp = revision
 end
 
@@ -378,6 +386,7 @@ local function layout(view)
 end
 
 function M.open(scope, opts)
+  local origin = vim.api.nvim_get_current_win()
   Render.highlights()
   if active and active.closed then
     close_view(active)
@@ -394,7 +403,10 @@ function M.open(scope, opts)
     layout(active)
     vim.wo[active.list_win].winbar = " Inbox / "
       .. (project and vim.fs.basename(project):gsub("%%", "%%%%") or "All projects")
-    refresh(active)
+    refresh(active, opts and opts.thread)
+    if vim.api.nvim_win_is_valid(origin) and vim.bo[vim.api.nvim_win_get_buf(origin)].buftype == "" then
+      active.origin_win = origin
+    end
     return active
   end
   vim.cmd.tabnew()
@@ -406,6 +418,8 @@ function M.open(scope, opts)
     filter = scope and scope ~= "" and scope ~= "all" and scope or "all",
     delivery_mode = "queue",
     threads = {},
+    locations = {},
+    origin_win = origin,
     outdated = {},
     list_buf = scratch("commentry://inbox"),
     source_buf = scratch("commentry://source"),
@@ -553,6 +567,40 @@ function M.open(scope, opts)
         end,
         "Queue or send selected thread",
       },
+      gs = {
+        function()
+          local target_project = view.project or (selected(view) and selected(view).project)
+          if not target_project then
+            Util.warn("Select a project thread first")
+            return
+          end
+          local result, err = require("commentry.inbox.agent").send_all(target_project)
+          if not report(result, err) then
+            return
+          end
+          refresh(view)
+          if result.failed > 0 then
+            Util.warn(
+              ("Sent %d thread(s), saved %d for delivery, %d need attention.\n"):format(
+                result.sent,
+                result.queued,
+                result.failed
+              ) .. table.concat(result.errors, "\n")
+            )
+          elseif result.sent == 0 and result.queued == 0 then
+            Util.info("Nothing new to send. There are no new comments.")
+          else
+            Util.info(
+              ("Sent %d thread(s), saved %d for delivery, skipped %d unchanged or resolved."):format(
+                result.sent,
+                result.queued,
+                result.skipped
+              )
+            )
+          end
+        end,
+        "Send all new project comments to the agent queue",
+      },
       S = {
         function()
           local target_project = view.project or (selected(view) and selected(view).project)
@@ -614,6 +662,51 @@ function M.open(scope, opts)
         "Remove the oldest pending request from the queue",
       },
       x = { toggle, "Resolve or reopen thread" },
+      gl = {
+        function()
+          local thread = selected(view)
+          if not thread then
+            return
+          end
+          vim.ui.select(Source.locations(thread), {
+            prompt = "Capture and code locations",
+            format_item = function(item)
+              return item.label .. (item.source.path and " / " .. item.source.path .. ":" .. item.source.first or "")
+            end,
+          }, function(item)
+            if item then
+              view.locations[thread.id] = item.id
+              render_detail(view)
+            end
+          end)
+        end,
+        "Choose a capture or code attachment",
+      },
+      gf = {
+        function()
+          local thread = selected(view)
+          if not thread then
+            return
+          end
+          local located = Source.with_location(thread, view.locations[thread.id])
+          local ok, err = Locations.jump(located, view.origin_win)
+          if ok then
+            view.origin_win = vim.api.nvim_get_current_win()
+          end
+          if not ok then
+            Util.warn(err)
+            if located.source.kind == "file" then
+              vim.ui.select({ "View saved snapshot", "Stay in inbox" }, { prompt = err }, function(choice)
+                if choice == "View saved snapshot" then
+                  view.mode = "original"
+                  render_detail(view)
+                end
+              end)
+            end
+          end
+        end,
+        "Go to current code for this location",
+      },
       c = { comparison, "Choose comparison" },
       e = {
         function()
@@ -644,6 +737,7 @@ function M.open(scope, opts)
             "f       Filter threads",
             "m       Choose queue or steer mode",
             "s       Queue or send the selected thread",
+            "gs      Send all new project comments to the agent queue",
             "S       Attach an existing project agent",
             "a       Attached agent status and delivery",
             "t       Retry a failed request",
@@ -651,6 +745,8 @@ function M.open(scope, opts)
             "Ctrl-d  Save and send from the composer",
             "Ctrl-h/j/k/l  Move between panels",
             "x       Resolve or reopen",
+            "gl      Choose capture or code location",
+            "gf      Go to code, gC returns to its thread",
             "c       Choose comparison",
             "e       Expand or collapse code context",
             "i       Inspect capture and Git details",
@@ -745,7 +841,7 @@ function M.open(scope, opts)
       end
     end,
   })
-  refresh(view)
+  refresh(view, opts and opts.thread)
   local function poll()
     if view.closed or not vim.api.nvim_tabpage_is_valid(view.tab) then
       return

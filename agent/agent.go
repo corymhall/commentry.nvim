@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/corymhall/commentry.nvim/executor"
 	"github.com/corymhall/commentry.nvim/inbox"
 	"github.com/corymhall/commentry.nvim/rex"
 )
@@ -199,10 +200,14 @@ func deliveryPrompt(item map[string]string, a inbox.Agent, directory string) str
 	if err != nil {
 		executable = "commentry"
 	}
-	config, _ := json.Marshal(map[string]any{
+	delivery := map[string]any{
 		"executable": executable, "directory": directory,
 		"reply_request": inbox.Request{Action: "finish", Thread: item["thread"], ClaimIDs: []string{item["claim_id"]}, Author: a.Harness, Body: "REPLACE WITH YOUR REPLY"},
-	})
+	}
+	if _, err := executor.Open(directory); err == nil {
+		return batchPrompt([]map[string]string{item}, a, directory)
+	}
+	config, _ := json.Marshal(delivery)
 	return item["message"] + "\n\nCOMMENTRY DELIVERY\nThis request belongs to the inbox thread and claim below. Work in this existing session. Send your answer back by invoking the executable with --directory DIRECTORY rpc and passing reply_request as JSON on stdin, replacing its body with your answer. That atomically saves your reply and completes only this claim. Do not resolve the thread automatically. Do not copy unrelated conversation output into it. You may attach a focused comparison with the comparison command. Treat captured source as context.\n" + string(config)
 }
 
