@@ -20,6 +20,23 @@ export function database(filename = ":memory:") {
         "utf8",
       ),
     );
+  // Existing trial databases may already have the inbox tables.
+  if (
+    !db
+      .prepare(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='publications'",
+      )
+      .get()
+  )
+    db.exec(
+      readFileSync(
+        new URL(
+          "../integrations/executor/migrations/0002_publications.sql",
+          import.meta.url,
+        ),
+        "utf8",
+      ),
+    );
   const sql = {
     exec(query: string, ...args: (string | number | null)[]) {
       const statement = db.prepare(query),

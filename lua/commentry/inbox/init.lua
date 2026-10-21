@@ -241,6 +241,8 @@ local function render_detail(view)
   local thread = selected(view)
   Locations.set(view.location_threads or view.threads, thread and thread.id)
   if not thread then
+    Render.remember_source(view)
+    view.source_sections = nil
     Reply.remember(view)
     view.reply = nil
     write(view.source_buf, { "No threads in this scope.", "", ":Commentry comment", ":Commentry capture-text" }, "text")
@@ -249,15 +251,8 @@ local function render_detail(view)
     return
   end
   Render.selection(view, vim.api.nvim_win_get_cursor(view.list_win)[1])
-  local located, attachment = Source.with_location(thread, view.locations[thread.id])
-  local comparison, err = Source.compare(located, view.mode, view.context)
-  if not comparison then
-    comparison = { lines = { err }, label = "Comparison unavailable", filetype = "text" }
-  end
-  Render.source(view, located, comparison)
-  vim.wo[view.source_win].winbar = " "
-    .. attachment.label:gsub("%%", "%%%%")
-    .. " %=%#CommentryInboxMuted#gl locations  gf code "
+  Render.source(view, thread, Source.sections(thread, view.context))
+  vim.wo[view.source_win].winbar = " Source and changes %=%#CommentryInboxMuted#za fold  gl sections  gf code "
   Render.conversation(view, thread)
 end
 
@@ -306,9 +301,8 @@ refresh = function(view, select_id)
   end, threads)
   local row = 1
   for index, thread in ipairs(view.threads) do
-    local located = Source.with_location(thread, view.locations[thread.id])
-    local comparison = Source.compare(located, "since")
-    view.outdated[thread.id] = comparison and comparison.outdated == true
+    local _, outdated = Source.sections(thread, view.context)
+    view.outdated[thread.id] = outdated
     if thread.id == (select_id or (old and old.id)) then
       row = index
     end
@@ -363,6 +357,7 @@ local function layout(view)
   if view.wide == wide then
     return
   end
+  Render.remember_source(view)
   view.reflowing = true
   local focus = vim.api.nvim_get_current_win()
   local target = focus == view.thread_win and "thread_win" or focus == view.source_win and "source_win" or "list_win"
@@ -382,7 +377,7 @@ local function layout(view)
   for _, buf in ipairs({ view.source_buf, view.thread_buf }) do
     vim.bo[buf].bufhidden = "wipe"
   end
-  vim.wo[view.source_win].winbar = " Source %=%#CommentryInboxMuted#c compare  e context "
+  vim.wo[view.source_win].winbar = " Source and changes %=%#CommentryInboxMuted#za fold  e context "
   vim.wo[view.thread_win].winbar = " Conversation %=%#CommentryInboxMuted#r reply  ? help "
   vim.api.nvim_win_set_width(view.list_win, math.min(40, math.floor(vim.o.columns / 4)))
   if wide then
@@ -424,12 +419,10 @@ function M.open(scope, opts)
   local view = {
     tab = vim.api.nvim_get_current_tabpage(),
     project = project,
-    mode = "since",
     context = 4,
     filter = scope and scope ~= "" and scope ~= "all" and scope or "all",
     delivery_mode = "queue",
     threads = {},
-    locations = {},
     origin_win = origin,
     outdated = {},
     list_buf = scratch("commentry://inbox"),
@@ -441,7 +434,7 @@ function M.open(scope, opts)
   layout(view)
   vim.wo[view.list_win].winbar = " Inbox / "
     .. (project and vim.fs.basename(project):gsub("%%", "%%%%") or "All projects")
-  vim.wo[view.source_win].winbar = " Source %=%#CommentryInboxMuted#c compare  e context "
+  vim.wo[view.source_win].winbar = " Source and changes %=%#CommentryInboxMuted#za fold  e context "
   vim.wo[view.thread_win].winbar = " Conversation %=%#CommentryInboxMuted#r reply  ? help "
   vim.wo[view.list_win].wrap = false
   vim.wo[view.list_win].scrolloff = 2
@@ -470,14 +463,6 @@ function M.open(scope, opts)
     if thread then
       Reply.focus(view)
     end
-  end
-  local function comparison()
-    vim.ui.select({ "since", "original", "agent" }, { prompt = "Comparison" }, function(mode)
-      if mode and vim.api.nvim_tabpage_is_valid(view.tab) then
-        view.mode = mode
-        render_detail(view)
-      end
-    end)
   end
   local function toggle()
     local thread = selected(view)
@@ -681,19 +666,25 @@ function M.open(scope, opts)
           if not thread then
             return
           end
-          vim.ui.select(Source.locations(thread), {
-            prompt = "Capture and code locations",
+          vim.ui.select(view.source_sections, {
+            prompt = "Source sections",
             format_item = function(item)
-              return item.label .. (item.source.path and " / " .. item.source.path .. ":" .. item.source.first or "")
+              return item.title
             end,
           }, function(item)
-            if item then
-              view.locations[thread.id] = item.id
-              render_detail(view)
+            if item and vim.api.nvim_win_is_valid(view.source_win) then
+              for _, current in ipairs(view.source_sections or {}) do
+                if current.id == item.id then
+                  vim.api.nvim_set_current_win(view.source_win)
+                  vim.api.nvim_win_set_cursor(view.source_win, { current.first, 0 })
+                  vim.cmd("normal! zv")
+                  break
+                end
+              end
             end
           end)
         end,
-        "Choose a capture or code attachment",
+        "Jump to a source section",
       },
       gf = {
         function()
@@ -701,26 +692,30 @@ function M.open(scope, opts)
           if not thread then
             return
           end
-          local located = Source.with_location(thread, view.locations[thread.id])
-          local ok, err = Locations.jump(located, view.origin_win)
-          if ok then
-            view.origin_win = vim.api.nvim_get_current_win()
-          end
-          if not ok then
-            Util.warn(err)
-            if located.source.kind == "file" then
-              vim.ui.select({ "View saved snapshot", "Stay in inbox" }, { prompt = err }, function(choice)
-                if choice == "View saved snapshot" then
-                  view.mode = "original"
-                  render_detail(view)
-                end
-              end)
+          local section = Render.source_section(view, vim.api.nvim_win_get_cursor(view.source_win)[1])
+          -- Outside the source pane, default to the first code section rather
+          -- than assigning a file to an unrelated saved comparison.
+          if vim.api.nvim_get_current_win() ~= view.source_win and (not section or not section.source) then
+            for _, item in ipairs(view.source_sections or {}) do
+              if item.source and item.source.kind == "file" then
+                section = item
+                break
+              end
             end
           end
+          if not section or not section.source or section.source.kind ~= "file" then
+            Util.warn("This section has no code location. Use gl to choose a code section.")
+            return
+          end
+          local ok, err = Locations.jump(vim.tbl_extend("force", thread, { source = section.source }), view.origin_win)
+          if ok then
+            view.origin_win = vim.api.nvim_get_current_win()
+          else
+            Util.warn(err)
+          end
         end,
-        "Go to current code for this location",
+        "Go to code for the source section",
       },
-      c = { comparison, "Choose comparison" },
       e = {
         function()
           view.context = view.context == 4 and 16 or 4
@@ -760,9 +755,9 @@ function M.open(scope, opts)
             "Ctrl-d  Save and send from the composer",
             "Ctrl-h/j/k/l  Move between panels",
             "x       Resolve or reopen",
-            "gl      Choose capture or code location",
+            "gl      Jump to a source section",
             "gf      Go to code, gC returns to its thread",
-            "c       Choose comparison",
+            "za      Fold or unfold a source section",
             "e       Expand or collapse code context",
             "i       Inspect capture and Git details",
             "R       Refresh",
@@ -807,10 +802,25 @@ function M.open(scope, opts)
     end,
   })
   vim.keymap.set("x", "r", function()
-    local lines = vim.fn.getregion(vim.fn.getpos("v"), vim.fn.getpos("."), {
+    local first, last = vim.fn.getpos("v"), vim.fn.getpos(".")
+    local lines = vim.fn.getregion(first, last, {
       type = vim.fn.mode(),
       exclusive = vim.o.selection == "exclusive",
     })
+    local low, high = math.min(first[2], last[2]), math.max(first[2], last[2])
+    local labels = {}
+    for _, section in ipairs(view.source_sections or {}) do
+      if low <= section.last and high >= section.first then
+        local source = section.source
+        labels[#labels + 1] = source
+            and source.path
+            and ((section.id == "original" and "Original context / " or "") .. source.path)
+          or section.title
+      end
+    end
+    if #labels > 0 then
+      table.insert(lines, 1, table.concat(labels, "; "))
+    end
     vim.cmd.normal({ args = { "\27" }, bang = true })
     if selected(view) then
       Reply.focus(view, lines)

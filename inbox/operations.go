@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 )
@@ -19,6 +20,7 @@ const (
 	statusFailed   = "failed"
 	statusPending  = "pending"
 	statusClaimed  = "claimed"
+	actionRevise   = "revise"
 )
 
 // Project resolves a project directory to its Git root or canonical directory.
@@ -64,6 +66,10 @@ func (s *Store) Execute(ctx context.Context, r Request) (any, error) {
 		return s.remoteExecute(ctx, r)
 	}
 	switch r.Action {
+	case "publish":
+		return publicationResult(s.publish(ctx, r))
+	case "publication":
+		return publicationResult(s.publication(ctx, r.Project, r.RequestID))
 	case "list":
 		return s.filtered(ctx, r)
 	case "read":
@@ -72,7 +78,7 @@ func (s *Store) Execute(ctx context.Context, r Request) (any, error) {
 		return s.Revision(ctx)
 	case "changes":
 		return s.Changes(ctx, r.Project, r.Cursor)
-	case "create", "attach", "reply", "resolve", "comparison", "read-state", modeQueue, "claim", statusComplete, "cancel", "fail", "retry", "finish":
+	case "create", "attach", actionRevise, "reply", "resolve", "comparison", "archive-comparison", "read-state", modeQueue, "claim", statusComplete, "cancel", "fail", "retry", "finish":
 	default:
 		return nil, fmt.Errorf("unknown inbox action: %s", r.Action)
 	}
@@ -209,16 +215,11 @@ func update(ctx context.Context, tx *sql.Tx, r Request) (any, error) {
 		}
 		thread.Queue = append(thread.Queue, item)
 		result = item
-	case "attach":
-		result, err = attach(&thread, r, event)
+	default:
+		result, err = mutate(&thread, r, &event)
 		if err != nil {
 			return nil, err
 		}
-	default:
-		if err := apply(&thread, r, &event); err != nil {
-			return nil, err
-		}
-		result = event
 	}
 
 	thread.Unread = thread.ManualUnread || thread.Incoming != thread.Seen
@@ -227,6 +228,29 @@ func update(ctx context.Context, tx *sql.Tx, r Request) (any, error) {
 		return nil, err
 	}
 	return result, nil
+}
+
+func mutate(thread *Thread, r Request, event *Event) (any, error) {
+	switch r.Action {
+	case "attach":
+		return attach(thread, r, *event)
+	case actionRevise:
+		if err := revise(thread, r, *event); err != nil {
+			return nil, err
+		}
+		return *thread.Review, nil
+	case "comparison":
+		if err := appendComparison(thread, r, event); err != nil {
+			return nil, err
+		}
+		if r.ComparisonID != "" {
+			event.ID = r.ComparisonID
+		}
+		return *event, nil
+	default:
+		err := apply(thread, r, event)
+		return *event, err
+	}
 }
 
 func enqueue(thread Thread, r Request, event Event) (Queued, bool, error) {
@@ -315,17 +339,15 @@ func claim(ctx context.Context, tx *sql.Tx, r Request) (any, error) {
 
 // A queued excerpt retains original selection coordinates. excerpt_first maps
 // its first array element back to its line in the captured file.
-type excerpt struct {
-	Source
-	ExcerptFirst int `json:"excerpt_first,omitempty"`
-}
+type excerpt struct{ Source }
 
 func sourceExcerpt(source Source) excerpt {
 	result := excerpt{Source: source}
 	if source.Kind == "file" {
-		first, last := max(0, source.First-5), min(len(source.Lines), source.Last+4)
+		origin := max(1, source.ExcerptFirst)
+		first, last := max(0, source.First-origin-4), min(len(source.Lines), source.Last-origin+5)
 		result.Lines = source.Lines[first:last]
-		result.ExcerptFirst = first + 1
+		result.ExcerptFirst = first + origin
 	}
 	return result
 }
@@ -347,7 +369,8 @@ func payload(thread Thread, mode string) (string, error) {
 		Source      excerpt             `json:"source"`
 		Messages    []Message           `json:"messages"`
 		Attachments []attachmentExcerpt `json:"attachments,omitempty"`
-	}{thread.ID, thread.Project, thread.Title, sourceExcerpt(thread.Source), thread.Messages, attachments})
+		Review      *Review             `json:"review,omitempty"`
+	}{thread.ID, thread.Project, thread.Title, sourceExcerpt(thread.Source), thread.Messages, attachments, thread.Review})
 	if err != nil {
 		return "", err
 	}
@@ -358,8 +381,12 @@ func apply(thread *Thread, r Request, event *Event) error {
 	switch r.Action {
 	case "reply":
 		return appendMessage(thread, r, *event)
+	case "archive-comparison":
+		return archiveComparison(thread, r, *event)
 	case "comparison":
 		return appendComparison(thread, r, event)
+	case actionRevise:
+		return revise(thread, r, *event)
 	case "read-state":
 		return markRead(thread, r)
 	case "resolve":
@@ -391,7 +418,28 @@ func appendComparison(thread *Thread, r Request, event *Event) error {
 		return fmt.Errorf("comparison requires before, after, and a single-line label")
 	}
 	event.Before, event.After, event.Label = *r.Before, *r.After, r.Label
-	thread.Comparisons = append(thread.Comparisons, *event)
+	if r.ComparisonID != "" {
+		index := -1
+		for i, comparison := range thread.Comparisons {
+			if comparison.ID == r.ComparisonID {
+				index = i
+				break
+			}
+		}
+		if index < 0 {
+			return fmt.Errorf("unknown comparison")
+		}
+		previous := thread.Comparisons[index]
+		if previous.Author != r.Author {
+			return fmt.Errorf("only the comparison author can replace it")
+		}
+		thread.ComparisonHistory = append(thread.ComparisonHistory, previous)
+		replacement := *event
+		replacement.ID = previous.ID
+		thread.Comparisons[index] = replacement
+	} else {
+		thread.Comparisons = append(thread.Comparisons, *event)
+	}
 	if r.Author != "You" {
 		thread.Incoming = event.ID
 	}
@@ -447,4 +495,75 @@ func attach(thread *Thread, r Request, event Event) (Attachment, error) {
 		thread.Incoming = event.ID
 	}
 	return attachment, nil
+}
+
+func reviewContent(previous *Review, r Request) (string, string, error) {
+	title, summary := r.Title, r.Body
+	if previous == nil {
+		if r.ExpectedReview != "" {
+			return "", "", fmt.Errorf("no current review version")
+		}
+		return title, summary, nil
+	}
+	if r.ExpectedReview != previous.ID {
+		return "", "", fmt.Errorf("expected_review must match the current review version")
+	}
+	if r.Author != previous.Author {
+		return "", "", fmt.Errorf("only the review author can revise it")
+	}
+	if title == "" {
+		title = previous.Title
+	}
+	if summary == "" {
+		summary = previous.Summary
+	}
+	return title, summary, nil
+}
+
+func revise(thread *Thread, r Request, event Event) error {
+	title, summary, err := reviewContent(thread.Review, r)
+	if err != nil {
+		return err
+	}
+	if !label(title) || !nonempty(summary) {
+		return fmt.Errorf("review requires a single-line title and summary body")
+	}
+	if r.PrimaryComparison != nil && *r.PrimaryComparison != "" && !slices.ContainsFunc(thread.Comparisons, func(c Event) bool { return c.ID == *r.PrimaryComparison }) {
+		return fmt.Errorf("unknown primary comparison")
+	}
+	if thread.Review != nil {
+		thread.ReviewHistory = append(thread.ReviewHistory, *thread.Review)
+	} else if len(thread.Messages) > 0 {
+		original := thread.Messages[0]
+		thread.ReviewHistory = append(thread.ReviewHistory, Review{ID: original.ID, Title: thread.Title, Summary: original.Body, Author: original.Author, At: thread.CreatedAt})
+	}
+	thread.Review = &Review{ID: event.ID, Title: title, Summary: summary, Author: event.Author, At: event.At}
+	thread.Title = title
+	if r.PrimaryComparison != nil {
+		thread.PrimaryComparison = *r.PrimaryComparison
+	}
+	if r.Author != "You" {
+		thread.Incoming = event.ID
+	}
+	return nil
+}
+
+func archiveComparison(thread *Thread, r Request, event Event) error {
+	index := slices.IndexFunc(thread.Comparisons, func(c Event) bool { return c.ID == r.ComparisonID })
+	if index < 0 {
+		return fmt.Errorf("unknown comparison")
+	}
+	previous := thread.Comparisons[index]
+	if previous.Author != r.Author {
+		return fmt.Errorf("only the comparison author can archive it")
+	}
+	thread.ComparisonHistory = append(thread.ComparisonHistory, previous)
+	thread.Comparisons = slices.Delete(thread.Comparisons, index, index+1)
+	if thread.PrimaryComparison == previous.ID {
+		thread.PrimaryComparison = ""
+	}
+	if r.Author != "You" {
+		thread.Incoming = event.ID
+	}
+	return nil
 }

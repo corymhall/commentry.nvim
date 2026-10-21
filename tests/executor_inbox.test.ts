@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { database } from "./executor_sql.ts";
+import { requestContext } from "../integrations/executor/requests.ts";
 import {
   mutate,
   read,
@@ -252,6 +253,244 @@ test("agents enrich copied conversations without replacing captures or acknowled
     assert.equal(read(sql, { action: "revision" }), revision);
     const q = mutate(sql, { action: "queue", thread: id }) as Queued;
     assert.match(q.message, new RegExp(attachment.id));
+  } finally {
+    close();
+  }
+});
+
+test("review revisions preserve discussion and submitted claims while rejecting stale or foreign edits", () => {
+  const { sql, close } = database();
+  try {
+    const id = mutate(sql, {
+      action: "create",
+      project: "/p",
+      title: "Original question",
+      body: "What is wrong?",
+    }) as string;
+    const before = read(sql, { action: "read", thread: id }) as Thread;
+    const comparison = mutate(sql, {
+      action: "comparison",
+      thread: id,
+      author: "codex",
+      before: "literal markup",
+      after: "property name",
+      label: "Generated documentation",
+    }) as { id: string };
+    const review = mutate(sql, {
+      action: "revise",
+      thread: id,
+      author: "codex",
+      title: "References display literal markup",
+      body: "The renderer treats references as code.",
+      primary_comparison: comparison.id,
+    }) as { id: string };
+    const queued = mutate(sql, { action: "queue", thread: id }) as Queued;
+    const claimed = mutate(sql, {
+      action: "claim",
+      project: "/p",
+      author: "codex",
+    }) as { claim_id: string };
+    const revision = read(sql, { action: "revision" });
+    for (const change of [
+      { author: "pi", expected_review: review.id },
+      { author: "codex", expected_review: "stale" },
+      {
+        author: "codex",
+        expected_review: review.id,
+        primary_comparison: "missing",
+      },
+    ])
+      assert.throws(() =>
+        mutate(sql, {
+          action: "revise",
+          thread: id,
+          body: "Overwrite",
+          ...change,
+        }),
+      );
+    assert.equal(read(sql, { action: "revision" }), revision);
+    mutate(sql, {
+      action: "read-state",
+      thread: id,
+      read: true,
+      seen: review.id,
+    });
+    mutate(sql, {
+      action: "revise",
+      thread: id,
+      author: "codex",
+      expected_review: review.id,
+      body: "The local fix resolves the references.",
+      primary_comparison: "",
+    });
+    const current = read(sql, { action: "read", thread: id }) as Thread;
+    assert.deepEqual(current.messages, before.messages);
+    assert.deepEqual(current.source, before.source);
+    assert.equal(
+      current.review?.summary,
+      "The local fix resolves the references.",
+    );
+    assert.equal(current.review_history?.[0].title, "Original question");
+    assert.equal(
+      current.review_history?.[1].summary,
+      "The renderer treats references as code.",
+    );
+    assert.equal(current.primary_comparison, undefined);
+    assert.equal(current.unread, true);
+    assert.equal(current.resolved, false);
+    assert.equal(current.queue[0].message, queued.message);
+    const submitted = JSON.parse(
+      queued.message.slice(queued.message.indexOf("\n{") + 1),
+    );
+    assert.equal(
+      submitted.review.summary,
+      "The renderer treats references as code.",
+    );
+    const context = requestContext(sql, {
+      project: "/p",
+      thread: id,
+      claim_id: claimed.claim_id,
+    });
+    assert.match(
+      context.context!.text,
+      /The renderer treats references as code/,
+    );
+    assert.doesNotMatch(context.context!.text, /The local fix resolves/);
+  } finally {
+    close();
+  }
+});
+
+test("replacing a comparison keeps its selection stable and makes the correction unread", () => {
+  const { sql, close } = database();
+  try {
+    const thread = mutate(sql, {
+      action: "create",
+      project: "/p",
+      body: "Review",
+    }) as string;
+    const original = mutate(sql, {
+      action: "comparison",
+      thread,
+      author: "codex",
+      before: "old",
+      after: "new",
+      label: "Implementation",
+    }) as { id: string };
+    mutate(sql, {
+      action: "revise",
+      thread,
+      author: "codex",
+      title: "Finding",
+      body: "Explanation",
+      primary_comparison: original.id,
+    });
+    let current = read(sql, { action: "read", thread }) as Thread;
+    mutate(sql, {
+      action: "read-state",
+      thread,
+      read: true,
+      seen: current.incoming,
+    });
+    assert.throws(() =>
+      mutate(sql, {
+        action: "comparison",
+        thread,
+        author: "pi",
+        comparison_id: original.id,
+        before: "wrong",
+        after: "wrong",
+        label: "Wrong",
+      }),
+    );
+    const replacement = mutate(sql, {
+      action: "comparison",
+      thread,
+      author: "codex",
+      comparison_id: original.id,
+      before: "literal markup",
+      after: "property name",
+      label: "User-visible output",
+    }) as { id: string };
+    current = read(sql, { action: "read", thread }) as Thread;
+    assert.equal(replacement.id, original.id);
+    assert.equal(current.primary_comparison, original.id);
+    assert.equal(current.comparisons.length, 1);
+    assert.equal(current.comparisons[0].label, "User-visible output");
+    assert.equal(current.comparison_history?.[0].label, "Implementation");
+    assert.equal(current.unread, true);
+    assert.notEqual(current.incoming, original.id);
+  } finally {
+    close();
+  }
+});
+
+test("archiving misleading primary evidence preserves history and rejects foreign or unknown IDs atomically", () => {
+  const { sql, close } = database();
+  try {
+    const thread = mutate(sql, {
+      action: "create",
+      project: "/p",
+      body: "Review this capture",
+    }) as string;
+    const comparison = mutate(sql, {
+      action: "comparison",
+      thread,
+      author: "codex",
+      before: "Illustrative old",
+      after: "Illustrative new",
+      label: "Unverified example",
+    }) as { id: string };
+    mutate(sql, {
+      action: "revise",
+      thread,
+      author: "codex",
+      title: "Finding",
+      body: "Needs verification",
+      primary_comparison: comparison.id,
+    });
+    const queued = mutate(sql, { action: "queue", thread }) as Queued;
+    const before = read(sql, { action: "read", thread }) as Thread;
+    mutate(sql, {
+      action: "read-state",
+      thread,
+      read: true,
+      seen: before.incoming,
+    });
+    const revision = read(sql, { action: "revision" });
+    assert.throws(() =>
+      mutate(sql, {
+        action: "archive-comparison",
+        thread,
+        comparison_id: comparison.id,
+        author: "pi",
+      }),
+    );
+    assert.throws(() =>
+      mutate(sql, {
+        action: "archive-comparison",
+        thread,
+        comparison_id: "missing",
+        author: "codex",
+      }),
+    );
+    assert.equal(read(sql, { action: "revision" }), revision);
+    const receipt = mutate(sql, {
+      action: "archive-comparison",
+      thread,
+      comparison_id: comparison.id,
+      author: "codex",
+    }) as { id: string };
+    const after = read(sql, { action: "read", thread }) as Thread;
+    assert.deepEqual(after.comparisons, []);
+    assert.deepEqual(after.comparison_history, before.comparisons);
+    assert.equal(after.primary_comparison, undefined);
+    assert.equal(after.incoming, receipt.id);
+    assert.equal(after.unread, true);
+    assert.deepEqual(after.source, before.source);
+    assert.deepEqual(after.messages, before.messages);
+    assert.equal(after.queue[0].message, queued.message);
+    assert.equal(after.resolved, false);
   } finally {
     close();
   }

@@ -49,9 +49,9 @@ Inbox-local keys:
     Ctrl-d Save and dispatch from the new-thread composer. Ctrl-s only saves.
     Ctrl-h/j/k/l Move between panels, keeping plain h/j/k/l for text.
     x     Resolve or reopen. The thread stays in the list.
-    gl    Choose original capture or a named code attachment.
-    gf    Go to current code. Changed/missing locations offer a saved snapshot.
-    c     Choose since, original, or agent comparison.
+    gl    Jump to a section in the unified source pane.
+    gf    Go to code for the source section under the cursor.
+    za    Fold or unfold a source section.
     e     Expand or collapse context from four to sixteen surrounding lines.
     i     Inspect thread ID, capture details and Git provenance.
     ?     Show inbox help.
@@ -82,8 +82,9 @@ The thread buffer keeps normal i/a/u/d/x and other text-editing keys. Filtering,
 resolution and other inbox actions remain available in the list/source panes.
 
 Native window commands that close a panel also close the inbox view. Reopen it
-with :Commentry inbox. Comparison attachments are listed in the conversation
-with their label and author. Press c and choose agent to view the attached diff.
+with :Commentry inbox. Every comparison appears in the source pane with its
+label and author. The conversation begins with its current review summary,
+when present, followed by discussion.
 
 Copied questions and notes can acquire code locations without replacing their
 original text. Agents use attach with a label and a file source snapshot. The
@@ -92,9 +93,38 @@ file's lines and optional filetype, modified and Git metadata. attachment_id
 replaces a previously read location with the same ID. Agent attachments become
 unread without resolving the thread.
 
-Press gl to select a location or the original capture. gf opens current code in
-the editing window you came from. Unchanged selections map through insertions
-or unique exact moves. Changed, missing and ambiguous code offers its snapshot.
+Agents may instead attach an excerpt with excerpt_first, the absolute file line
+of lines[0]. first/last remain absolute selection coordinates, contained within
+the excerpt. Omitted excerpt_first means the entire file starts at line 1.
+Unchanged excerpts follow unique code matches. Changed or ambiguous matches
+stay visible as saved excerpts and gf does not guess a destination. Neovim's
+file selections continue to capture full snapshots automatically.
+
+The source pane contains saved comparisons, every code attachment and original
+context together. The chosen primary comparison appears first and supporting
+evidence starts folded. Without a choice, the first saved comparison stays
+first when more evidence arrives. Comparisons may describe a proposal rather
+than current code. Code sections show current local excerpts or a diff
+labeled Changed locally since attached. Missing files retain a Saved snapshot.
+Original code context and long copied excerpts start folded. Use za to toggle
+sections. Fold choices survive refreshes. There is no comparison mode picker.
+
+Agents use revise to maintain a current review title and summary above the
+discussion. primary_comparison selects a saved comparison by ID. An update
+requires expected_review equal to the current review ID. The original capture
+and chronological messages stay intact. The original agent finding starts
+folded when its current review replaces it. Human messages stay visible.
+comparison_id replaces an agent's own comparison at its existing ID. Prior
+review and comparison versions remain in history. These updates become unread
+without resolving the conversation or rewriting submitted requests.
+archiveComparison withdraws an agent's own comparison from the active view,
+retaining it in history and clearing its primary selection when needed.
+
+Press gl to jump to a section. gf opens current code for the source section
+under the cursor, in the editing window you came from. Saved comparisons
+without code locations never guess a file. From another panel gf uses the source
+section or the first code location. Changed or ambiguous destinations stay in
+the inbox. Visual r quotes carry the section's location or descriptive label.
 Code buffers show gutter markers for open threads loaded from the inbox.
 The active thread also has a range highlight and short reply preview.
 Markers track edits using cached snapshots. Refresh the inbox for new activity.
@@ -260,9 +290,9 @@ Supported requests include:
 <
 Creation returns the stable thread ID as result. Project defaults to the
 invoking directory for create. Omit project from list to list every project.
-Comparison text is stored verbatim and never edits source files. Select agent
-with c to show all attached comparisons in one scrollable view, each labeled
-with its author and timestamp.
+Comparison text is stored verbatim and never edits source files. All attached
+comparisons appear automatically in the source pane, each labeled with its
+author and timestamp.
 Authors are caller-provided labels. Failed requests return ok=false and exit
 nonzero. R refreshes incoming messages. FocusGained also refreshes the inbox.
 summary excludes full snapshots from list output. Claims are project-scoped and
@@ -304,12 +334,27 @@ prototype event files remain untouched. Removing connection files does not
 delete the Executor inbox. There is no deletion interface yet.
 
 Agents discover the installed Commentry app in Executor codemode. Its native
-tools are requests.read, requests.context, list, read, create, reply, finish,
-attach, comparison, resolve, readState,
+tools are publish, publications.read, requests.read, requests.context, list, read, create, reply, finish,
+attach, comparison, archiveComparison, revise, resolve, readState,
 changes and revision. finish atomically replies and completes the supplied
 claim_ids without resolving the thread. reply only adds a comment. The packaged
 commentry skill describes the flow. Local canonical checkout paths remain the
 project identities; different machines' paths are not automatically linked.
+
+publish atomically saves 1 to 25 independent topics with current summaries and
+evidence. Supply project, request_id, author and items. Each item has a unique
+key, title and body, with optional source, attachments and comparisons.
+Comparison keys are local to the item; primary_comparison selects one by key.
+The response maps topic keys to saved thread/evidence IDs without echoing code.
+There is no need to create then revise each new thread separately.
+
+Persist the manifest and request_id before submitting. publications.read looks
+up a completed receipt by project/request_id. If a response is lost, retry only
+the exact original ID and payload. That returns the original IDs without
+overwriting later replies or creating copies. Changed content at the same ID
+is rejected. A missing status while an earlier call runs does not prove failure.
+All topics commit together or none do. Executor approval/input pauses still use
+resume rather than repeating the publication.
 
 For delivered comments, requests.read accepts the exact project and items from
 the notification. It returns five claims per page and up to 2000 Unicode
@@ -321,6 +366,7 @@ Full read remains available for explicit complete-thread inspection.
 When wrapping MCP, emit checked execution.value, avoiding duplicated envelopes.
 
 The standalone binary exposes list, read, create, reply, resolve, attach, comparison,
+archive-comparison, revise, publish, publication,
 read-state, queue, claim, complete, cancel, retry, revision, changes, watch, rpc,
 capture, rex, agent, and executor.
 All data commands return JSON. Examples:
@@ -332,6 +378,8 @@ All data commands return JSON. Examples:
   commentry complete t-THREAD --claim-id claim-CLAIM
   commentry attach t-THREAD --author Codex --label Implementation --source-file capture.json
   commentry comparison t-THREAD --author Codex --label Refactor --before-file old.lua --after-file new.lua
+  commentry publish --file review.json
+  commentry publication --project . --request-id REVIEW-ID
   commentry watch --project . --after 0 --timeout 60s
 <
 watch emits an initial JSON page, then streams committed changes until cancelled

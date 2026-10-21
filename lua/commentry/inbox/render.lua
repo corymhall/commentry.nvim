@@ -89,64 +89,119 @@ function M.selection(view, row)
   })
 end
 
-function M.source(view, thread, comparison)
-  local source = thread.source
-  local general = source.kind == "text" and source.origin == "general"
-  local title = view.mode == "agent" and "Attached comparisons"
-    or general and "Project conversation"
-    or source.kind == "file" and source.path .. ":" .. source.first .. "-" .. source.last
-    or "Captured text"
-  local label = view.mode == "agent" and comparison.label
-    or view.mode == "original" and "Original capture"
-    or comparison.unavailable and "Outdated / file unavailable / original capture"
-    or comparison.outdated and "Outdated / approximate comparison"
-    or general and "No file or excerpt attached"
-    or source.kind ~= "file" and "Original capture / no file anchor"
-    or "Since comment / captured -> current"
-  local rows = { " " .. title, " " .. label, "" }
-  local old, new = comparison.first or 1, comparison.current_first or 1
-  local marks, numbers = {}, {}
-  for index, line in ipairs(comparison.lines) do
-    local row = #rows
-    if comparison.headings and comparison.headings[index] then
-      marks[#marks + 1] = { row, "Title" }
-    elseif comparison.filetype == "diff" and (not comparison.diff_rows or comparison.diff_rows[index]) then
-      local old_start, old_count, new_start, new_count = line:match("^@@ %-(%d+),?(%d*) %+(%d+),?(%d*) @@")
-      if old_start then
-        old = tonumber(old_start) + (comparison.first or 1) - 1
-        new = tonumber(new_start) + (comparison.current_first or 1) - 1
-        line = ("@@ -%d%s +%d%s @@"):format(
-          old,
-          old_count ~= "" and "," .. old_count or "",
-          new,
-          new_count ~= "" and "," .. new_count or ""
-        )
-        marks[#marks + 1] = { row, "Hunk" }
-      elseif line:sub(1, 1) == "+" then
-        numbers[#numbers + 1] = { row, ("     %4d "):format(new) }
-        new = new + 1
-        marks[#marks + 1] = { row, "Added" }
-      elseif line:sub(1, 1) == "-" then
-        numbers[#numbers + 1] = { row, ("%4d      "):format(old) }
-        old = old + 1
-        marks[#marks + 1] = { row, "Removed" }
-      elseif line:sub(1, 1) == " " then
-        numbers[#numbers + 1] = { row, ("%4d %4d "):format(old, new) }
-        old, new = old + 1, new + 1
-      end
-    elseif source.kind == "file" and view.mode ~= "agent" then
-      numbers[#numbers + 1] = { row, ("%4d  "):format(old) }
-      if old >= source.first and old <= source.last then
-        marks[#marks + 1] = { row, "Selection" }
-      end
-      old = old + 1
-    end
-    rows[#rows + 1] = line
+function M.remember_source(view)
+  if
+    not view.source_sections
+    or not view.source_win
+    or view.source_fold_win ~= view.source_win
+    or not vim.api.nvim_win_is_valid(view.source_win)
+  then
+    return
   end
-  M.write(view.source_buf, rows, comparison.filetype)
-  M.mark(view.source_buf, 0, "Title")
-  M.mark(view.source_buf, 1, comparison.outdated and "Warning" or "Muted")
+  view.source_folds = view.source_folds or {}
+  local folds = view.source_folds[view.source_thread] or {}
+  vim.api.nvim_win_call(view.source_win, function()
+    for _, section in ipairs(view.source_sections) do
+      folds[section.id] = vim.fn.foldclosed(section.first) == section.first
+    end
+  end)
+  view.source_folds[view.source_thread] = folds
+end
+
+function M.source_section(view, row)
+  for _, section in ipairs(view.source_sections or {}) do
+    if row >= section.first and row <= section.last then
+      return section
+    end
+  end
+end
+
+-- Separate file snippets can have different languages. Native syntax regions
+-- preserve their highlighting without making section headings part of a file.
+local function source_syntax(buf, sections)
+  vim.api.nvim_buf_call(buf, function()
+    vim.cmd("syntax clear")
+    local included = {}
+    for index, section in ipairs(sections) do
+      local filetype = section.comparison.filetype
+      if filetype ~= "text" and filetype ~= "diff" and filetype:match("^[%w_]+$") then
+        local cluster = "CommentrySource_" .. filetype
+        if included[filetype] == nil then
+          vim.b.current_syntax = nil
+          included[filetype] = pcall(vim.cmd, "syntax include @" .. cluster .. " syntax/" .. filetype .. ".vim")
+        end
+        if included[filetype] and section.last >= section.first + 3 then
+          vim.cmd(
+            ("syntax region CommentrySource%d start=/\\%%%dl/ end=/\\%%%dl/ keepend contains=@%s"):format(
+              index,
+              section.first + 3,
+              section.last + 1,
+              cluster
+            )
+          )
+        end
+      end
+    end
+    vim.b.current_syntax = "commentry_inbox_source"
+  end)
+end
+
+function M.source(view, thread, sections)
+  M.remember_source(view)
+  local same = view.source_thread == thread.id
+  local changed_primary = same and view.source_primary ~= (sections[1] and sections[1].id)
+  local rows, marks, numbers = {}, {}, {}
+  for _, section in ipairs(sections) do
+    local comparison, source = section.comparison, section.source
+    section.first = #rows + 1
+    marks[#marks + 1] = { #rows, "Title" }
+    rows[#rows + 1] = section.title
+    marks[#marks + 1] = { #rows, comparison.unavailable and "Warning" or "Muted" }
+    rows[#rows + 1] = section.detail
+    rows[#rows + 1] = ""
+    local old, new = comparison.first or 1, comparison.current_first or 1
+    for _, line in ipairs(comparison.lines) do
+      local row = #rows
+      if comparison.filetype == "diff" then
+        local old_start, old_count, new_start, new_count = line:match("^@@ %-(%d+),?(%d*) %+(%d+),?(%d*) @@")
+        if old_start then
+          old = tonumber(old_start) + (comparison.first or 1) - 1
+          new = tonumber(new_start) + (comparison.current_first or 1) - 1
+          line = ("@@ -%d%s +%d%s @@"):format(
+            old,
+            old_count ~= "" and "," .. old_count or "",
+            new,
+            new_count ~= "" and "," .. new_count or ""
+          )
+          marks[#marks + 1] = { row, "Hunk" }
+        elseif line:sub(1, 1) == "+" then
+          numbers[#numbers + 1] = { row, ("     %4d "):format(new) }
+          new = new + 1
+          marks[#marks + 1] = { row, "Added" }
+        elseif line:sub(1, 1) == "-" then
+          numbers[#numbers + 1] = { row, ("%4d      "):format(old) }
+          old = old + 1
+          marks[#marks + 1] = { row, "Removed" }
+        elseif line:sub(1, 1) == " " then
+          numbers[#numbers + 1] = { row, ("%4d %4d "):format(old, new) }
+          old, new = old + 1, new + 1
+        end
+      elseif source and source.kind == "file" then
+        numbers[#numbers + 1] = { row, ("%4d  "):format(old) }
+        if old >= source.first and old <= source.last then
+          marks[#marks + 1] = { row, "Selection" }
+        end
+        old = old + 1
+      end
+      rows[#rows + 1] = line
+    end
+    section.last = #rows
+    rows[#rows + 1] = ""
+  end
+  M.write(view.source_buf, rows, "text")
+  source_syntax(view.source_buf, sections)
   for _, mark in ipairs(marks) do
+    M.mark(view.source_buf, mark[1], mark[2])
     vim.api.nvim_buf_set_extmark(view.source_buf, ns, mark[1], 0, { line_hl_group = "CommentryInbox" .. mark[2] })
   end
   for _, number in ipairs(numbers) do
@@ -155,6 +210,39 @@ function M.source(view, thread, comparison)
       virt_text_pos = "inline",
     })
   end
+  if view.source_win and vim.api.nvim_win_is_valid(view.source_win) then
+    vim.api.nvim_win_call(view.source_win, function()
+      vim.wo.foldmethod, vim.wo.foldenable, vim.wo.foldcolumn = "manual", true, "1"
+      vim.wo.foldtext = "getline(v:foldstart) . '  [' . (v:foldend - v:foldstart) . ' lines]'"
+      vim.cmd("normal! zE")
+      local folds = view.source_folds and view.source_folds[thread.id] or {}
+      for _, section in ipairs(sections) do
+        if section.last > section.first then
+          vim.cmd(section.first .. "," .. section.last .. "fold")
+          local closed = folds[section.id]
+          if changed_primary then
+            if section == sections[1] then
+              closed = false
+            elseif section.id == view.source_primary then
+              closed = true
+            end
+          end
+          if closed == nil then
+            closed = section.collapsed
+          end
+          if not closed then
+            vim.cmd(section.first .. "foldopen")
+          end
+        end
+      end
+      if not same then
+        vim.api.nvim_win_set_cursor(0, { 1, 0 })
+      end
+    end)
+  end
+  view.source_sections, view.source_thread = sections, thread.id
+  view.source_primary = sections[1] and sections[1].id
+  view.source_fold_win = view.source_win
 end
 
 function M.conversation(view, thread)
@@ -173,31 +261,29 @@ function M.conversation(view, thread)
       vim.list_extend(rows, { "Inspect partial work, then press t to retry.", "" })
     end
   end
-  if #(thread.attachments or {}) > 0 then
-    rows[#rows + 1] = #thread.attachments .. " code locations / gl choose / gf go to code"
-    for _, attachment in ipairs(thread.attachments) do
-      rows[#rows + 1] = attachment.label .. " / " .. attachment.source.path .. ":" .. attachment.source.first
-    end
-    rows[#rows + 1] = ""
-  end
-  local comparison = thread.comparisons[#thread.comparisons]
-  if comparison then
-    vim.list_extend(rows, {
-      "Comparisons attached: " .. #thread.comparisons,
-      comparison.label .. " / " .. comparison.author,
-      "Press c and choose agent to view all.",
-      "",
-    })
+  local review = thread.review
+  if review then
+    rows[#rows + 1] = "Current review / " .. review.author
+    vim.list_extend(rows, vim.split(review.summary, "\n", { plain = true }))
+    vim.list_extend(rows, { "", "Discussion", "" })
   end
   local authors = {}
-  for _, message in ipairs(thread.messages) do
+  local original_fold
+  for index, message in ipairs(thread.messages) do
     local at = message.at:match("T(%d%d:%d%d)") or message.at
     if message.at:sub(1, 10) ~= os.date("!%Y-%m-%d") then
       at = message.at:sub(1, 10) .. " " .. at
     end
     authors[#authors + 1] = { row = #rows, length = #message.author }
-    rows[#rows + 1] = message.author .. "  " .. at
+    rows[#rows + 1] = (review and index == 1 and message.author == review.author and "Original finding / " or "")
+      .. message.author
+      .. "  "
+      .. at
+    local first = #rows
     vim.list_extend(rows, vim.split(message.body, "\n", { plain = true }))
+    if review and index == 1 and message.author == review.author then
+      original_fold = { first, #rows }
+    end
     vim.list_extend(rows, { "", "" })
   end
   local dirty
@@ -206,7 +292,31 @@ function M.conversation(view, thread)
   vim.bo[view.thread_buf].modifiable = true
   vim.bo[view.thread_buf].modified = dirty
   if dirty then
+    -- Restored drafts retain their displayed history. Folds from the previous
+    -- thread must not hide a reply or unrelated messages in that frozen text.
+    if view.thread_win and vim.api.nvim_win_is_valid(view.thread_win) then
+      vim.api.nvim_win_call(view.thread_win, function()
+        vim.cmd("normal! zE")
+      end)
+    end
     return
+  end
+  if view.thread_win and vim.api.nvim_win_is_valid(view.thread_win) then
+    vim.api.nvim_win_call(view.thread_win, function()
+      local same = view.review_thread == thread.id
+      local closed = not same or vim.fn.foldclosed(view.review_original_first or 1) ~= -1
+      vim.wo.foldmethod, vim.wo.foldenable = "manual", true
+      vim.wo.foldtext = "getline(v:foldstart) . ' / za expand'"
+      vim.cmd("normal! zE")
+      if original_fold and original_fold[2] > original_fold[1] then
+        vim.cmd(original_fold[1] .. "," .. original_fold[2] .. "fold")
+        if not closed then
+          vim.cmd(original_fold[1] .. "foldopen")
+        end
+      end
+      view.review_original_first = original_fold and original_fold[1]
+      view.review_thread = thread.id
+    end)
   end
   M.mark(view.thread_buf, #view.reply.prefix - 2, "Accent")
   M.mark(view.thread_buf, 0, "Title")

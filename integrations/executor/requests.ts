@@ -1,9 +1,10 @@
 // Agent reads are separate from the editor's complete thread protocol.
 import type { SqlReader } from "apps";
-import type { Thread, Queued, Source, Message } from "./inbox.js";
+import type { Thread, Queued, Source, Message, Review } from "./inbox.js";
 
 type Snapshot = {
   title?: string;
+  review?: Review;
   source: Source & { excerpt_first?: number };
   messages: Message[];
   attachments?: {
@@ -98,12 +99,18 @@ function sourceText(source: Snapshot["source"]): string {
 function discussion(messages: Message[]) {
   return messages.map((m) => m.author + ":\n" + m.body).join("\n\n");
 }
+function supersededFinding(saved: Snapshot) {
+  return !!saved.review && saved.messages[0]?.author === saved.review.author;
+}
 function requestText(saved: Snapshot, start: number) {
   const parts = [
     "Submitted discussion, newest first\n" +
       discussion(
         saved.messages
           .slice(start)
+          .filter(
+            (_, index) => start + index !== 0 || !supersededFinding(saved),
+          )
           .map((message, index, messages) => {
             const chars = Array.from(message.body);
             return message.author !== "You" &&
@@ -119,8 +126,10 @@ function requestText(saved: Snapshot, start: number) {
           })
           .reverse(),
       ),
-    "Original capture\n" + sourceText(saved.source),
   ];
+  if (saved.review)
+    parts.push("Submitted review summary\n" + saved.review.summary);
+  parts.push("Original capture\n" + sourceText(saved.source));
   if (saved.title && saved.title !== saved.messages[0]?.body)
     parts.push("Thread title\n" + saved.title);
   if (saved.attachments?.length)
@@ -170,7 +179,14 @@ function contextText(
           "Current comparisons\n" +
           thread.comparisons
             .map((c) =>
-              JSON.stringify({ id: c.id, label: c.label, author: c.author }),
+              JSON.stringify({
+                id: c.id,
+                label: c.label,
+                author: c.author,
+                primary:
+                  c.id ===
+                  (thread.primary_comparison ?? thread.comparisons[0]?.id),
+              }),
             )
             .join("\n")
         );
@@ -221,7 +237,10 @@ export function requestContext(
     total_chars: chars.length,
   };
   if (end < chars.length) result.context.next_offset = end;
-  if (saved) result.earlier_messages = contextStart(saved);
+  if (saved)
+    result.earlier_messages =
+      contextStart(saved) +
+      (contextStart(saved) === 0 && supersededFinding(saved) ? 1 : 0);
   return result;
 }
 export function readRequests(

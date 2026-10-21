@@ -28,6 +28,7 @@ import {
 } from "./inbox.js";
 
 import { readRequests, requestContext } from "./requests.js";
+import { publish, publication, type Publication } from "./publish.js";
 
 const text = string({ minLength: 1 });
 const source = object({
@@ -36,6 +37,7 @@ const source = object({
   path: string().optional(),
   first: number().optional(),
   last: number().optional(),
+  excerpt_first: number().optional(),
   origin: string().optional(),
   filetype: string().optional(),
   modified: boolean().optional(),
@@ -61,6 +63,13 @@ const event = object({
   claim_id: string().optional(),
   queue_id: string().optional(),
 });
+const review = object({
+  id: text,
+  title: text,
+  summary: text,
+  author: text,
+  at: text,
+});
 const queued = object({
   id: text,
   message: text,
@@ -85,6 +94,10 @@ const thread = object({
   resolved: boolean(),
   messages: array(message),
   comparisons: array(event),
+  primary_comparison: string().optional(),
+  review: review.optional(),
+  review_history: array(review).optional(),
+  comparison_history: array(event).optional(),
   queue: array(queued),
   unread: boolean(),
   incoming: string().optional(),
@@ -110,8 +123,37 @@ const agent = object({
   rex_session: string().optional(),
   rex_block: string().optional(),
 });
+const publishItem = object({
+  key: text,
+  title: text,
+  body: text,
+  source: source.optional(),
+  attachments: array(object({ label: text, source })).optional(),
+  comparisons: array(
+    object({ key: text, label: text, before: string(), after: string() }),
+  ).optional(),
+  primary_comparison: text.optional(),
+});
+const publicationOutput = object({
+  project: text,
+  request_id: text,
+  status: text,
+  items: array(
+    object({
+      key: text,
+      thread: text,
+      title: text,
+      review: text,
+      attachments: array(object({ id: text, label: text })),
+      comparisons: array(object({ key: text, id: text, label: text })),
+      primary_comparison: text.optional(),
+    }),
+  ).optional(),
+});
 const request = object({
   action: text,
+  request_id: string().optional(),
+  items: array(publishItem).optional(),
   thread: string().optional(),
   project: string().optional(),
   author: string().optional(),
@@ -120,6 +162,9 @@ const request = object({
   text: string().optional(),
   source: source.optional(),
   attachment_id: string().optional(),
+  comparison_id: string().optional(),
+  primary_comparison: string().optional(),
+  expected_review: string().optional(),
   filter: string().optional(),
   summary: boolean().optional(),
   resolved: boolean().optional(),
@@ -149,14 +194,44 @@ const changes = object({
   revision: number(),
 });
 const author = string().default("codex");
-const perform = (sql: SQL, input: Request) =>
-  reads.has(input.action) ? read(sql, input) : mutate(sql, input);
+const perform = (sql: SQL, input: Request) => {
+  if (input.action === "publish") return publish(sql, input as Publication);
+  if (input.action === "publication")
+    return publication(sql, input.project ?? "", input.request_id ?? "");
+  return reads.has(input.action) ? read(sql, input) : mutate(sql, input);
+};
 
 export default defineApp(
-  { accounts: {} },
+  {},
   {
     tools: router(
       {
+        publish: mutation(
+          {
+            description:
+              "Publish 1 to 25 independent review topics with summaries, code excerpts and comparisons in one atomic transaction. Use a durable request_id and unique item keys. Repeating the same request returns the original compact receipt; changed content at the same ID is rejected. For source excerpts set excerpt_first to the file line of lines[0]. No separate create/revise calls needed. Check publications.read after a timeout.",
+            input: object({
+              project: text,
+              request_id: text,
+              author,
+              items: array(publishItem),
+            }),
+            output: publicationOutput,
+          },
+          async ({ sql }, input) => publish(sql, input as Publication),
+        ),
+        publications: router({
+          read: query(
+            {
+              description:
+                "Check whether an atomic publish committed using project and request_id. Returns complete with the original topic-to-thread receipts, or missing. Does not change read state. A missing response during an in-flight call is not proof it will fail; retry only the same request_id and payload.",
+              input: object({ project: text, request_id: text }),
+              output: publicationOutput,
+            },
+            async ({ sql }, input) =>
+              publication(sql, input.project, input.request_id),
+          ),
+        }),
         requests: router({
           read: query(
             {
@@ -284,18 +359,49 @@ export default defineApp(
         comparison: mutation(
           {
             description:
-              "Attach a focused before/after comparison. Preserve the original capture. Neither text is written to source files.",
+              "Attach a focused before/after comparison. Supply comparison_id to replace your own comparison at its stable ID and retain its previous version in history. Preserves captures and queued requests. Neither text is written to source files.",
             input: object({
               thread: text,
               before: string(),
               after: string(),
               label: text,
+              comparison_id: text.optional(),
               author,
             }),
             output: event,
           },
           async ({ sql }, input) =>
             mutate(sql, { ...input, action: "comparison" }) as Event,
+        ),
+        archiveComparison: mutation(
+          {
+            description:
+              "Withdraw your own misleading or obsolete comparison from the active source view. Keeps the complete comparison in history and clears primary selection if needed. Original capture, discussion and submitted requests remain unchanged.",
+            input: object({ thread: text, comparison_id: text, author }),
+            output: event,
+          },
+          async ({ sql }, input) =>
+            mutate(sql, { ...input, action: "archive-comparison" }) as Event,
+        ),
+        revise: mutation(
+          {
+            description:
+              "Set the current human-readable review summary and title without editing conversation messages. Choose primary_comparison by existing comparison ID, or clear with an empty string. First revision requires title and body. Updating your own review requires expected_review equal to its current id. Previous versions remain in history; claims stay frozen. Returns only the current review receipt.",
+            input: object({
+              thread: text,
+              title: text.optional(),
+              body: text.optional(),
+              primary_comparison: string().optional(),
+              expected_review: text.optional(),
+              author,
+            }),
+            output: review,
+          },
+          async ({ sql }, input) =>
+            mutate(sql, {
+              ...input,
+              action: "revise",
+            }) as import("./inbox.js").Review,
         ),
         resolve: mutation(
           {
@@ -351,7 +457,8 @@ export default defineApp(
             input: request,
             output: json(),
           },
-          async ({ sql }, input) => perform(sql, input as Request) as JsonValue,
+          async ({ sql }, input) =>
+            (await perform(sql, input as Request)) as JsonValue,
         ),
         agents: router({
           get: query(

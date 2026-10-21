@@ -91,7 +91,7 @@ describe("universal inbox", function()
     vim.cmd.write()
     local saved = assert(Store.get(thread.id))
     assert.are.same(
-      "> -local first = 1\n> +local first = 3\n\nCan we combine these?",
+      "> example.lua\n> -local first = 1\n> +local first = 3\n\nCan we combine these?",
       saved.messages[#saved.messages].body
     )
     assert.are.same(thread.source, saved.source)
@@ -224,6 +224,82 @@ describe("universal inbox", function()
     assert.is_nil(Source.locate(thread))
   end)
 
+  it("reviews comparisons and code locations together and navigates the section under the cursor", function()
+    local thread = file({ "before", "selected", "after" }, 2)
+    assert(
+      Store.update(thread.id, { kind = "attach", label = "Implementation", source = thread.source, author = "Agent" })
+    )
+    local other_source =
+      { kind = "file", path = "other.lua", first = 2, last = 2, lines = { "first", "other code", "last" } }
+    vim.fn.writefile(other_source.lines, root .. "/other.lua")
+    assert(Store.update(thread.id, { kind = "attach", label = "Caller", source = other_source, author = "Agent" }))
+    assert(
+      Store.update(
+        thread.id,
+        { kind = "comparison", label = "Suggested fix", before = "selected\n", after = "updated\n", author = "Agent" }
+      )
+    )
+    vim.api.nvim_buf_set_lines(buf, 1, 2, false, { "updated" })
+    local view = require("commentry.inbox").open(nil, { project = root, thread = thread.id })
+    local original, caller, implementation
+    for _, section in ipairs(view.source_sections) do
+      if section.id == "original" then
+        original = section
+      end
+      if section.source and section.source.path == "other.lua" then
+        caller = section
+      end
+      if section.source and section.id ~= "original" and section.source.path == "example.lua" then
+        implementation = section
+      end
+    end
+    assert.matches("Saved comparison", view.source_sections[1].title)
+    assert.matches("Changed locally", implementation.title)
+    assert.matches("Current code", caller.title)
+    vim.api.nvim_set_current_win(view.source_win)
+    vim.api.nvim_win_set_cursor(view.source_win, { 1, 0 })
+    keys(view).gf()
+    assert.are.same(view.source_win, vim.api.nvim_get_current_win())
+    assert.are.same(original.first, vim.fn.foldclosed(original.first))
+    vim.api.nvim_win_set_cursor(view.source_win, { original.first, 0 })
+    vim.cmd("normal! zo")
+    keys(view).e()
+    original = view.source_sections[#view.source_sections]
+    assert.are.same(-1, vim.fn.foldclosed(original.first))
+    local select = vim.ui.select
+    vim.ui.select = function(items, _, callback)
+      for _, item in ipairs(items) do
+        if item.source and item.source.path == "other.lua" then
+          callback(item)
+          return
+        end
+      end
+    end
+    local ok, err = pcall(keys(view).gl)
+    vim.ui.select = select
+    assert.is_true(ok, tostring(err))
+    keys(view).gf()
+    local other_buf = vim.api.nvim_get_current_buf()
+    assert.are.same(root .. "/other.lua", vim.api.nvim_buf_get_name(other_buf))
+    assert.are.same(2, vim.api.nvim_win_get_cursor(0)[1])
+    require("commentry.inbox.locations").open_at_cursor()
+    assert.are.same(view.tab, vim.api.nvim_get_current_tabpage())
+    vim.api.nvim_set_current_win(view.source_win)
+    for _, section in ipairs(view.source_sections) do
+      if section.source and section.source.path == "example.lua" and section.id ~= "original" then
+        vim.api.nvim_win_set_cursor(view.source_win, { section.first, 0 })
+        break
+      end
+    end
+    keys(view).gf()
+    assert.are.same(buf, vim.api.nvim_get_current_buf())
+    assert.are.same(2, vim.api.nvim_win_get_cursor(0)[1])
+    require("commentry.inbox.locations").open_at_cursor()
+    assert.are.same(view.tab, vim.api.nvim_get_current_tabpage())
+    assert.are.same("selected", assert(Store.get(thread.id)).source.lines[2])
+    vim.api.nvim_buf_delete(other_buf, { force = true })
+  end)
+
   it("reflows on resize and navigates panels without changing plain text motions", function()
     create()
     vim.o.columns = 200
@@ -317,19 +393,12 @@ describe("universal inbox", function()
       label = "Focused refactor",
     }))
     local view = require("commentry.inbox").open("all")
-    local rows = table.concat(vim.api.nvim_buf_get_lines(view.thread_buf, 0, -1, false), "\n")
+    local rows = table.concat(vim.api.nvim_buf_get_lines(view.source_buf, 0, -1, false), "\n")
     assert.is_truthy(rows:find("Focused refactor", 1, true))
     assert.is_truthy(rows:find("Agent", 1, true))
     assert.is_true(assert(Store.get(id)).unread)
     keys(view)["<CR>"]()
     assert.is_false(assert(Store.get(id)).unread)
-    local original_select = vim.ui.select
-    vim.ui.select = function(_, _, callback)
-      callback("agent")
-    end
-    local ok, err = pcall(keys(view).c)
-    vim.ui.select = original_select
-    assert.is_true(ok, tostring(err))
     local diff = table.concat(vim.api.nvim_buf_get_lines(view.source_buf, 0, -1, false), "\n")
     assert.is_truthy(diff:find("replacement code", 1, true))
   end)
@@ -579,9 +648,10 @@ describe("universal inbox", function()
     assert.are.same({ "Selected output" }, threads[1].source.lines)
     assert.are.same(2, #threads[1].messages)
     assert.is_true(threads[1].resolved)
-    local comparison = assert(Source.compare(threads[1], "agent"))
+    local section = Source.sections(threads[1])[1]
+    local comparison = section.comparison
     assert.is_truthy(table.concat(comparison.lines, "\n"):find("+new", 1, true))
-    assert.is_truthy(comparison.label:find("Agent", 1, true))
+    assert.is_truthy(section.detail:find("Agent", 1, true))
   end)
 
   it("rejects invalid external writes without poisoning existing threads", function()
@@ -642,6 +712,10 @@ describe("universal inbox", function()
     local comparison = assert(Source.compare(thread, "since"))
     assert.is_true(comparison.outdated)
     assert.are.same({ "keep this original", "context" }, comparison.lines)
+    local sections = Source.sections(thread)
+    assert.are.same(1, #sections)
+    assert.matches("Saved snapshot", sections[1].title)
+    assert.matches("File unavailable", sections[1].detail)
   end)
 
   it("fails visibly when the SQLite database is corrupt", function()

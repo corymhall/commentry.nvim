@@ -10,15 +10,16 @@ import (
 
 // Source is the immutable text or file snapshot captured with a thread.
 type Source struct {
-	Kind     string            `json:"kind"`
-	Lines    []string          `json:"lines"`
-	Path     string            `json:"path,omitempty"`
-	First    int               `json:"first,omitempty"`
-	Last     int               `json:"last,omitempty"`
-	Origin   string            `json:"origin,omitempty"`
-	Filetype string            `json:"filetype,omitempty"`
-	Modified bool              `json:"modified,omitempty"`
-	Git      map[string]string `json:"git,omitempty"`
+	Kind         string            `json:"kind"`
+	Lines        []string          `json:"lines"`
+	Path         string            `json:"path,omitempty"`
+	First        int               `json:"first,omitempty"`
+	Last         int               `json:"last,omitempty"`
+	ExcerptFirst int               `json:"excerpt_first,omitempty"`
+	Origin       string            `json:"origin,omitempty"`
+	Filetype     string            `json:"filetype,omitempty"`
+	Modified     bool              `json:"modified,omitempty"`
+	Git          map[string]string `json:"git,omitempty"`
 }
 
 // Attachment is a named code snapshot independent of the original capture.
@@ -68,52 +69,70 @@ type Queued struct {
 	Author        string `json:"author,omitempty"`
 }
 
+// Review is the current explanation, independent of message history.
+type Review struct {
+	ID      string `json:"id"`
+	Title   string `json:"title"`
+	Summary string `json:"summary"`
+	Author  string `json:"author"`
+	At      string `json:"at"`
+}
+
 // Thread contains a capture, conversation, comparisons, and read/work state.
 type Thread struct {
-	ID           string       `json:"id"`
-	Project      string       `json:"project"`
-	Title        string       `json:"title"`
-	Source       Source       `json:"source"`
-	Attachments  []Attachment `json:"attachments,omitempty"`
-	CreatedAt    string       `json:"created_at"`
-	UpdatedAt    string       `json:"updated_at"`
-	Resolved     bool         `json:"resolved"`
-	Messages     []Message    `json:"messages"`
-	Comparisons  []Event      `json:"comparisons"`
-	Queue        []Queued     `json:"queue"`
-	Unread       bool         `json:"unread"`
-	Incoming     string       `json:"incoming,omitempty"`
-	Seen         string       `json:"seen,omitempty"`
-	ManualUnread bool         `json:"manual_unread"`
+	Review            *Review      `json:"review,omitempty"`
+	ReviewHistory     []Review     `json:"review_history,omitempty"`
+	PrimaryComparison string       `json:"primary_comparison,omitempty"`
+	ComparisonHistory []Event      `json:"comparison_history,omitempty"`
+	ID                string       `json:"id"`
+	Project           string       `json:"project"`
+	Title             string       `json:"title"`
+	Source            Source       `json:"source"`
+	Attachments       []Attachment `json:"attachments,omitempty"`
+	CreatedAt         string       `json:"created_at"`
+	UpdatedAt         string       `json:"updated_at"`
+	Resolved          bool         `json:"resolved"`
+	Messages          []Message    `json:"messages"`
+	Comparisons       []Event      `json:"comparisons"`
+	Queue             []Queued     `json:"queue"`
+	Unread            bool         `json:"unread"`
+	Incoming          string       `json:"incoming,omitempty"`
+	Seen              string       `json:"seen,omitempty"`
+	ManualUnread      bool         `json:"manual_unread"`
 }
 
 // Request is the shared CLI and Neovim JSON protocol.
 type Request struct {
-	Action        string   `json:"action"`
-	DeferDelivery bool     `json:"defer_delivery,omitempty"`
-	AttachmentID  string   `json:"attachment_id,omitempty"`
-	Mode          string   `json:"mode,omitempty"`
-	ClaimIDs      []string `json:"claim_ids,omitempty"`
-	Thread        string   `json:"thread,omitempty"`
-	Project       string   `json:"project,omitempty"`
-	Author        string   `json:"author,omitempty"`
-	Title         string   `json:"title,omitempty"`
-	Body          string   `json:"body,omitempty"`
-	Text          *string  `json:"text,omitempty"`
-	Source        *Source  `json:"source,omitempty"`
-	Filter        string   `json:"filter,omitempty"`
-	Summary       bool     `json:"summary,omitempty"`
-	Resolved      *bool    `json:"resolved,omitempty"`
-	Read          *bool    `json:"read,omitempty"`
-	Seen          string   `json:"seen,omitempty"`
-	Before        *string  `json:"before,omitempty"`
-	After         *string  `json:"after,omitempty"`
-	Label         string   `json:"label,omitempty"`
-	Message       string   `json:"message,omitempty"`
-	ClaimID       string   `json:"claim_id,omitempty"`
-	QueueID       string   `json:"queue_id,omitempty"`
-	PendingOnly   bool     `json:"pending_only,omitempty"`
-	Cursor        int64    `json:"cursor,omitempty"`
+	RequestID         string        `json:"request_id,omitempty"`
+	Items             []PublishItem `json:"items,omitempty"`
+	ComparisonID      string        `json:"comparison_id,omitempty"`
+	PrimaryComparison *string       `json:"primary_comparison,omitempty"`
+	ExpectedReview    string        `json:"expected_review,omitempty"`
+	Action            string        `json:"action"`
+	DeferDelivery     bool          `json:"defer_delivery,omitempty"`
+	AttachmentID      string        `json:"attachment_id,omitempty"`
+	Mode              string        `json:"mode,omitempty"`
+	ClaimIDs          []string      `json:"claim_ids,omitempty"`
+	Thread            string        `json:"thread,omitempty"`
+	Project           string        `json:"project,omitempty"`
+	Author            string        `json:"author,omitempty"`
+	Title             string        `json:"title,omitempty"`
+	Body              string        `json:"body,omitempty"`
+	Text              *string       `json:"text,omitempty"`
+	Source            *Source       `json:"source,omitempty"`
+	Filter            string        `json:"filter,omitempty"`
+	Summary           bool          `json:"summary,omitempty"`
+	Resolved          *bool         `json:"resolved,omitempty"`
+	Read              *bool         `json:"read,omitempty"`
+	Seen              string        `json:"seen,omitempty"`
+	Before            *string       `json:"before,omitempty"`
+	After             *string       `json:"after,omitempty"`
+	Label             string        `json:"label,omitempty"`
+	Message           string        `json:"message,omitempty"`
+	ClaimID           string        `json:"claim_id,omitempty"`
+	QueueID           string        `json:"queue_id,omitempty"`
+	PendingOnly       bool          `json:"pending_only,omitempty"`
+	Cursor            int64         `json:"cursor,omitempty"`
 }
 
 // Change identifies a committed mutation for incremental inbox consumers.
@@ -153,8 +172,9 @@ func validateSource(s Source) error {
 	if slices.Contains(strings.Split(s.Path, "/"), "..") {
 		return fmt.Errorf("source path cannot escape project")
 	}
-	if s.First < 1 || s.Last < s.First || s.Last > len(s.Lines) {
-		return fmt.Errorf("invalid source range")
+	origin := max(1, s.ExcerptFirst)
+	if s.ExcerptFirst < 0 || s.First < origin || s.Last < s.First || s.Last-origin >= len(s.Lines) {
+		return fmt.Errorf("invalid source range: lines must cover first..last; for an excerpt set excerpt_first to the file line of lines[0]")
 	}
 	return validateMetadata(s)
 }

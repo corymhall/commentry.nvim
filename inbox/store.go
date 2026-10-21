@@ -99,10 +99,10 @@ func (s *Store) initialize(ctx context.Context) error {
 	if err := s.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
 		return err
 	}
-	if version > 2 {
+	if version > 3 {
 		return fmt.Errorf("unsupported inbox database version %d", version)
 	}
-	if version == 2 {
+	if version == 3 {
 		return nil
 	}
 	_, err := s.db.ExecContext(ctx, `BEGIN IMMEDIATE;
@@ -126,7 +126,14 @@ func (s *Store) initialize(ctx context.Context) error {
  id TEXT NOT NULL,
  state TEXT NOT NULL CHECK(json_valid(state))
  );
- PRAGMA user_version=2;
+ CREATE TABLE IF NOT EXISTS publications (
+ project TEXT NOT NULL,
+ request_id TEXT NOT NULL,
+ fingerprint TEXT NOT NULL,
+ receipt TEXT NOT NULL CHECK(json_valid(receipt)),
+ PRIMARY KEY(project,request_id)
+ );
+ PRAGMA user_version=3;
  COMMIT;`)
 	return err
 }

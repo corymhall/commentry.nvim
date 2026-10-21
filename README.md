@@ -20,7 +20,7 @@ The inbox works independently of Diffview and Snacks:
 The editor uses `Ctrl-s` to save and normal-mode `q` to cancel. The inbox uses
 `j`/`k` in its list to select a thread, `r` to reply, `x` to resolve or reopen,
 `gs` to send all new project comments to the agent queue,
-`c` to choose a comparison, `e` to expand or collapse surrounding code,
+`za` to fold source sections, `e` to expand or collapse surrounding code,
 `i` to inspect capture and Git details, `?` for help, `R` to refresh,
 and `q` to close. `Ctrl-h/j/k/l` moves between panels. Plain `h/j/k/l` retains
 normal text navigation. Closing an inbox panel with a native window command
@@ -49,11 +49,48 @@ The copied text remains the original capture. Supplying `attachment_id`
 replaces that location while preserving its ID. Agent attachment updates become
 unread, and do not resolve the conversation.
 
-Press `gl` to choose the original capture or a code attachment. Its focused
-comparison appears beside the conversation. Press `gf` to open the current
-code in the editing window you came from. Unchanged code can be found after
-insertions or a unique exact block move. Changed, missing or ambiguous locations
-offer the saved snapshot.
+Agents publish new review topics with Executor's `publish` tool. One call saves
+1 to 25 separate items with summaries, code locations and comparisons. Each
+submission has a durable `request_id` and each topic has a unique `key`.
+`publications.read` recovers the compact receipts after a lost response.
+Retrying the exact same ID and payload returns the original thread IDs;
+different content at that ID is rejected. A submission commits completely or
+rolls back completely.
+
+File sources may contain a focused excerpt. `first` and `last` remain absolute
+selection lines; `excerpt_first` is the absolute file line of `lines[0]`.
+For example, a selection at line 401 can use `first=401`, `last=401`,
+`excerpt_first=400` and three lines of text. Omitting `excerpt_first` retains
+the complete-file format. Excerpts follow uniquely matching code. Changed or
+ambiguous locations remain saved excerpts instead of guessing a destination.
+Neovim's own file captures continue to save complete snapshots automatically.
+
+The source pane shows saved agent comparisons, every attached code location,
+and the original context together. A review's chosen primary comparison appears
+first, with supporting evidence folded. Without an explicit choice, the first
+saved comparison stays first as more evidence arrives. Comparisons are labeled
+as saved before/after text, which may describe a proposal. Code sections
+show current local excerpts, or a focused diff labeled **Changed locally since
+attached** when they differ from the saved snapshot. Missing files show a
+**Saved snapshot** instead. Original code context and long copied excerpts start
+collapsed; `za` folds or unfolds any section. Fold choices survive refreshes.
+
+Agents use `revise` to maintain a short current review title and summary above
+the discussion, and choose `primary_comparison` by its saved ID. Updating a
+summary requires `expected_review` with its current review ID. The original
+capture and messages remain intact. An agent's original finding starts folded
+when its current review replaces that explanation. Human messages stay visible.
+`comparison_id` replaces an agent's own comparison while retaining its ID and
+prior content in history. These updates become unread without resolving the
+conversation or changing previously submitted requests.
+`archiveComparison` withdraws an agent's own misleading comparison from the
+active view while preserving its history.
+
+Press `gl` to jump to a section. `gf` opens the file for the code section under
+the source cursor in your original editing window. Saved comparisons without a
+code location never guess a file. In other panels, `gf` uses the source section
+or defaults to the first code location. Changed or ambiguous destinations stay
+visible in the inbox. Visual `r` quotes include the section's location or label.
 
 Code buffers show gutter markers for open threads loaded from the inbox, with a
 range highlight and short reply preview for the active thread. Markers update
@@ -108,8 +145,9 @@ fail visibly and never fall back to local writes. Offline capture is deferred.
 `--directory` selects the local connection/configuration directory.
 
 In codemode, discover tools in the installed app namespace, normally
-`commentry`. Use `list`, `read`, `create`, `reply`, `finish`, `attach`, `comparison`,
-`readState`, `resolve`, `changes`, and `revision`. A delivered request supplies
+`commentry`. Use `publish`, `publications.read`, `list`, `read`, `create`, `reply`, `finish`, `attach`, `comparison`,
+`revise`, `archiveComparison`, `readState`, `resolve`, `changes`, and `revision`.
+A delivered request supplies
 its thread and claim IDs. `finish` saves the answer and completes those claims
 atomically without resolving the conversation. `reply` adds a comment without
 completing a delivery claim. The packaged `commentry` skill explains this flow.
@@ -131,7 +169,7 @@ matching other machines' checkout paths is not automatic.
 than the local `You` label are incoming activity. Own replies do not clear unread
 messages. List previews leave unread state intact. `Enter`, or moving into the
 conversation panel, marks the displayed activity read. Agent comparisons appear
-as labeled attachments with instructions for viewing them using `c`.
+automatically as labeled sections in the source pane.
 A newer concurrent reply
 stays unread. `u` explicitly toggles read/unread. Agent CLI reads never consume
 the human reader's unread state.
@@ -306,7 +344,7 @@ The source pane compares the surrounding region with the current buffer or
 file. Changes above the selected region are accounted for. When the selected
 code changes, the thread remains in the list with an `Outdated` label and an
 explicitly approximate diff. Missing files retain the original excerpt.
-Original captures remain available through `c`. Resolution and location state
+Original captures remain in the Original context section. Resolution and location state
 are independent. Complex moves can require an agent-authored comparison.
 
 Projects use the canonical Git worktree root, or the containing directory
@@ -350,8 +388,8 @@ The response contains `{"ok":true,"result":"t-..."}`. Use that returned ID:
 ```
 
 Omit `project` from `list` to list every project. Comparison text is recorded
-verbatim. Select `agent` with `c` to view all attached comparisons in one
-scrollable view, each labeled with its author and timestamp. This never
+verbatim. All attached comparisons appear automatically in the source pane,
+each labeled with its author and timestamp. This never
 overwrites the original capture or edits source files. Authors are
 caller-provided labels. Failed requests return
 `ok: false` and exit nonzero. `summary: true` excludes full buffer snapshots from

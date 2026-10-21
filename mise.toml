@@ -90,20 +90,20 @@ run = "npm install --prefix integrations/executor --ignore-scripts --no-package-
 
 [tasks.test_executor]
 description = "Test Executor inbox operations against isolated SQLite"
-run = "node --disable-warning=ExperimentalWarning --test tests/executor*.test.ts"
+run = "node --import ./tests/executor_loader.mjs --disable-warning=ExperimentalWarning --test tests/executor*.test.ts"
 
 [tasks.format_executor]
 description = "Format Executor TypeScript sources"
-run = "integrations/executor/node_modules/.bin/prettier --write 'integrations/executor/*.{ts,json}' 'tests/executor*.ts' scripts/agent-trial.ts"
+run = "integrations/executor/node_modules/.bin/prettier --write 'integrations/executor/*.{ts,json}' 'tests/executor*.ts' tests/executor_loader.mjs scripts/agent-trial.ts"
 
 [tasks.lint_executor]
 description = "Type-check and check formatting of the Executor app"
 run = """
-integrations/executor/node_modules/.bin/prettier --check 'integrations/executor/*.{ts,json}' 'tests/executor*.ts' scripts/agent-trial.ts
+integrations/executor/node_modules/.bin/prettier --check 'integrations/executor/*.{ts,json}' 'tests/executor*.ts' tests/executor_loader.mjs scripts/agent-trial.ts
 integrations/executor/node_modules/.bin/tsc --ignoreConfig --noEmit --strict --skipLibCheck --module nodenext --moduleResolution nodenext --target es2022 integrations/executor/index.ts
 """
 
 
 [tasks.agent_trials]
 description = "Run isolated Commentry consumer trial fixtures"
-run = "node --disable-warning=ExperimentalWarning scripts/agent-trial.ts"
+run = "node --import ./tests/executor_loader.mjs --disable-warning=ExperimentalWarning scripts/agent-trial.ts"

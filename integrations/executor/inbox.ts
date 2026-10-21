@@ -8,6 +8,7 @@ export interface Source {
   path?: string;
   first?: number;
   last?: number;
+  excerpt_first?: number;
   origin?: string;
   filetype?: string;
   modified?: boolean;
@@ -38,6 +39,13 @@ export interface Event {
   claim_id?: string;
   queue_id?: string;
 }
+export interface Review {
+  id: string;
+  title: string;
+  summary: string;
+  author: string;
+  at: string;
+}
 export interface Queued {
   id: string;
   message: string;
@@ -62,6 +70,10 @@ export interface Thread {
   resolved: boolean;
   messages: Message[];
   comparisons: Event[];
+  primary_comparison?: string;
+  review?: Review;
+  review_history?: Review[];
+  comparison_history?: Event[];
   queue: Queued[];
   unread: boolean;
   incoming?: string;
@@ -78,6 +90,8 @@ export interface Agent {
 }
 export interface Request {
   action: string;
+  request_id?: string;
+  items?: import("./publish.js").PublishItem[];
   thread?: string;
   project?: string;
   author?: string;
@@ -86,6 +100,9 @@ export interface Request {
   text?: string;
   source?: Source;
   attachment_id?: string;
+  comparison_id?: string;
+  primary_comparison?: string;
+  expected_review?: string;
   filter?: string;
   summary?: boolean;
   resolved?: boolean;
@@ -130,8 +147,12 @@ export function validateSource(source: Source) {
       Number.isInteger(source.last) &&
       source.first! >= 1 &&
       source.last! >= source.first! &&
-      source.last! <= source.lines.length,
-    "invalid source range",
+      (source.excerpt_first === undefined ||
+        (Number.isSafeInteger(source.excerpt_first) &&
+          source.excerpt_first >= 1)) &&
+      source.first! >= (source.excerpt_first ?? 1) &&
+      source.last! < (source.excerpt_first ?? 1) + source.lines.length,
+    "invalid source range: lines must cover first..last; for an excerpt set excerpt_first to the file line of lines[0]",
   );
   requireThat(
     source.filetype === undefined ||
@@ -264,12 +285,13 @@ export function read(sql: SqlReader, r: Request): unknown {
 function sourceExcerpt(source: Source) {
   let excerpt: Source & { excerpt_first?: number } = source;
   if (source.kind === "file") {
-    const first = Math.max(0, source.first! - 5),
-      last = Math.min(source.lines.length, source.last! + 4);
+    const origin = source.excerpt_first ?? 1;
+    const first = Math.max(0, source.first! - origin - 4),
+      last = Math.min(source.lines.length, source.last! - origin + 5);
     excerpt = {
       ...source,
       lines: source.lines.slice(first, last),
-      excerpt_first: first + 1,
+      excerpt_first: first + origin,
     };
   }
   return excerpt;
@@ -308,6 +330,7 @@ function payload(t: Thread, mode: string) {
         source: sourceExcerpt(a.source),
       })),
       messages: t.messages,
+      ...(t.review ? { review: t.review } : {}),
     })
   );
 }
@@ -341,13 +364,16 @@ function transition(t: Thread, r: Request) {
       "Delivery failed or its acceptance is unknown. Inspect before retrying.";
   } else q.status = r.action === "complete" ? "complete" : "cancelled";
 }
-function mutateInside(sql: SqlReader, r: Request): unknown {
+// The caller must own the synchronous SQL transaction.
+export function mutateInside(sql: SqlReader, r: Request): unknown {
   requireThat(
     [
       "create",
       "reply",
       "resolve",
       "comparison",
+      "archive-comparison",
+      "revise",
       "attach",
       "read-state",
       "queue",
@@ -525,7 +551,7 @@ function mutateInside(sql: SqlReader, r: Request): unknown {
       result = attachment;
       break;
     }
-    case "comparison":
+    case "comparison": {
       requireThat(
         typeof r.before === "string" &&
           typeof r.after === "string" &&
@@ -535,9 +561,76 @@ function mutateInside(sql: SqlReader, r: Request): unknown {
       e.before = r.before;
       e.after = r.after;
       e.label = r.label;
-      t.comparisons.push(e);
+      if (r.comparison_id !== undefined) {
+        const index = t.comparisons.findIndex((c) => c.id === r.comparison_id);
+        requireThat(index >= 0, "unknown comparison");
+        requireThat(
+          t.comparisons[index].author === author,
+          "cannot replace another author's comparison",
+        );
+        (t.comparison_history ??= []).push(t.comparisons[index]);
+        t.comparisons[index] = { ...e, id: r.comparison_id };
+        result = t.comparisons[index];
+      } else t.comparisons.push(e);
       if (author !== "You") t.incoming = e.id;
       break;
+    }
+    case "archive-comparison": {
+      const index = t.comparisons.findIndex((c) => c.id === r.comparison_id);
+      requireThat(index >= 0, "unknown comparison");
+      requireThat(
+        t.comparisons[index].author === author,
+        "cannot archive another author's comparison",
+      );
+      const archived = t.comparisons.splice(index, 1)[0];
+      (t.comparison_history ??= []).push(archived);
+      if (t.primary_comparison === archived.id) delete t.primary_comparison;
+      if (author !== "You") t.incoming = e.id;
+      break;
+    }
+    case "revise": {
+      const previous = t.review;
+      requireThat(
+        !previous || previous.author === author,
+        "cannot revise another author's review",
+      );
+      requireThat(
+        previous
+          ? r.expected_review === previous.id
+          : r.expected_review === undefined,
+        "review changed; read it before revising",
+      );
+      const title = r.title ?? previous?.title;
+      const summary = r.body ?? previous?.summary;
+      requireThat(
+        label(title) && nonempty(summary),
+        "review requires a title and summary body",
+      );
+      requireThat(
+        r.primary_comparison === undefined ||
+          r.primary_comparison === "" ||
+          t.comparisons.some((c) => c.id === r.primary_comparison),
+        "unknown primary comparison",
+      );
+      (t.review_history ??= []).push(
+        previous ?? {
+          id: t.messages[0].id,
+          title: t.title,
+          summary: t.messages[0].body,
+          author: t.messages[0].author,
+          at: t.created_at,
+        },
+      );
+      t.review = { id: e.id, title, summary, author, at };
+      t.title = title;
+      if (r.primary_comparison !== undefined) {
+        if (r.primary_comparison) t.primary_comparison = r.primary_comparison;
+        else delete t.primary_comparison;
+      }
+      if (author !== "You") t.incoming = e.id;
+      result = t.review;
+      break;
+    }
     case "resolve":
       requireThat(
         typeof r.resolved === "boolean",

@@ -105,10 +105,17 @@ local ok, err = xpcall(function()
         })
         assert(store.create({project = capture.project, title = "Explain this test failure", body = "Include both candidate locations in this error.", source = {kind = "text", lines = {"Found two matching excerpts.", "Unable to choose a destination."}}}))
         assert(store.create({project = capture.project, title = "A general project question", body = "Can we make the next milestone smaller?", source = {kind = "text", lines = {}, origin = "general"}}))
-        local question = assert(store.create({project = capture.project, title = "Where is the retry deadline handled?", body = "Can you attach the implementation so I can review it here?", source = {kind = "text", lines = {"From our chat: retries share a ten second deadline."}, origin = "clipboard"}}))
+        local question = assert(store.create({project = capture.project, title = "Return errors at the retry deadline", author = "Codex", body = "The timeout branch returns nil without explaining why. The parser wrapper and tests also need review.", source = {kind = "text", lines = {"From our chat: retries share a ten second deadline."}, origin = "clipboard"}}))
         local location = assert(require("commentry.inbox.source").capture(buf, 3, 6))
+        local excerpt_first = math.max(1, location.source.first - 1)
+        location.source.lines = vim.list_slice(location.source.lines, excerpt_first, location.source.last + 1)
+        location.source.excerpt_first = excerpt_first
         assert(store.update(question, {kind = "attach", label = "Retry implementation", source = location.source, author = "Codex"}))
-        assert(store.update(question, {kind = "reply", author = "Codex", body = "The deadline is checked before each attempt. Use gf to inspect this code, then gC to return and reply."}))
+        local example = assert(store.update(question, {kind = "comparison", label = "Timeout result before -> after the local fix", author = "Codex", before = 'request(url) -> nil\n', after = 'request(url) -> nil, "timeout"\n'}))
+        assert(store.update(question, {kind = "comparison", label = "Implementation before -> after the local fix", author = "Codex", before = 'if clock() >= deadline then return nil end\n', after = 'if clock() >= deadline then return nil, "timeout" end\n'}))
+        assert(store.update(question, {kind = "comparison", label = "Regression test for the timeout error", author = "Codex", before = 'assert.is_nil(request(url))\n', after = 'local result, err = request(url)\nassert.is_nil(result)\nassert.are.equal("timeout", err)\n'}))
+        assert(store.update(question, {kind = "revise", title = "Timeouts fail without an explanation", author = "Codex", body = "When retries reach the deadline, callers receive nil with no reason. They cannot distinguish a timeout from another failure.\n\nThe local fix returns a timeout error. Please review the visible result beside this thread. Implementation and test evidence are folded below it.", primary_comparison = example.id}))
+        assert(store.update(question, {kind = "reply", author = "You", body = "Will callers still receive partial results?"}))
         vim.api.nvim_buf_set_lines(buf, 0, 0, false, {"-- Requests share one deadline across all attempts."})
         _G.commentry_capture_view = require("commentry.inbox").open(nil, {thread = question})
         return true
@@ -124,6 +131,7 @@ local ok, err = xpcall(function()
       for row, line in ipairs(vim.api.nvim_buf_get_lines(view.source_buf, 0, -1, false)) do
         if line:find('if clock()', 1, true) then
           vim.api.nvim_win_set_cursor(view.source_win, {row, 0})
+          vim.cmd('normal! zv')
           break
         end
       end

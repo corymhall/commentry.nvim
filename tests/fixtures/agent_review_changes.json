@@ -1,0 +1,17 @@
+{
+  "request": "Compare this branch with the original implementation. Review only changes introduced here, taking earlier parent-branch decisions into account. Add what is different to the Commentry inbox so I can review and respond there.",
+  "trees": {
+    "original": {
+      "settings.ts": "export const settings = { retries: 5, concurrency: 4, logFormat: 'text' as const };\n",
+      "README.md": "# Worker\n\nRetries default to five. Tasks run with concurrency four. Logs are plain text.\n"
+    },
+    "parent": {
+      "settings.ts": "export const settings = { retries: 3, concurrency: 4, logFormat: 'text' as const };\n",
+      "README.md": "# Worker\n\nRetries default to three. Tasks run with concurrency four. Logs are plain text.\n"
+    },
+    "branch": {
+      "settings.ts": "export const settings = { retries: 3, concurrency: 8, logFormat: 'json' as const };\n",
+      "README.md": "# Worker\n\nRetries default to three. Tasks run with concurrency eight. Each log line is a JSON object for ingestion by the collector.\n"
+    }
+  }
+}

@@ -18,6 +18,8 @@ func (s *Store) remoteExecute(ctx context.Context, r Request) (any, error) {
 		return nil, err
 	}
 	switch r.Action {
+	case "publish", "publication":
+		return decodeRemote[PublishReceipt](raw)
 	case "list":
 		if r.Summary {
 			return decodeRemote[[]map[string]any](raw)
@@ -27,6 +29,8 @@ func (s *Store) remoteExecute(ctx context.Context, r Request) (any, error) {
 		return decodeRemote[Thread](raw)
 	case "create":
 		return decodeRemote[string](raw)
+	case actionRevise:
+		return decodeRemote[Review](raw)
 	case "attach":
 		return decodeRemote[Attachment](raw)
 	case "queue":

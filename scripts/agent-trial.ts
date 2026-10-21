@@ -8,6 +8,7 @@ import {
 import { join } from "node:path";
 import { database } from "../tests/executor_sql.ts";
 import { mutate, read, type Thread } from "../integrations/executor/inbox.ts";
+import { publish, publication } from "../integrations/executor/publish.ts";
 import {
   readRequests,
   requestContext,
@@ -15,7 +16,9 @@ import {
 
 const [action, directory] = process.argv.slice(2);
 if (!directory)
-  throw Error("Usage: node scripts/agent-trial.ts seed|call|inspect DIRECTORY");
+  throw Error(
+    "Usage: node scripts/agent-trial.ts seed|seed-review|call|inspect DIRECTORY",
+  );
 mkdirSync(directory, { recursive: true });
 const { sql, close } = database(join(directory, "inbox.sqlite3"));
 const manifest = join(directory, "scenarios.json");
@@ -47,6 +50,49 @@ function submit(project: string, thread: string, message?: string) {
 }
 const tools = [
   {
+    path: "commentry.publish",
+    input:
+      "{project,request_id,author,items:[{key,title,body,source?,attachments?,comparisons?,primary_comparison?}]}",
+    description:
+      "Publish complete review topics atomically. Excerpts use excerpt_first, the absolute file line of lines[0]. Comparison keys and primary choice are local to each item. Same request ID and payload return original receipts; changed payload conflicts.",
+  },
+  {
+    path: "commentry.publications.read",
+    input: "{project,request_id}",
+    description:
+      "Recover compact complete receipts after a lost response, or return missing. Does not acknowledge human reads.",
+  },
+  {
+    path: "commentry.create",
+    input:
+      "{project:string,title?:string,body:string,author?:string,source?:Source}",
+    description: "Create an inbox topic, preserving its original capture.",
+  },
+  {
+    path: "commentry.list",
+    input: "{project:string,summary?:boolean}",
+    description: "List project conversations without marking them read.",
+  },
+  {
+    path: "commentry.attach",
+    input:
+      "{thread,label,author?,attachment_id?,source:{kind:'file',path,first,last,lines:string[],excerpt_first?,filetype?,git?}}",
+    description:
+      "Attach a named implementation location. Supply full file lines or excerpt_first for an excerpt. attachment_id refreshes it.",
+  },
+  {
+    path: "commentry.revise",
+    input: "{thread,author?,title?,body?,primary_comparison?,expected_review?}",
+    description:
+      "Maintain current review summary/title and primary comparison. First use requires title/body; subsequent own updates require expected_review=current review.id. Empty primary_comparison clears explicit selection. Preserves discussion and history.",
+  },
+  {
+    path: "commentry.archiveComparison",
+    input: "{thread,comparison_id,author?}",
+    description:
+      "Withdraw your own comparison from active evidence while retaining it in history. Clears explicit primary selection when archived.",
+  },
+  {
     path: "commentry.requests.read",
     input:
       "{project:string,items:[{thread:string,claim_ids:string[]}],cursor?:number}",
@@ -68,8 +114,9 @@ const tools = [
   },
   {
     path: "commentry.comparison",
-    input: "{thread,author,label,before,after}",
-    description: "Attach focused comparison; does not finish claims.",
+    input: "{thread,author,label,before,after,comparison_id?}",
+    description:
+      "Attach focused comparison or replace your own using comparison_id, retaining history; does not finish claims.",
   },
   {
     path: "commentry.read",
@@ -79,7 +126,27 @@ const tools = [
   },
 ];
 try {
-  if (action === "seed") {
+  if (action === "seed-review") {
+    // Authors get the broad request and raw trees, without a topic manifest.
+    const fixture = JSON.parse(
+      readFileSync("tests/fixtures/agent_review_changes.json", "utf8"),
+    );
+    for (const [tree, files] of Object.entries(fixture.trees)) {
+      const destination = join(directory, "source", tree);
+      mkdirSync(destination, { recursive: true });
+      for (const [path, content] of Object.entries(
+        files as Record<string, string>,
+      ))
+        writeFileSync(join(destination, path), content);
+    }
+    writeFileSync(join(directory, "request.txt"), fixture.request + "\n");
+    console.log(
+      JSON.stringify({
+        request: join(directory, "request.txt"),
+        source: join(directory, "source"),
+      }),
+    );
+  } else if (action === "seed") {
     const scenarios: any[] = [];
     const project = "/commentry-trials/five";
     const questions = [
@@ -239,6 +306,26 @@ try {
           break;
         case "commentry.read":
           value = get(input.input.thread);
+          break;
+        case "commentry.publish":
+          value = await publish(sql, input.input);
+          break;
+        case "commentry.publications.read":
+          value = publication(sql, input.input.project, input.input.request_id);
+          break;
+        case "commentry.list":
+          value = read(sql, { ...input.input, action: "list" });
+          break;
+        case "commentry.create":
+        case "commentry.attach":
+        case "commentry.revise":
+          value = call({
+            ...input.input,
+            action: input.tool.split(".").at(-1),
+          });
+          break;
+        case "commentry.archiveComparison":
+          value = call({ ...input.input, action: "archive-comparison" });
           break;
         case "commentry.finish":
           value = call({ ...input.input, action: "finish" });

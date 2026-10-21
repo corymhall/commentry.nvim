@@ -15,13 +15,15 @@ import (
 )
 
 const (
-	actionRead       = "read"
-	actionList       = "list"
-	actionQueue      = "queue"
-	actionFinish     = "finish"
-	actionResolve    = "resolve"
-	actionComparison = "comparison"
-	actionReadState  = "read-state"
+	actionRead              = "read"
+	actionList              = "list"
+	actionQueue             = "queue"
+	actionFinish            = "finish"
+	actionResolve           = "resolve"
+	actionComparison        = "comparison"
+	actionReadState         = "read-state"
+	actionRevise            = "revise"
+	actionArchiveComparison = "archive-comparison"
 )
 
 // NewRootCmd constructs an independent command tree for each invocation.
@@ -33,10 +35,10 @@ func NewRootCmd() *cobra.Command {
 		RunE: func(command *cobra.Command, _ []string) error { return command.Help() },
 	}
 	root.PersistentFlags().StringVar(&directory, "directory", "", "Inbox data directory, defaults to COMMENTRY_INBOX_DIR or Neovim's data directory")
-	for _, action := range []string{actionList, actionRead, "create", "reply", actionFinish, actionResolve, actionComparison, "attach", actionReadState, actionQueue, "claim", "complete", "cancel", "retry", "revision", "changes"} {
+	for _, action := range []string{actionList, actionRead, "create", "reply", actionFinish, actionResolve, actionComparison, actionArchiveComparison, actionRevise, "attach", actionReadState, actionQueue, "claim", "complete", "cancel", "retry", "revision", "changes"} {
 		root.AddCommand(newAction(action, &directory))
 	}
-	root.AddCommand(newRPC(&directory), newWatch(&directory), newCapture(&directory), newRex(&directory), newAgent(&directory), newExecutor(&directory))
+	root.AddCommand(newPublish(&directory), newAction("publication", &directory), newRPC(&directory), newWatch(&directory), newCapture(&directory), newRex(&directory), newAgent(&directory), newExecutor(&directory))
 	return root
 }
 
@@ -136,7 +138,7 @@ func newAction(action string, directory *string) *cobra.Command {
 	command := &cobra.Command{Use: action, Short: actionDescription(action), Args: cobra.NoArgs}
 	flags := command.Flags()
 	switch action {
-	case actionRead, "attach", "reply", actionFinish, actionResolve, actionComparison, actionReadState, actionQueue, "complete", "cancel", "retry":
+	case actionRead, "attach", "reply", actionFinish, actionResolve, actionComparison, actionArchiveComparison, actionRevise, actionReadState, actionQueue, "complete", "cancel", "retry":
 		command.Use += " <thread>"
 		command.Args = cobra.ExactArgs(1)
 	}
@@ -154,15 +156,18 @@ func newAction(action string, directory *string) *cobra.Command {
 }
 
 type actionOptions struct {
-	request                                 inbox.Request
-	text, sourceFile, beforeFile, afterFile string
-	resolved, read                          bool
+	request                                                    inbox.Request
+	text, sourceFile, beforeFile, afterFile, primaryComparison string
+	resolved, read                                             bool
 }
 
 func bindActionFlags(command *cobra.Command, options *actionOptions) {
 	request := &options.request
 	action := request.Action
 	flags := command.Flags()
+	if action == "publication" {
+		flags.StringVar(&request.RequestID, "request-id", "", "Publication request ID")
+	}
 	switch action {
 	case "list":
 		flags.StringVar(&request.Filter, "filter", "all", "all, unread, read, open, resolved, or queued")
@@ -172,6 +177,11 @@ func bindActionFlags(command *cobra.Command, options *actionOptions) {
 		flags.StringVar(&request.Body, "body", "", "Comment body")
 		flags.StringVar(&options.text, "text", "", "Copied text to capture")
 		flags.StringVar(&options.sourceFile, "source-file", "", "JSON file containing an immutable source capture")
+	case actionRevise:
+		flags.StringVar(&request.Title, "title", "", "Current review title")
+		flags.StringVar(&request.Body, "body", "", "Current review summary")
+		flags.StringVar(&request.ExpectedReview, "expected-review", "", "Current review version required when revising")
+		flags.StringVar(&options.primaryComparison, "primary-comparison", "", "Comparison to show first; empty clears the selection")
 	case "attach":
 		flags.StringVar(&options.sourceFile, "source-file", "", "JSON file containing a file snapshot")
 		flags.StringVar(&request.Label, "label", "", "Location label")
@@ -186,7 +196,10 @@ func bindActionFlags(command *cobra.Command, options *actionOptions) {
 	case actionReadState:
 		flags.BoolVar(&options.read, actionRead, true, "Set false to mark unread")
 		flags.StringVar(&request.Seen, "seen", "", "Incoming version displayed to the reader")
+	case actionArchiveComparison:
+		flags.StringVar(&request.ComparisonID, "comparison-id", "", "Your comparison to withdraw from the active review")
 	case actionComparison:
+		flags.StringVar(&request.ComparisonID, "comparison-id", "", "Replace your comparison, preserving its ID")
 		flags.StringVar(&options.beforeFile, "before-file", "", "File containing the comparison's before text")
 		flags.StringVar(&options.afterFile, "after-file", "", "File containing the comparison's after text")
 		flags.StringVar(&request.Label, "label", "", "Comparison label")
@@ -212,6 +225,9 @@ func (options *actionOptions) prepare(command *cobra.Command, args []string) err
 	if len(args) > 0 {
 		request.Thread = args[0]
 	}
+	if action == actionRevise && flags.Changed("primary-comparison") {
+		request.PrimaryComparison = &options.primaryComparison
+	}
 	if action == actionResolve {
 		request.Resolved = &options.resolved
 	}
@@ -221,16 +237,8 @@ func (options *actionOptions) prepare(command *cobra.Command, args []string) err
 	if flags.Changed("text") {
 		request.Text = &options.text
 	}
-	if options.sourceFile != "" {
-		raw, err := readInputFile(options.sourceFile)
-		if err != nil {
-			return err
-		}
-		var source inbox.Source
-		if err = json.Unmarshal(raw, &source); err != nil {
-			return err
-		}
-		request.Source = &source
+	if err := options.prepareSource(); err != nil {
+		return err
 	}
 	if action == actionComparison {
 		before, err := readInputFile(options.beforeFile)
@@ -248,15 +256,36 @@ func (options *actionOptions) prepare(command *cobra.Command, args []string) err
 	return nil
 }
 
+func (options *actionOptions) prepareSource() error {
+	if options.sourceFile == "" {
+		return nil
+	}
+	raw, err := readInputFile(options.sourceFile)
+	if err != nil {
+		return err
+	}
+	var source inbox.Source
+	if err = json.Unmarshal(raw, &source); err != nil {
+		return err
+	}
+	options.request.Source = &source
+	return nil
+}
+
 func readInputFile(filename string) ([]byte, error) {
 	// #nosec G304 -- These are local files explicitly selected by CLI flags.
 	return os.ReadFile(filename)
 }
 
 func actionDescription(action string) string {
+	if action == "publication" {
+		return "Look up the receipt for an atomic publication"
+	}
 	descriptions := map[string]string{
-		"attach":   "Add or replace a named code attachment",
-		actionList: "List project threads and filter their state", actionRead: "Read a thread without marking it read",
+		"attach":                "Add or replace a named code attachment",
+		actionArchiveComparison: "Withdraw your comparison while preserving its history",
+		actionRevise:            "Revise the review summary and choose primary evidence",
+		actionList:              "List project threads and filter their state", actionRead: "Read a thread without marking it read",
 		"create": "Create a standalone or captured-text thread", "reply": "Reply to a thread", actionResolve: "Resolve or reopen a conversation",
 		"finish":         "Reply and complete the specified active claims in one transaction",
 		actionComparison: "Attach an agent-authored before/after comparison", actionReadState: "Mark a displayed incoming version read, or mark unread",

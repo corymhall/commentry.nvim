@@ -106,40 +106,42 @@ end
 function M.compare(thread, mode, context)
   context = context or 4
   local source = thread.source
-  if mode == "agent" then
-    if #thread.comparisons == 0 then
-      return nil, "No agent comparison attached"
-    end
-    local lines, headings, diff_rows = {}, {}, {}
-    local has_diff = false
-    for index, comparison in ipairs(thread.comparisons) do
-      if index > 1 then
-        lines[#lines + 1] = ""
-      end
-      headings[#lines + 1] = true
-      lines[#lines + 1] = ("Comparison %d/%d / %s"):format(index, #thread.comparisons, comparison.label)
-      lines[#lines + 1] = comparison.author .. " / " .. comparison.at
-      lines[#lines + 1] = ""
-      local diff = vim.diff(comparison.before, comparison.after, { result_type = "unified", ctxlen = context })
-      has_diff = has_diff or diff ~= ""
-      for _, line in ipairs(vim.split(diff == "" and comparison.after or diff, "\n", { plain = true })) do
-        if diff ~= "" then
-          diff_rows[#lines + 1] = true
-        end
-        lines[#lines + 1] = line
-      end
-    end
-    return {
-      lines = lines,
-      headings = headings,
-      diff_rows = diff_rows,
-      label = "Agent comparisons / " .. #thread.comparisons,
-      filetype = has_diff and "diff" or "text",
-      outdated = false,
-    }
-  end
   if source.kind ~= "file" then
     return { lines = source.lines, label = "Original capture / no file anchor", filetype = "text", outdated = false }
+  end
+  if source.excerpt_first then
+    local origin = source.excerpt_first
+    local first = math.max(origin, source.first - context)
+    local last = math.min(origin + #source.lines - 1, source.last + context)
+    local before = slice(source.lines, first - origin + 1, last - origin + 1)
+    local current = current_lines(thread)
+    local target = current and M.locate(thread)
+    if mode == "original" or not target then
+      return {
+        lines = before,
+        first = first,
+        filetype = source.filetype or "text",
+        label = "Saved excerpt / " .. source.path .. ":" .. first .. "-" .. last,
+        outdated = current == nil or (mode ~= "original" and target == nil),
+        unavailable = current == nil,
+        unlocated = current ~= nil and mode ~= "original" and target == nil,
+      }
+    end
+    local current_first = math.max(1, target.first - (source.first - first))
+    local after = slice(current, current_first, target.last + last - source.last)
+    local diff = vim.diff(text(before), text(after), { result_type = "unified", ctxlen = context })
+    local live = vim.deepcopy(source)
+    live.lines, live.first, live.last, live.excerpt_first = current, target.first, target.last, nil
+    return {
+      lines = diff == "" and before or vim.split(diff, "\n", { plain = true }),
+      first = first,
+      current_first = current_first,
+      current_source = live,
+      label = "Saved excerpt -> current code",
+      filetype = diff == "" and (source.filetype or "text") or "diff",
+      changed = diff ~= "",
+      outdated = false,
+    }
   end
   local first, last = math.max(1, source.first - context), math.min(#source.lines, source.last + context)
   local before = slice(source.lines, first, last)
@@ -175,10 +177,122 @@ function M.compare(thread, mode, context)
       .. "-"
       .. source.last,
     filetype = diff == "" and (source.filetype or "text") or "diff",
+    changed = diff ~= "",
     outdated = outdated,
     first = first,
     current_first = map_line(first, hunks),
+    current_source = #current > 0 and vim.tbl_extend("force", source, {
+      lines = current,
+      first = math.min(#current, map_line(source.first, hunks)),
+      last = math.min(#current, map_line(source.last, hunks, true)),
+    }) or nil,
   }
+end
+
+-- Keep the chosen explanation first. New supporting evidence must not change
+-- the first screen. Each section retains its own navigation coordinates.
+function M.sections(thread, context)
+  local sections, outdated = {}, false
+  local function add(id, title, detail, comparison, source, collapsed)
+    sections[#sections + 1] = {
+      id = id,
+      title = title,
+      detail = detail,
+      comparison = comparison,
+      source = source,
+      collapsed = collapsed or false,
+    }
+  end
+  local comparisons = thread.comparisons or {}
+  local primary = comparisons[1]
+  for _, event in ipairs(comparisons) do
+    if event.id == thread.primary_comparison then
+      primary = event
+      break
+    end
+  end
+  local ordered = {}
+  if primary then
+    ordered[1] = primary
+  end
+  for _, event in ipairs(comparisons) do
+    if event ~= primary then
+      ordered[#ordered + 1] = event
+    end
+  end
+  for index, event in ipairs(ordered) do
+    local diff = vim.diff(event.before, event.after, { result_type = "unified", ctxlen = context or 4 })
+    add(
+      "comparison:" .. (event.id or index),
+      (
+        index > 1 and "Supporting comparison / "
+        or thread.primary_comparison and "Primary comparison / "
+        or "Saved comparison / "
+      ) .. event.label,
+      "Saved by " .. event.author .. " / " .. event.at:sub(1, 16):gsub("T", " "),
+      {
+        lines = vim.split(diff == "" and event.after or diff, "\n", { plain = true }),
+        filetype = diff == "" and "text" or "diff",
+      },
+      nil,
+      index > 1
+    )
+  end
+  local locations = thread.attachments or {}
+  if #locations == 0 and thread.source.kind == "file" then
+    locations = { { id = "original", label = "Original capture", source = thread.source } }
+  end
+  local original_shown = false
+  for _, location in ipairs(locations) do
+    local located = vim.tbl_extend("force", thread, { source = location.source })
+    local comparison = M.compare(located, "since", context)
+    local source = location.source
+    local title = comparison.unlocated and "Saved excerpt / "
+      or comparison.unavailable and "Saved snapshot / "
+      or comparison.changed and "Changed locally since attached / "
+      or "Current code / "
+    local detail = comparison.unlocated and "Location changed or ambiguous / "
+      or comparison.unavailable and "File unavailable / "
+      or comparison.changed and "Saved snapshot -> working tree / "
+      or "Matches saved snapshot / "
+    local target = comparison.current_source
+    local path = source.path
+      .. ":"
+      .. (target and target.first or source.first)
+      .. "-"
+      .. (target and target.last or source.last)
+    -- Plain live excerpts use current coordinates even when lines moved above.
+    if comparison.current_first and not comparison.changed and not comparison.unavailable then
+      comparison.first = comparison.current_first
+    end
+    add(
+      "location:" .. location.id,
+      title .. path,
+      detail .. location.label,
+      comparison,
+      target or source,
+      primary ~= nil
+    )
+    outdated = outdated or comparison.outdated
+    if location.id == "original" and not comparison.changed then
+      original_shown = true
+    end
+  end
+  if not original_shown and (thread.source.kind == "file" or #thread.source.lines > 0) then
+    local source = thread.source
+    add(
+      "original",
+      "Original context" .. (source.path and " / " .. source.path or ""),
+      "Captured when this conversation started",
+      M.compare(thread, "original", context),
+      source,
+      source.kind == "file" or #source.lines > 6
+    )
+  end
+  if #sections == 0 then
+    add("empty", "Project conversation", "No code or excerpt attached", { lines = {}, filetype = "text" })
+  end
+  return sections, outdated
 end
 
 -- Attachments share capture comparison logic, but never replace thread.source.
@@ -215,6 +329,37 @@ function M.locate(thread)
     return nil, "Outdated location: file unavailable"
   end
   local source = thread.source
+  if source.excerpt_first then
+    local function unique(block)
+      local found
+      if #block == 0 then
+        return nil
+      end
+      for start = 1, #current - #block + 1 do
+        if vim.deep_equal(slice(current, start, start + #block - 1), block) then
+          if found then
+            return nil
+          end
+          found = start
+        end
+      end
+      return found
+    end
+    local start = unique(source.lines)
+    local first = start and (start + source.first - source.excerpt_first)
+    if not first then
+      first =
+        unique(slice(source.lines, source.first - source.excerpt_first + 1, source.last - source.excerpt_first + 1))
+    end
+    if first then
+      return {
+        path = vim.fs.joinpath(thread.project, source.path),
+        first = first,
+        last = first + source.last - source.first,
+      }
+    end
+    return nil, "Outdated location: selected excerpt changed or is ambiguous"
+  end
   local hunks = vim.diff(text(source.lines), text(current), { result_type = "indices", algorithm = "histogram" })
   local first, last = map_line(source.first, hunks), map_line(source.last, hunks, true)
   if

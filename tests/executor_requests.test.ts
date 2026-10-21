@@ -361,3 +361,125 @@ test("an independent title preserves the subject of a short question", () => {
     close();
   }
 });
+
+test("revised findings prioritize the human followup and saved summary while history retains the original", () => {
+  const { sql, close } = database();
+  try {
+    const thread = mutate(sql, {
+      action: "create",
+      project,
+      author: "codex",
+      body: "OBSOLETE_FINDING",
+      source: { kind: "text", lines: ["CAPTURE".repeat(700)] },
+    }) as string;
+    const review = mutate(sql, {
+      action: "revise",
+      thread,
+      author: "codex",
+      title: "Readable finding",
+      body: "CURRENT_SUMMARY",
+    }) as { id: string };
+    mutate(sql, {
+      action: "reply",
+      thread,
+      author: "You",
+      body: "HUMAN_FOLLOWUP",
+    });
+    const claim = submit(sql, thread);
+    mutate(sql, {
+      action: "revise",
+      thread,
+      author: "codex",
+      expected_review: review.id,
+      body: "LATER_SUMMARY",
+    });
+    const result = requestContext(sql, {
+      project,
+      thread,
+      claim_id: claim.claim_id,
+    });
+    assert.equal(result.earlier_messages, 1);
+    const text = result.context!.text;
+    assert.ok(text.indexOf("HUMAN_FOLLOWUP") < text.indexOf("CURRENT_SUMMARY"));
+    assert.ok(text.indexOf("CURRENT_SUMMARY") < text.indexOf("CAPTURE"));
+    assert.doesNotMatch(text, /OBSOLETE_FINDING|LATER_SUMMARY/);
+    const history = requestContext(sql, {
+      project,
+      thread,
+      claim_id: claim.claim_id,
+      section: "history",
+    });
+    assert.match(history.context!.text, /OBSOLETE_FINDING/);
+    assert.match(history.context!.text, /HUMAN_FOLLOWUP/);
+
+    const humanThread = create(sql, "ORIGINAL_HUMAN_QUESTION");
+    mutate(sql, {
+      action: "revise",
+      thread: humanThread,
+      author: "codex",
+      title: "Agent explanation",
+      body: "SUMMARY",
+    });
+    const humanClaim = submit(sql, humanThread);
+    const humanResult = requestContext(sql, {
+      project,
+      thread: humanThread,
+      claim_id: humanClaim.claim_id,
+    });
+    assert.equal(humanResult.earlier_messages, 0);
+    assert.match(humanResult.context!.text, /ORIGINAL_HUMAN_QUESTION/);
+  } finally {
+    close();
+  }
+});
+
+test("comparison metadata identifies selected primary evidence and oldest fallback", () => {
+  const { sql, close } = database();
+  try {
+    const thread = create(sql, "Review this");
+    const comparisons = ["Output example", "Implementation"].map(
+      (label) =>
+        mutate(sql, {
+          action: "comparison",
+          thread,
+          author: "codex",
+          label,
+          before: "before",
+          after: "after",
+        }) as { id: string },
+    );
+    const claim = submit(sql, thread);
+    const metadata = () =>
+      requestContext(sql, {
+        project,
+        thread,
+        claim_id: claim.claim_id,
+        section: "comparison",
+      })
+        .context!.text.split("\n")
+        .slice(1)
+        .map((line) => JSON.parse(line));
+    assert.deepEqual(
+      metadata().map((c) => c.primary),
+      [true, false],
+    );
+    mutate(sql, {
+      action: "revise",
+      thread,
+      author: "codex",
+      title: "Finding",
+      body: "Explanation",
+      primary_comparison: comparisons[1].id,
+    });
+    assert.deepEqual(
+      metadata().map((c) => c.primary),
+      [false, true],
+    );
+    assert.deepEqual(
+      metadata().map((c) => c.id),
+      comparisons.map((c) => c.id),
+    );
+  } finally {
+    close();
+  }
+});
