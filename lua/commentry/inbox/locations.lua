@@ -20,57 +20,81 @@ local function locations(thread)
   return items
 end
 
+local function display(buf)
+  local context = require("commentry.diffview").current_file_context(buf)
+  if context then
+    return vim.fs.joinpath(context.project, context.file_path), vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+  end
+  return vim.api.nvim_buf_get_name(buf)
+end
+
 function M.draw(buf)
-  if not vim.api.nvim_buf_is_loaded(buf) or vim.bo[buf].buftype ~= "" then
+  if not vim.api.nvim_buf_is_loaded(buf) then
     return
   end
   vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
-  local path = vim.api.nvim_buf_get_name(buf)
-  local marked = {}
+  local path, contents = display(buf)
+  if vim.bo[buf].buftype ~= "" and not contents then
+    return
+  end
+  local marked, cards, seen = {}, {}, {}
   for _, thread in ipairs(threads) do
     if not thread.resolved or thread.id == current then
       for _, attachment in ipairs(locations(thread)) do
         local source = attachment.source
         if source.kind == "file" and vim.fs.joinpath(thread.project, source.path) == path then
-          local target = Source.locate(vim.tbl_extend("force", thread, { source = source }))
+          local target = Source.locate(vim.tbl_extend("force", thread, { source = source }), contents)
           if target then
-            local row = target.first - 1
-            vim.api.nvim_buf_set_extmark(buf, ns, row, 0, {
-              sign_text = "C",
-              sign_hl_group = "CommentryInboxAccent",
-              priority = 90,
-            })
-            local opts = { priority = 90 }
-            if thread.id == current then
-              opts.end_row = target.last
-              opts.hl_group = "CommentryInboxSelection"
-              opts.hl_eol = true
-              if not marked[row] then
+            if contents then
+              local key = thread.id .. ":" .. target.first .. ":" .. target.last
+              if not seen[key] then
+                cards[#cards + 1] = { thread = thread, first = target.first, last = target.last }
+                seen[key] = true
+              end
+            else
+              local row = target.first - 1
+              vim.api.nvim_buf_set_extmark(buf, ns, row, 0, {
+                sign_text = "C",
+                sign_hl_group = "CommentryInboxAccent",
+                priority = 90,
+              })
+              local opts = { priority = 90 }
+              if thread.id == current then
+                opts.end_row = target.last
+                opts.hl_group = "CommentryInboxSelection"
+                opts.hl_eol = true
+              end
+              if thread.id == current and not marked[row] then
                 local message = thread.messages[#thread.messages]
+                local review = #thread.messages == 1 and thread.review
+                local author = review and review.author or message.author
+                local body = review and review.summary or message.body
                 opts.virt_text = {
-                  {
-                    Render.clip("  " .. message.author .. ": " .. message.body:gsub("%s+", " "), 70),
-                    "CommentryInboxMuted",
-                  },
+                  { Render.clip("  " .. author .. ": " .. body:gsub("%s+", " "), 70), "CommentryInboxMuted" },
                 }
+                opts.virt_text_pos = "eol"
                 marked[row] = true
               end
+              vim.api.nvim_buf_set_extmark(buf, ns, row, 0, opts)
             end
-            vim.api.nvim_buf_set_extmark(buf, ns, row, 0, opts)
           end
         end
       end
     end
   end
+  if contents then
+    require("commentry.inbox.cards").draw(buf, ns, cards)
+  end
 end
 
 function M.open_at_cursor()
-  local path, row = vim.api.nvim_buf_get_name(0), vim.api.nvim_win_get_cursor(0)[1]
+  local path, contents = display(vim.api.nvim_get_current_buf())
+  local row = vim.api.nvim_win_get_cursor(0)[1]
   local candidates, seen = {}, {}
   for _, thread in ipairs(threads) do
     for _, attachment in ipairs(locations(thread)) do
       if attachment.source.kind == "file" and vim.fs.joinpath(thread.project, attachment.source.path) == path then
-        local target = Source.locate(vim.tbl_extend("force", thread, { source = attachment.source }))
+        local target = Source.locate(vim.tbl_extend("force", thread, { source = attachment.source }), contents)
         if target and row >= target.first and row <= target.last and not seen[thread.id] then
           candidates[#candidates + 1], seen[thread.id] = thread, true
         end

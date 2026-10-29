@@ -65,6 +65,48 @@ describe("universal inbox", function()
     return result
   end
 
+  it("keeps a failed popup save editable and supports normal-mode save and cancel", function()
+    local thread = file({ "local value = 1" }, 1)
+    vim.api.nvim_set_current_buf(buf)
+    local Inbox = require("commentry.inbox")
+    local function mapping(buffer, lhs)
+      for _, map in ipairs(vim.api.nvim_buf_get_keymap(buffer, "n")) do
+        if map.lhs == lhs then
+          return map.callback
+        end
+      end
+      error("Missing popup mapping: " .. lhs)
+    end
+    Inbox.comment()
+    vim.cmd.stopinsert()
+    local popup = vim.api.nvim_get_current_buf()
+    vim.api.nvim_buf_set_lines(popup, 0, -1, false, { "Keep this draft", "across a failed save" })
+    local original = Store.create
+    Store.create = function()
+      return nil, "Simulated unavailable backend"
+    end
+    local ok, err = pcall(mapping(popup, "<CR>"))
+    Store.create = original
+    assert.is_true(ok, tostring(err))
+    assert.is_true(vim.api.nvim_buf_is_valid(popup))
+    mapping(popup, "<CR>")()
+    assert.is_false(vim.api.nvim_buf_is_valid(popup))
+    local threads = assert(Store.list(thread.project))
+    assert.are.same(2, #threads)
+    for _, saved in ipairs(threads) do
+      if saved.id ~= thread.id then
+        assert.are.same("Keep this draft\nacross a failed save", assert(Store.get(saved.id)).messages[1].body)
+      end
+    end
+    Inbox.comment()
+    vim.cmd.stopinsert()
+    popup = vim.api.nvim_get_current_buf()
+    vim.api.nvim_buf_set_lines(popup, 0, -1, false, { "Do not save" })
+    mapping(popup, "<Esc>")()
+    assert.is_false(vim.api.nvim_buf_is_valid(popup))
+    assert.are.same(2, #assert(Store.list(thread.project)))
+  end)
+
   it("quotes a visual source selection into an inline reply and saves before sending", function()
     local thread = file({ "local first = 1", "local second = 2", "return first + second" }, 1, 2)
     vim.api.nvim_buf_set_lines(buf, 0, 1, false, { "local first = 3" })
@@ -535,12 +577,15 @@ describe("universal inbox", function()
     local view = require("commentry.inbox").open("unread", { project = root })
     local Util = require("commentry.util")
     local original, message = Util.info, nil
+    local original_warn = Util.warn
     Util.info = function(value)
       message = value
     end
+    Util.warn = Util.info
     local ok, err = pcall(function()
       keys(view).gs()
-      assert.matches("saved 3 for delivery", message)
+      assert.matches("3 queued, not delivered", message)
+      assert.matches("Press S in the inbox", message)
       assert.are.same(1, #assert(Store.get(ids[1])).queue)
       assert.are.same(2, #assert(Store.get(ids[2])).queue)
       assert.are.same(2, #assert(Store.get(ids[3])).queue)
@@ -567,6 +612,7 @@ describe("universal inbox", function()
       assert.are.same("Nothing new to send. There are no new comments.", message)
     end)
     Util.info = original
+    Util.warn = original_warn
     assert.is_true(ok, tostring(err))
   end)
 

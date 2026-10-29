@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -24,8 +25,9 @@ func TestMain(m *testing.M) {
 }
 
 type rexFixture struct {
-	Agent  rexAgent `json:"agent"`
-	Reject bool     `json:"reject"`
+	Agent  rexAgent   `json:"agent"`
+	Others []rexAgent `json:"others,omitempty"`
+	Reject bool       `json:"reject"`
 }
 
 func fakeRexAction(filename string) error {
@@ -48,7 +50,7 @@ func fakeRexAction(filename string) error {
 	}
 	switch action {
 	case "agent_list":
-		return json.NewEncoder(os.Stdout).Encode(map[string]any{"agents": []rexAgent{fixture.Agent}})
+		return json.NewEncoder(os.Stdout).Encode(map[string]any{"agents": append([]rexAgent{fixture.Agent}, fixture.Others...)})
 	case "agent_get":
 		if args["target"] != fixture.Agent.ID {
 			return fmt.Errorf("agent changed")
@@ -164,6 +166,59 @@ func (f *fixture) queued(t *testing.T) string {
 	thread := f.execute(t, inbox.Request{Action: "create", Project: f.project, Body: "Explain this"}).(string)
 	f.execute(t, inbox.Request{Action: "queue", Thread: thread})
 	return thread
+}
+
+// TestWorktreeDiscoveryAndDelivery covers worktree fallback and scope.
+func TestWorktreeDiscoveryAndDelivery(t *testing.T) {
+	f := fakeRex(t)
+	git := func(directory string, args ...string) {
+		t.Helper()
+		// #nosec G204 -- Arguments and paths belong to isolated test repositories.
+		output, err := exec.CommandContext(t.Context(), "git", append([]string{"-C", directory}, args...)...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, output)
+		}
+	}
+	git(f.project, "init")
+	git(f.project, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-m", "Initial")
+	worktree := filepath.Join(t.TempDir(), "linked")
+	git(f.project, "worktree", "add", "-b", "linked", worktree)
+	f.native.Agent.CWD = worktree
+	unrelated := f.native.Agent
+	unrelated.ID = "unrelated"
+	unrelated.CWD = filepath.Join(t.TempDir(), "clone")
+	git(f.project, "clone", "--local", f.project, unrelated.CWD)
+	f.native.Others = []rexAgent{unrelated}
+	f.save(t)
+	found, err := Discover(t.Context(), f.project)
+	if err != nil || len(found.Sessions) != 1 || found.Sessions[0].ID != f.agent.ID {
+		t.Fatalf("worktree fallback: %+v, %v", found, err)
+	}
+	if _, err = Attach(t.Context(), f.directory, f.project, f.agent.ID); err != nil {
+		t.Fatal(err)
+	}
+	thread := f.queued(t)
+	if sent, err := Dispatch(t.Context(), f.directory, f.project, thread, ""); err != nil || sent != 1 {
+		t.Fatalf("cross-worktree delivery: sent=%d, %v", sent, err)
+	}
+	exact := f.native.Agent
+	exact.ID = "exact"
+	exact.CWD = f.project
+	f.native.Others = append(f.native.Others, exact)
+	f.save(t)
+	found, err = Discover(t.Context(), f.project)
+	if err != nil || len(found.Sessions) != 1 || found.Sessions[0].ID != exact.ID {
+		t.Fatalf("exact worktree preference: %+v, %v", found, err)
+	}
+	// A newly available exact match must not invalidate the explicit selection.
+	if status, err := Inspect(t.Context(), f.agent); err != nil || status.State != "working" {
+		t.Fatalf("selected fallback became invalid: %+v, %v", status, err)
+	}
+	f.native.Agent.CWD = unrelated.CWD
+	f.save(t)
+	if status, err := Inspect(t.Context(), f.agent); err != nil || status.State != "offline" {
+		t.Fatalf("unrelated project accepted: %+v, %v", status, err)
+	}
 }
 
 // TestNativeQueueAndReplyAfterDetach checks delivery and reply attribution.

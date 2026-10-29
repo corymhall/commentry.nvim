@@ -1,18 +1,14 @@
 ---
 name: neovim-ui-capture
-description: Capture and review real Neovim UI states for commentry.nvim using the repo's embedded RPC multigrid workflow. Use this whenever the user asks you to inspect what the plugin looks like, validate a Neovim UI change visually, compare laptop vs desktop layouts, iterate on popup/card/range-comment design, or verify that a Neovim-facing change actually renders the way you think it does. Prefer this skill over guessing from code whenever the task involves Neovim appearance or interaction.
+description: Capture and review real Neovim UI states for commentry.nvim using the repo's embedded RPC multigrid workflow. Use this whenever the user asks you to inspect what the plugin looks like, validate a Neovim UI change visually, compare laptop vs desktop layouts, iterate on popup/inbox/source-comment design, or verify that a Neovim-facing change actually renders the way you think it does. Prefer this skill over guessing from code whenever the task involves Neovim appearance or interaction.
 ---
 
 # Neovim UI Capture
 
 Use this skill when working on visual or interaction-heavy Commentry changes.
 
-The repo includes two capture paths:
-
-- Preferred: `./scripts/ui-capture-rpc`
-  Uses an embedded Neovim plus real multigrid redraw events.
-- Fallback: `./scripts/ui-capture`
-  Reconstructs UI from windows, buffers, and extmarks. Useful if the RPC path is not enough for a narrow debugging task.
+Use `./scripts/ui-capture-rpc`, an embedded Neovim with real multigrid redraw events.
+The retired draft-editor fallback renderer has been removed.
 
 For most design validation, use the RPC path first.
 
@@ -21,7 +17,7 @@ For most design validation, use the RPC path first.
 Use it to:
 
 - validate popup layout changes
-- inspect saved comment cards and range comments
+- inspect inbox conversations and Diffview source comments
 - compare `laptop-small` and `desktop-wide` presets
 - confirm Neovim UI behavior after plugin edits
 - generate human-viewable PNGs and HTML galleries for design discussion
@@ -69,8 +65,8 @@ then expect to extend the bridge before the skill fully covers it.
 
 ```bash
 ./scripts/ui-capture-rpc --scenario popup --preset laptop-small
-./scripts/ui-capture-rpc --scenario card --preset laptop-small
-./scripts/ui-capture-rpc --scenario range --preset laptop-small
+./scripts/ui-capture-rpc --scenario diffview --preset laptop-small
+./scripts/ui-capture-rpc --scenario inbox --preset laptop-small
 ```
 
 ### Capture and compare both presets
@@ -92,14 +88,14 @@ Multi-preset gallery:
 Side-by-side compare pages:
 
 - `tmp/ui-capture-rpc-presets/compare/popup.html`
-- `tmp/ui-capture-rpc-presets/compare/card.html`
-- `tmp/ui-capture-rpc-presets/compare/range.html`
+- `tmp/ui-capture-rpc-presets/compare/diffview.html`
+- `tmp/ui-capture-rpc-presets/compare/inbox.html`
 
 Common image outputs:
 
 - `tmp/ui-capture-rpc-gallery/popup/rpc-comment-popup.png`
-- `tmp/ui-capture-rpc-gallery/card/rpc-comment-card.png`
-- `tmp/ui-capture-rpc-gallery/range/rpc-range-comment.png`
+- `tmp/ui-capture-rpc-gallery/diffview/rpc-diffview-inbox.png`
+- `tmp/ui-capture-rpc-gallery/inbox/rpc-inbox.png`
 
 ## Presets
 

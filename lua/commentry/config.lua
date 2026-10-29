@@ -7,35 +7,13 @@ M.ns = vim.api.nvim_create_namespace("commentry")
 ---@class commentry.Keymaps
 ---@field add_comment string
 ---@field add_range_comment string
----@field edit_comment string
----@field delete_comment string
----@field set_comment_type string
----@field toggle_file_reviewed string
----@field next_unreviewed_file string
----@field send_to_agent string
 ---@field list_comments string
-
----@class commentry.StoreConfig
----@field filename string
 
 ---@class commentry.DiffviewConfig
 ---@field enabled boolean
----@field prefer string
 ---@field auto_attach boolean
----@field comment_cards commentry.DiffviewCommentCardsConfig
----@field comment_ranges commentry.DiffviewCommentRangesConfig
-
----@class commentry.DiffviewCommentCardsConfig
----@field max_width integer
----@field max_body_lines integer
----@field show_markers boolean
-
----@class commentry.DiffviewCommentRangesConfig
----@field enabled boolean
----@field line_highlight boolean
-
----@class commentry.AgentConfig
----@field enabled boolean
+---@field comment_cards {max_width: integer, max_body_lines: integer, show_markers: boolean}
+---@field comment_ranges {enabled: boolean, line_highlight: boolean}
 
 ---@class commentry.LogConfig
 ---@field level "error"|"warn"|"info"|"debug"
@@ -48,11 +26,7 @@ M.ns = vim.api.nvim_create_namespace("commentry")
 ---@class commentry.Config
 ---@field debug boolean
 ---@field keymaps commentry.Keymaps
----@field comment_types string[]
----@field default_comment_type string
----@field store commentry.StoreConfig
 ---@field diffview commentry.DiffviewConfig
----@field agent commentry.AgentConfig
 ---@field log commentry.LogConfig
 ---@field diagnostics commentry.DiagnosticsConfig
 local defaults = {
@@ -60,35 +34,13 @@ local defaults = {
   keymaps = {
     add_comment = "mc",
     add_range_comment = "mc",
-    edit_comment = "me",
-    delete_comment = "md",
-    set_comment_type = "mt",
-    toggle_file_reviewed = "mr",
-    next_unreviewed_file = "]r",
-    send_to_agent = "ms",
     list_comments = "ml",
-  },
-  comment_types = { "note", "suggestion", "issue", "praise", "question" },
-  default_comment_type = "note",
-  store = {
-    filename = "commentry.json",
   },
   diffview = {
     enabled = true,
-    prefer = "diffview.nvim",
     auto_attach = true,
-    comment_cards = {
-      max_width = 76,
-      max_body_lines = 6,
-      show_markers = true,
-    },
-    comment_ranges = {
-      enabled = true,
-      line_highlight = true,
-    },
-  },
-  agent = {
-    enabled = false,
+    comment_cards = { max_width = 76, max_body_lines = 6, show_markers = true },
+    comment_ranges = { enabled = true, line_highlight = true },
   },
   log = {
     level = "warn",
@@ -103,22 +55,7 @@ local defaults = {
 -- Canonical defaults shared across setup normalization and runtime fallback.
 M.default_keymaps = vim.deepcopy(defaults.keymaps)
 
-local keymap_keys = {
-  "add_comment",
-  "add_range_comment",
-  "edit_comment",
-  "delete_comment",
-  "set_comment_type",
-  "toggle_file_reviewed",
-  "next_unreviewed_file",
-  "send_to_agent",
-  "list_comments",
-}
-
-local keymap_empty_allowed = {
-  toggle_file_reviewed = true,
-  next_unreviewed_file = true,
-}
+local keymap_keys = { "add_comment", "add_range_comment", "list_comments" }
 
 local log_levels = {
   error = true,
@@ -254,42 +191,8 @@ end
 ---@return commentry.Config
 local function normalize_config(current)
   current.debug = normalize_scalar(current.debug, "boolean", defaults.debug, "debug")
-  current.default_comment_type =
-    normalize_scalar(current.default_comment_type, "string", defaults.default_comment_type, "default_comment_type")
-
-  if type(current.comment_types) ~= "table" then
-    warn_invalid_type("comment_types", current.comment_types, "table")
-    current.comment_types = vim.deepcopy(defaults.comment_types)
-  end
-
-  local valid_comment_types = {}
-  for _, value in ipairs(current.comment_types) do
-    if type(value) == "string" and value ~= "" then
-      valid_comment_types[#valid_comment_types + 1] = value
-    else
-      warn_invalid_type("comment_types[]", value, "non-empty string")
-    end
-  end
-  if #valid_comment_types == 0 then
-    Util.warn("commentry setup: comment_types must include at least one non-empty string; using defaults")
-    valid_comment_types = vim.deepcopy(defaults.comment_types)
-  end
-  current.comment_types = valid_comment_types
-  if not vim.tbl_contains(current.comment_types, current.default_comment_type) then
-    Util.warn(
-      ("commentry setup: default_comment_type=%s is not present in comment_types; using %q"):format(
-        vim.inspect(current.default_comment_type),
-        current.comment_types[1]
-      )
-    )
-    current.default_comment_type = current.comment_types[1]
-  end
-
-  current.store.filename = normalize_scalar(current.store.filename, "string", defaults.store.filename, "store.filename")
   current.diffview.enabled =
     normalize_scalar(current.diffview.enabled, "boolean", defaults.diffview.enabled, "diffview.enabled")
-  current.diffview.prefer =
-    normalize_scalar(current.diffview.prefer, "string", defaults.diffview.prefer, "diffview.prefer")
   current.diffview.auto_attach =
     normalize_scalar(current.diffview.auto_attach, "boolean", defaults.diffview.auto_attach, "diffview.auto_attach")
   current.diffview.comment_cards.max_width = normalize_scalar(
@@ -322,7 +225,6 @@ local function normalize_config(current)
     defaults.diffview.comment_ranges.line_highlight,
     "diffview.comment_ranges.line_highlight"
   )
-  current.agent.enabled = normalize_scalar(current.agent.enabled, "boolean", defaults.agent.enabled, "agent.enabled")
   current.log.level = normalize_scalar(current.log.level, "string", defaults.log.level, "log.level")
   current.log.sink = normalize_scalar(current.log.sink, "string", defaults.log.sink, "log.sink")
   if not log_levels[current.log.level] then
@@ -393,16 +295,8 @@ local function normalize_keymaps(keymaps)
   for _, key in ipairs(keymap_keys) do
     local value = keymaps[key]
     if value ~= nil then
-      local allow_empty = keymap_empty_allowed[key] == true
-      local expected_shape = allow_empty and 'string (use "" to disable)' or "non-empty string"
-      local valid = type(value) == "string"
-      if valid then
-        if value == "" then
-          valid = allow_empty
-        else
-          valid = is_valid_keymap_format(value)
-        end
-      end
+      local expected_shape = 'string (use "" to disable)'
+      local valid = type(value) == "string" and (value == "" or is_valid_keymap_format(value))
 
       if not valid then
         warn_keymap_validation(key, value, expected_shape)

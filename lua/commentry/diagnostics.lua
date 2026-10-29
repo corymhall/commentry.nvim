@@ -15,7 +15,7 @@ end
 ---@return string
 function M.dump()
   local Config = safe_require("commentry.config")
-  local Comments = safe_require("commentry.comments")
+  local Store = require("commentry.inbox.store")
   local Diffview = safe_require("commentry.diffview")
 
   local lines = {}
@@ -25,20 +25,12 @@ function M.dump()
 
   if type(Config) == "table" then
     local log_config = type(Config.log) == "table" and Config.log or {}
-    local agent_config = type(Config.agent) == "table" and Config.agent or {}
     lines[#lines + 1] = ("log.level=%s"):format(tostring(log_config.level))
     lines[#lines + 1] = ("log.sink=%s"):format(tostring(log_config.sink))
-    lines[#lines + 1] = ("agent.enabled=%s"):format(tostring(agent_config.enabled))
   end
 
-  if type(Comments) == "table" and type(Comments.debug_store_context) == "function" then
-    local info = Comments.debug_store_context()
-    if type(info) == "table" then
-      lines[#lines + 1] = ("store=%s"):format(info.store_path or "nil")
-      lines[#lines + 1] = ("context=%s"):format(info.context_id or "nil")
-      lines[#lines + 1] = ("store.exists=%s"):format(tostring(info.store_exists))
-    end
-  end
+  lines[#lines + 1] = "inbox.connection=" .. Store.directory()
+  lines[#lines + 1] = "inbox.executable=" .. (Store.executable() or "missing")
 
   if type(Diffview) == "table" and type(Diffview.debug_state) == "function" then
     local state = Diffview.debug_state()

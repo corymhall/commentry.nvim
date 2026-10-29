@@ -5,7 +5,6 @@ describe("commentry.health", function()
   local original_diffview
   local original_snacks
   local original_config
-  local original_sidekick
   local original_fn_has
   local original_fn_exists
   local original_fn_isdirectory
@@ -16,7 +15,6 @@ describe("commentry.health", function()
     original_diffview = package.loaded["diffview"]
     original_snacks = package.loaded["snacks"]
     original_config = package.loaded["commentry.config"]
-    original_sidekick = package.loaded["commentry.agent.adapters.sidekick"]
     original_fn_has = vim.fn.has
     original_fn_exists = vim.fn.exists
     original_fn_isdirectory = vim.fn.isdirectory
@@ -40,7 +38,6 @@ describe("commentry.health", function()
     package.loaded["diffview"] = original_diffview
     package.loaded["snacks"] = original_snacks
     package.loaded["commentry.config"] = original_config
-    package.loaded["commentry.agent.adapters.sidekick"] = original_sidekick
     vim.fn.has = original_fn_has
     vim.fn.exists = original_fn_exists
     vim.fn.isdirectory = original_fn_isdirectory
@@ -77,7 +74,7 @@ describe("commentry.health", function()
   local function healthy_dependencies(config)
     package.loaded["diffview"] = {}
     package.loaded["snacks"] = { picker = { select = function() end } }
-    package.loaded["commentry.config"] = config or { agent = { enabled = false } }
+    package.loaded["commentry.config"] = config or {}
   end
 
   it("reports core and picker readiness", function()
@@ -90,77 +87,22 @@ describe("commentry.health", function()
     assert.is_true(contains_message(seen.ok, ":Commentry"))
     assert.is_true(contains_message(seen.ok, "commentry.config"))
     assert.is_true(contains_message(seen.ok, "diffview.nvim"))
-    assert.is_true(contains_message(seen.ok, "picker.select"))
     assert.are.same(0, #seen.warn)
   end)
 
-  it("warns when snacks is unavailable", function()
+  it("does not require Diffview or a picker for the inbox", function()
     local seen = capture_health()
-    package.loaded["diffview"] = {}
+    package.loaded["diffview"] = nil
     package.loaded["snacks"] = nil
-    package.loaded["commentry.config"] = { agent = { enabled = false } }
-
+    package.loaded["commentry.config"] = {}
     require("commentry.health").check()
-
-    assert.is_true(contains_message(seen.warn, "snacks.nvim"))
-  end)
-
-  it("warns when snacks picker.select is unavailable", function()
-    local seen = capture_health()
-    package.loaded["diffview"] = {}
-    package.loaded["snacks"] = { picker = {} }
-    package.loaded["commentry.config"] = { agent = { enabled = false } }
-
-    require("commentry.health").check()
-
-    assert.is_true(contains_message(seen.warn, "picker.select"))
-  end)
-
-  it("warns when agent delegation is enabled and the adapter is unavailable", function()
-    local seen = capture_health()
-    healthy_dependencies({ agent = { enabled = true } })
-    package.loaded["commentry.agent.adapters.sidekick"] = {}
-
-    require("commentry.health").check()
-
-    assert.is_true(contains_message(seen.warn, "sidekick adapter"))
-  end)
-
-  it("warns when the Sidekick CLI send API is unavailable", function()
-    local seen = capture_health()
-    healthy_dependencies({ agent = { enabled = true } })
-    package.loaded["commentry.agent.adapters.sidekick"] = {
-      send = function() end,
-      available = function()
-        return false
-      end,
-    }
-
-    require("commentry.health").check()
-
-    assert.is_true(contains_message(seen.warn, "sidekick CLI"))
-  end)
-
-  it("reports agent delegation readiness", function()
-    local seen = capture_health()
-    healthy_dependencies({ agent = { enabled = true } })
-    package.loaded["commentry.agent.adapters.sidekick"] = {
-      send = function() end,
-      available = function()
-        return true
-      end,
-    }
-
-    require("commentry.health").check()
-
-    assert.is_true(contains_message(seen.ok, "agent adapter"))
+    assert.are.same(0, #seen.error)
     assert.are.same(0, #seen.warn)
   end)
 
   it("warns when logger config values are invalid", function()
     local seen = capture_health()
     healthy_dependencies({
-      agent = { enabled = false },
       log = { level = "trace", sink = "stdout" },
     })
 
@@ -176,7 +118,6 @@ describe("commentry.health", function()
       return nil
     end
     healthy_dependencies({
-      agent = { enabled = false },
       log = {
         level = "info",
         sink = "file",
@@ -189,27 +130,6 @@ describe("commentry.health", function()
     local found = false
     for _, message in ipairs(seen.warn) do
       if message:find("log file sink is not writable:", 1, true) then
-        found = true
-      end
-    end
-    assert.is_true(found)
-  end)
-
-  it("does not create store directory during health checks", function()
-    local seen = capture_health()
-    vim.fn.isdirectory = function(path)
-      if type(path) == "string" and path:find(".commentry", 1, true) then
-        return 0
-      end
-      return original_fn_isdirectory(path)
-    end
-    healthy_dependencies()
-
-    require("commentry.health").check()
-
-    local found = false
-    for _, message in ipairs(seen.ok) do
-      if message:find("comment store directory does not exist yet", 1, true) then
         found = true
       end
     end

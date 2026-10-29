@@ -22,6 +22,10 @@ function M.project(directory)
 end
 
 function M.capture(bufnr, first, last)
+  local diffview = require("commentry.diffview")
+  if diffview.current_file_context(bufnr) then
+    return diffview.capture(bufnr, first, last)
+  end
   local path = vim.api.nvim_buf_get_name(bufnr)
   if path == "" or vim.bo[bufnr].buftype ~= "" then
     return nil, "Capture requires a normal named file buffer; use capture-text for copied text"
@@ -320,11 +324,11 @@ end
 
 -- Only navigate when the selected code survives unchanged. Modified or missing
 -- selections stay available as snapshots instead of guessing a destination.
-function M.locate(thread)
+function M.locate(thread, contents)
   if thread.source.kind ~= "file" then
     return nil, "This item has no code location"
   end
-  local current = current_lines(thread)
+  local current = contents or current_lines(thread)
   if not current then
     return nil, "Outdated location: file unavailable"
   end

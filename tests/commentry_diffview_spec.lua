@@ -1,367 +1,159 @@
----@module 'luassert'
+local Source = require("commentry.inbox.source")
+local Store = require("commentry.inbox.store")
 
-describe("commentry.diffview comment cards", function()
-  local original_diffview
-  local original_config
-  local original_diffview_lib
-  local original_buf_is_valid
-  local original_buf_line_count
-  local original_clear_namespace
-  local original_set_extmark
-  local original_set_hl
-
+describe("Diffview inbox capture", function()
+  local root, directory, lib, buffers, origin
+  local function git(args)
+    local argv = { "git", "-C", root }
+    vim.list_extend(argv, args)
+    local result = vim.system(argv, { text = true }):wait()
+    assert.are.same(0, result.code, result.stderr)
+    return vim.trim(result.stdout)
+  end
+  local function key(buf, mode, lhs)
+    for _, map in ipairs(vim.api.nvim_buf_get_keymap(buf, mode)) do
+      if map.lhs:lower() == lhs:lower() then
+        return map.callback
+      end
+    end
+    error("Missing mapping " .. lhs)
+  end
   before_each(function()
-    original_diffview = package.loaded["commentry.diffview"]
-    original_config = package.loaded["commentry.config"]
-    original_diffview_lib = package.loaded["diffview.lib"]
-    original_buf_is_valid = vim.api.nvim_buf_is_valid
-    original_buf_line_count = vim.api.nvim_buf_line_count
-    original_clear_namespace = vim.api.nvim_buf_clear_namespace
-    original_set_extmark = vim.api.nvim_buf_set_extmark
-    original_set_hl = vim.api.nvim_set_hl
-  end)
-
-  after_each(function()
-    package.loaded["commentry.diffview"] = original_diffview
-    package.loaded["commentry.config"] = original_config
-    package.loaded["diffview.lib"] = original_diffview_lib
-    vim.api.nvim_buf_is_valid = original_buf_is_valid
-    vim.api.nvim_buf_line_count = original_buf_line_count
-    vim.api.nvim_buf_clear_namespace = original_clear_namespace
-    vim.api.nvim_buf_set_extmark = original_set_extmark
-    vim.api.nvim_set_hl = original_set_hl
-  end)
-
-  it("renders marker labels and persistent boxed comment cards", function()
-    local marker_calls = {}
-    local card_calls = {}
-
-    vim.api.nvim_buf_is_valid = function()
-      return true
-    end
-    vim.api.nvim_buf_clear_namespace = function()
-      return
-    end
-    vim.api.nvim_set_hl = function()
-      return
-    end
-    vim.api.nvim_buf_set_extmark = function(_, _, line, _, opts)
-      if opts.virt_text then
-        marker_calls[#marker_calls + 1] = { line = line, opts = opts }
-      elseif opts.virt_lines then
-        card_calls[#card_calls + 1] = { line = line, opts = opts }
-      end
-      return 1
-    end
-
-    package.loaded["commentry.diffview"] = nil
-    local Diffview = require("commentry.diffview")
-
-    Diffview.render_comment_markers(1, {
-      { id = "c-1", line_start = 4, line_end = 6, comment_type = "note", body = "one\ntwo" },
-      { id = "c-2", line_start = 4, line_end = 6, comment_type = "issue", body = "three" },
-    })
-
-    assert.are.same(1, #marker_calls)
-    assert.are.same(3, marker_calls[1].line)
-    assert.are.same("[issue,note]", marker_calls[1].opts.virt_text[1][1])
-
-    assert.are.same(1, #card_calls)
-    assert.are.same(3, card_calls[1].line)
-    local chunks = {}
-    for _, row in ipairs(card_calls[1].opts.virt_lines) do
-      for _, chunk in ipairs(row) do
-        chunks[#chunks + 1] = chunk[1]
-      end
-    end
-    local card = table.concat(chunks, " ")
-    assert.is_truthy(card:find("L4-L6", 1, true))
-    assert.is_truthy(card:find("one", 1, true))
-    assert.is_truthy(card:find("two", 1, true))
-    assert.is_truthy(card:find("three", 1, true))
-  end)
-
-  it("renders question range signs, line highlights, and card styling", function()
-    local range_calls = {}
-    local card_calls = {}
-
-    vim.api.nvim_buf_is_valid = function()
-      return true
-    end
-    vim.api.nvim_buf_clear_namespace = function()
-      return
-    end
-    vim.api.nvim_set_hl = function()
-      return
-    end
-    vim.api.nvim_buf_set_extmark = function(_, _, line, _, opts)
-      if opts.sign_text then
-        range_calls[#range_calls + 1] = { line = line, opts = opts }
-      elseif opts.virt_lines then
-        card_calls[#card_calls + 1] = { line = line, opts = opts }
-      end
-      return 1
-    end
-
-    package.loaded["commentry.diffview"] = nil
-    local Diffview = require("commentry.diffview")
-
-    Diffview.render_comment_markers(1, {
-      { id = "c-1", line_start = 4, line_end = 6, comment_type = "question", body = "range body" },
-    })
-
-    table.sort(range_calls, function(a, b)
-      return a.line < b.line
-    end)
-    assert.are.same(3, #range_calls)
-    assert.are.same({ 3, 4, 5 }, { range_calls[1].line, range_calls[2].line, range_calls[3].line })
-    assert.is_string(range_calls[1].opts.sign_text)
-    assert.is_string(range_calls[2].opts.line_hl_group)
-    assert.are.same(1, #card_calls)
-    assert.are.same("QUESTION", card_calls[1].opts.virt_lines[1][2][1])
-  end)
-
-  it("renders reviewed state indicator labels", function()
-    local marker_calls = {}
-    vim.api.nvim_buf_is_valid = function()
-      return true
-    end
-    vim.api.nvim_buf_clear_namespace = function()
-      return
-    end
-    vim.api.nvim_buf_set_extmark = function(_, _, line, _, opts)
-      marker_calls[#marker_calls + 1] = { line = line, opts = opts }
-      return 1
-    end
-
-    package.loaded["commentry.diffview"] = nil
-    local Diffview = require("commentry.diffview")
-
-    Diffview.render_file_review_indicator(1, true)
-    Diffview.render_file_review_indicator(1, false)
-
-    assert.are.same(2, #marker_calls)
-    assert.are.same(0, marker_calls[1].line)
-    assert.are.same("[reviewed]", marker_calls[1].opts.virt_text[1][1])
-    assert.are.same("[unreviewed]", marker_calls[2].opts.virt_text[1][1])
-  end)
-
-  it("renders independent reviewed and partial marks in the file panel", function()
-    local marks = {}
-    local reviewed = { path = "reviewed.lua" }
-    local pending = { path = "pending.lua" }
-    local directory = {
-      _node = {
-        leaves = function()
-          return { { data = reviewed }, { data = pending } }
-        end,
-      },
-    }
-
-    vim.api.nvim_buf_is_valid = function()
-      return true
-    end
-    vim.api.nvim_buf_line_count = function()
-      return 10
-    end
-    vim.api.nvim_buf_clear_namespace = function()
-      return
-    end
-    vim.api.nvim_set_hl = function()
-      return
-    end
-    vim.api.nvim_buf_set_extmark = function(_, _, row, _, opts)
-      marks[#marks + 1] = { row = row, text = opts.virt_text[1][1] }
-      return #marks
-    end
-
-    package.loaded["commentry.diffview"] = nil
-    local Diffview = require("commentry.diffview")
-    Diffview.render_file_review_panel({
-      panel = {
-        bufid = 5,
-        components = {
-          working = {
-            files = {
-              comp = {
-                components = {
-                  {
-                    name = "directory",
-                    context = directory,
-                    lstart = 1,
-                    components = {
-                      { name = "file", context = reviewed, lstart = 2, components = {} },
-                      { name = "file", context = pending, lstart = 3, components = {} },
-                    },
-                  },
-                },
-              },
-            },
-          },
+    root = vim.fn.tempname()
+    vim.fn.mkdir(root, "p")
+    root = vim.uv.fs_realpath(root)
+    directory = vim.env.COMMENTRY_INBOX_DIR
+    vim.env.COMMENTRY_INBOX_DIR = root .. "/inbox"
+    lib = package.loaded["diffview.lib"]
+    origin = vim.api.nvim_get_current_buf()
+    buffers = {}
+    git({ "init", "-q" })
+    vim.fn.writefile({ "before", "old code", "after" }, root .. "/old.lua")
+    git({ "add", "old.lua" })
+    git({ "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "baseline" })
+    local revision = git({ "rev-parse", "HEAD" })
+    local layout = {}
+    for _, side in ipairs({ "a", "b" }) do
+      local buf = vim.api.nvim_create_buf(false, true)
+      buffers[#buffers + 1] = buf
+      vim.api.nvim_buf_set_name(buf, "diffview://test/" .. side .. "/virtual.lua")
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "before", side == "a" and "old code" or "new code", "after" })
+      vim.bo[buf].buftype = "nowrite"
+      layout[side] = {
+        file = {
+          bufnr = buf,
+          path = side == "a" and "old.lua" or "new.lua",
+          rev = side == "a" and { commit = revision } or { stage = 0 },
+          adapter = { ctx = { toplevel = root } },
         },
-      },
-    }, { [reviewed] = true, [pending] = false })
-
-    assert.are.same({
-      { row = 1, text = "[partial]" },
-      { row = 2, text = "[reviewed]" },
-    }, marks)
-  end)
-
-  it("renders active and unresolved comment counts beside file review state", function()
-    local marks = {}
-    local reviewed = { path = "reviewed.lua" }
-    local pending = { path = "pending.lua" }
-
-    vim.api.nvim_buf_is_valid = function()
-      return true
+      }
     end
-    vim.api.nvim_buf_line_count = function()
-      return 10
-    end
-    vim.api.nvim_buf_clear_namespace = function()
-      return
-    end
-    vim.api.nvim_set_hl = function()
-      return
-    end
-    vim.api.nvim_buf_set_extmark = function(_, _, row, _, opts)
-      local text = {}
-      for _, chunk in ipairs(opts.virt_text) do
-        text[#text + 1] = chunk[1]
-      end
-      marks[#marks + 1] = { row = row, text = table.concat(text) }
-      return #marks
-    end
-
-    package.loaded["commentry.diffview"] = nil
-    local Diffview = require("commentry.diffview")
-    Diffview.render_file_review_panel({
-      panel = {
-        bufid = 5,
-        components = {
-          working = {
-            files = {
-              comp = {
-                components = {
-                  { name = "file", context = reviewed, lstart = 2, components = {} },
-                  { name = "file", context = pending, lstart = 3, components = {} },
-                },
-              },
-            },
-          },
-        },
-      },
-    }, { [reviewed] = true, [pending] = false }, {
-      ["reviewed.lua"] = { active = 2, unresolved = 1 },
-      ["pending.lua"] = { active = 1, unresolved = 0 },
-    })
-
-    assert.are.same({
-      { row = 2, text = "[R 2c 1u]" },
-      { row = 3, text = "[1 comment]" },
-    }, marks)
-  end)
-
-  it("lists files, resolves loaded side buffers, and focuses a target path", function()
-    local focused = nil
-    package.loaded["commentry.diffview"] = nil
-    local Diffview = require("commentry.diffview")
-    local base_buf = vim.api.nvim_create_buf(false, true)
-    local head_buf = vim.api.nvim_create_buf(false, true)
-
-    local files = {
-      {
-        path = "a.lua",
-        layout = {
-          a = { file = { bufnr = base_buf } },
-          b = { file = { bufnr = head_buf } },
-        },
-      },
-      { path = "b.lua" },
-    }
-    local view = {
-      files = {
-        iter = function()
-          local i = 0
-          return function()
-            i = i + 1
-            if i <= #files then
-              return i, files[i]
-            end
-          end
-        end,
-      },
-      set_file_by_path = function(_, path)
-        focused = path
+    git({ "mv", "old.lua", "new.lua" })
+    vim.fn.writefile({ "before", "new code", "after" }, root .. "/new.lua")
+    git({ "add", "new.lua" })
+    package.loaded["diffview.lib"] = {
+      get_current_view = function()
+        return { cur_entry = { path = "new.lua", layout = layout } }
       end,
     }
-
-    local paths = Diffview.list_view_files(view)
-    local ok, err = Diffview.focus_file(view, "b.lua")
-
-    assert.are.same({ "a.lua", "b.lua" }, paths)
-    assert.are.same(base_buf, Diffview.file_side_buffer(view, "a.lua", "base"))
-    assert.are.same(head_buf, Diffview.file_side_buffer(view, "a.lua", "head"))
-    assert.is_nil(Diffview.file_side_buffer(view, "b.lua", "head"))
-    assert.is_true(ok)
-    assert.is_nil(err)
-    assert.are.same("b.lua", focused)
+    vim.api.nvim_win_set_buf(0, buffers[1])
   end)
-end)
-
-describe("commentry review context", function()
-  local original_diffview
-
-  before_each(function()
-    original_diffview = package.loaded["commentry.diffview"]
-  end)
-
   after_each(function()
-    package.loaded["commentry.diffview"] = original_diffview
+    vim.cmd.stopinsert()
+    package.loaded["diffview.lib"] = lib
+    vim.api.nvim_win_set_buf(0, vim.api.nvim_buf_is_valid(origin) and origin or vim.api.nvim_create_buf(true, false))
+    for _, buf in ipairs(buffers) do
+      if vim.api.nvim_buf_is_valid(buf) then
+        vim.api.nvim_buf_delete(buf, { force = true })
+      end
+    end
+    vim.env.COMMENTRY_INBOX_DIR = directory
+    vim.fn.delete(root, "rf")
   end)
 
-  it("keeps stable review-scope context identity across revision ranges", function()
-    package.loaded["commentry.diffview"] = nil
+  it("saves both displayed sides to the shared inbox with their real paths and revisions", function()
     local Diffview = require("commentry.diffview")
-
-    local working_context = Diffview.resolve_review_context(nil, { git_root = "/tmp/commentry-project" })
-    local revision_context = Diffview.resolve_review_context(
-      { "HEAD~1..HEAD" },
-      { git_root = "/tmp/commentry-project" }
-    )
-
-    assert.are.same("working_tree", working_context.mode)
-    assert.are.same("commit_range", revision_context.mode)
-    assert.are.same(working_context.context_id, revision_context.context_id)
-    assert.is_truthy(revision_context.context_id:find("::review::branch::", 1, true) ~= nil)
+    require("commentry.config").setup({})
+    for _, buf in ipairs(buffers) do
+      require("commentry.commands").attach(buf)
+    end
+    -- Capture the deleted/renamed base path, even though it no longer exists.
+    vim.api.nvim_win_set_cursor(0, { 2, 0 })
+    key(buffers[1], "n", "mc")()
+    local composer = vim.api.nvim_get_current_buf()
+    vim.api.nvim_buf_set_lines(composer, 0, -1, false, { "Why remove this?" })
+    key(composer, "n", "<C-S>")()
+    local threads = assert(Store.list(root))
+    assert.are.same(1, #threads)
+    local first = threads[1]
+    assert.are.same("old.lua", first.source.path)
+    assert.are.same("old code", first.source.lines[2])
+    assert.are.same("diffview:a", first.source.origin)
+    assert.are.same(git({ "rev-parse", "HEAD" }), first.source.git.revision)
+    assert.are.same("Why remove this?", first.messages[1].body)
+    -- The same inbox operation can capture a staged range on the other side.
+    vim.api.nvim_win_set_buf(0, buffers[2])
+    local capture = assert(Source.capture(buffers[2], 2, 3))
+    capture.body = "Review this range"
+    local second = assert(Store.create(capture))
+    local saved = assert(Store.get(second))
+    assert.are.same("new.lua", saved.source.path)
+    assert.are.same(":0", saved.source.git.revision)
+    assert.are.same(git({ "rev-parse", ":0:new.lua" }), saved.source.git.blob)
+    assert.are.same(3, saved.source.last)
+    Diffview.refresh()
+    local ns = vim.api.nvim_create_namespace("commentry.inbox.locations")
+    assert.is_true(#vim.api.nvim_buf_get_extmarks(buffers[1], ns, 0, -1, {}) > 0)
+    assert.is_true(#vim.api.nvim_buf_get_extmarks(buffers[2], ns, 0, -1, {}) > 0)
+    local function preview(buf)
+      for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(buf, ns, 0, -1, { details = true })) do
+        if mark[4].virt_lines then
+          local text = {}
+          for _, line in ipairs(mark[4].virt_lines) do
+            for _, chunk in ipairs(line) do
+              text[#text + 1] = chunk[1]
+            end
+          end
+          return table.concat(text, "\n")
+        end
+      end
+    end
+    assert.is_truthy(preview(buffers[1]):find("Why remove this?", 1, true))
+    assert.is_truthy(preview(buffers[2]):find("Review this range", 1, true))
+    local signs = {}
+    for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(buffers[2], ns, 0, -1, { details = true })) do
+      if mark[4].sign_text then
+        signs[mark[2] + 1] = vim.trim(mark[4].sign_text)
+      end
+    end
+    assert.are.same("╭", signs[2])
+    assert.are.same("╰", signs[3])
+    -- Two topics on one line keep separate cards, even with duplicate locations.
+    assert(Store.update(second, { kind = "attach", author = "Agent", label = "Same selection", source = saved.source }))
+    capture.body = "Another independent question"
+    assert(Store.create(capture))
+    Diffview.refresh()
+    local cards = preview(buffers[2])
+    assert.is_truthy(cards:find("Another independent question", 1, true))
+    local _, occurrences = cards:gsub("Review this range", "")
+    assert.are.same(1, occurrences)
+    -- Resolution and replies operate on these exact inbox threads.
+    assert(Store.update(first.id, { kind = "reply", author = "Agent", body = "The replacement handles retries." }))
+    Diffview.refresh()
+    assert.is_truthy(preview(buffers[1]):find("The replacement handles retries.", 1, true))
+    assert(Store.update(first.id, { kind = "resolve", resolved = true }))
+    assert.is_true(assert(Store.get(first.id)).resolved)
+    Diffview.refresh()
+    assert.are.same(0, #vim.api.nvim_buf_get_extmarks(buffers[1], ns, 0, -1, {}))
   end)
 
-  it("adds concrete revision anchors when revisions resolve to commits", function()
-    package.loaded["commentry.diffview"] = nil
+  it("rejects absent diff sides and never treats a scratch name as a source path", function()
     local Diffview = require("commentry.diffview")
-    local root = vim.fs.normalize(vim.uv.fs_realpath(vim.fn.getcwd()) or vim.fn.getcwd())
-
-    local context = Diffview.resolve_review_context({ "HEAD" }, { git_root = root })
-
-    assert.is_table(context.revision_anchors)
-    assert.are.same(1, #context.revision_anchors)
-    assert.are.same("HEAD", context.revision_anchors[1].token)
-    assert.is_true(type(context.revision_anchors[1].commit) == "string" and #context.revision_anchors[1].commit >= 7)
-    assert.is_truthy(context.context_id:find("::review::branch::", 1, true) ~= nil)
-  end)
-
-  it("ignores callable Diffview revision fields when resolving review context", function()
-    package.loaded["commentry.diffview"] = nil
-    local Diffview = require("commentry.diffview")
-
-    local context = Diffview.resolve_review_context(nil, {
-      root = vim.fn.getcwd(),
-      left = { commit = { hash = function() end } },
-      right = { commit = { hash = function() end } },
-    })
-
-    assert.are.same("working_tree", context.mode)
-    assert.is_nil(context.revisions)
+    local context = Diffview.current_file_context(buffers[1])
+    context.file.nulled = true
+    assert.is_nil(Diffview.capture(buffers[1], 1, 1))
+    local result = Source.capture(buffers[1], 1, 1)
+    assert.is_nil(result)
+    assert.are.same(0, #assert(Store.list(root)))
   end)
 end)

@@ -21,7 +21,7 @@ local Bridge = require("commentry.dev.ui_bridge")
 local cache = assert(vim.env.COMMENTRY_UI_CACHE, "COMMENTRY_UI_CACHE is required")
 local cwd = assert(vim.env.COMMENTRY_UI_CWD, "COMMENTRY_UI_CWD is required")
 local out_dir = read_env("COMMENTRY_UI_OUT_DIR", cwd)
-local scenario = read_env("COMMENTRY_UI_SCENARIO", "popup")
+local scenario = read_env("COMMENTRY_UI_SCENARIO", "inbox")
 local columns = read_env_number("COMMENTRY_UI_COLUMNS", 220)
 local lines = read_env_number("COMMENTRY_UI_LINES", 18)
 
@@ -160,7 +160,11 @@ local ok, err = xpcall(function()
     Bridge.write_snapshot_files(code, bridge.screen, out_dir, "rpc-inbox-code")
     return
   end
-  bridge:request("nvim_command", { "Commentry open" }, 5000)
+  bridge:request("nvim_exec_lua", { [[
+    vim.env.COMMENTRY_INBOX_DIR = vim.fn.getcwd() .. "/inbox-data"
+    vim.cmd("Commentry open")
+    return true
+  ]], {} }, 5000)
 
   bridge:wait_until(5000, function()
     local result = bridge:request("nvim_exec_lua", {
@@ -183,10 +187,11 @@ local ok, err = xpcall(function()
         if type(view) ~= "table" then
           return false
         end
-        local focused = diffview.focus_file_side(view, "head")
-        if not focused then
-          return false
-        end
+        local slot = view.cur_entry and view.cur_entry.layout.b
+        if not slot or not slot.file or not slot.file.bufnr then return false end
+        local wins = vim.fn.win_findbuf(slot.file.bufnr)
+        if #wins == 0 then return false end
+        vim.api.nvim_set_current_win(wins[1])
         local context = diffview.current_file_context()
         if not context then
           return false
@@ -215,58 +220,45 @@ local ok, err = xpcall(function()
     return
   end
 
-  if scenario == "card" then
-    bridge:request("nvim_exec_lua", {
-      [[
-        local comments = require("commentry.comments")
-        comments._set_input_provider_for_tests(function(_, cb)
-          cb("Should this variable name explain the reviewed value?", "question")
-        end)
-        comments.add_comment()
-        comments._set_input_provider_for_tests(nil)
-        return true
-      ]],
-      {},
-    }, 5000)
-    bridge:wait_for_flush(5000)
-    local snapshot = bridge.screen:snapshot("rpc-comment-card")
-    Bridge.write_snapshot_files(snapshot, bridge.screen, out_dir, "rpc-comment-card")
-    return
-  end
+  if scenario == "diffview" then
+    bridge:request("nvim_exec_lua", { [[
+      local source_buf = vim.api.nvim_get_current_buf()
+      vim.cmd("normal! Vj")
+      local comment
+      for _, map in ipairs(vim.api.nvim_buf_get_keymap(source_buf, "x")) do
+        if map.lhs == "mc" then comment = map.callback; break end
+      end
+      assert(comment, "Missing Diffview range mapping")()
+      local buf = vim.api.nvim_get_current_buf()
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, {"Can this name explain the changed value?", "", "This selection covers both the renamed value and the extra flag. Please keep those changes easy to understand together."})
+      for _, map in ipairs(vim.api.nvim_buf_get_keymap(buf, "n")) do
+        if map.lhs:lower() == "<c-s>" then map.callback(); break end
+      end
+      require("commentry.diffview").refresh()
+      local context = assert(require("commentry.diffview").current_file_context())
+      local threads = assert(require("commentry.inbox.store").list(context.project))
+      assert(#threads == 1, "Expected one saved inbox thread")
+      local ns = vim.api.nvim_create_namespace("commentry.inbox.locations")
+      assert(#vim.api.nvim_buf_get_extmarks(context.bufnr, ns, 0, -1, {}) > 0, "Missing inbox marker")
+      vim.cmd.redraw()
+      return true
 
-  if scenario == "review" then
-    bridge:request("nvim_exec_lua", {
-      [[
-        require("commentry.comments").toggle_file_reviewed()
-        return true
-      ]],
-      {},
-    }, 5000)
+    ]], {} }, 5000)
+    -- Drain scheduled buffer-enter redraws after the composer closes before
+    -- recording the sign column. One earlier flush may still belong to it.
+    local flushes = bridge.screen.flushes
+    bridge:request("nvim_command", { "redraw!" }, 5000)
+    bridge:wait_until(5000, function() return bridge.screen.flushes > flushes end)
+    local snapshot = bridge.screen:snapshot("rpc-diffview-inbox")
+    Bridge.write_snapshot_files(snapshot, bridge.screen, out_dir, "rpc-diffview-inbox")
+    bridge:request("nvim_exec_lua", { [[
+      require("commentry.inbox.locations").open_at_cursor()
+      assert(vim.api.nvim_buf_get_name(0) == "commentry://inbox", "Thread did not open")
+      return true
+    ]], {} }, 5000)
     bridge:wait_for_flush(5000)
-    local snapshot = bridge.screen:snapshot("rpc-review-progress")
-    Bridge.write_snapshot_files(snapshot, bridge.screen, out_dir, "rpc-review-progress")
-    return
-  end
-
-  if scenario == "range" then
-    bridge:request("nvim_exec_lua", {
-      [[
-        local comments = require("commentry.comments")
-        comments._set_input_provider_for_tests(function(_, cb)
-          cb("This change spans a few lines, so the range affordance should feel connected to the edited block.", "issue")
-        end)
-        local bufnr = vim.api.nvim_get_current_buf()
-        vim.fn.setpos("'<", { bufnr, 2, 1, 0 })
-        vim.fn.setpos("'>", { bufnr, 4, 1, 0 })
-        comments.add_range_comment()
-        comments._set_input_provider_for_tests(nil)
-        return true
-      ]],
-      {},
-    }, 5000)
-    bridge:wait_for_flush(5000)
-    local snapshot = bridge.screen:snapshot("rpc-range-comment")
-    Bridge.write_snapshot_files(snapshot, bridge.screen, out_dir, "rpc-range-comment")
+    local inbox = bridge.screen:snapshot("rpc-diffview-thread")
+    Bridge.write_snapshot_files(inbox, bridge.screen, out_dir, "rpc-diffview-thread")
     return
   end
 

@@ -45,11 +45,11 @@ describe("commentry config", function()
     local Config = require("commentry.config")
     Config.setup({
       keymaps = {
-        edit_comment = "gce",
+        list_comments = "gce",
       },
     })
 
-    assert.are.same("gce", Config.keymaps.edit_comment)
+    assert.are.same("gce", Config.keymaps.list_comments)
     assert.is_string(Config.keymaps.add_comment)
   end)
 
@@ -68,48 +68,12 @@ describe("commentry config", function()
     assert.is_truthy(warns[1]:find("invalid", 1, true))
   end)
 
-  it("warns and restores default when non-empty-required keymap is set to empty string", function()
-    local warns = {}
-    package.loaded["commentry.util"] = {
-      warn = function(msg)
-        warns[#warns + 1] = msg
-      end,
-    }
-
+  it("allows disabling each Diffview keymap", function()
     local Config = require("commentry.config")
-    Config.setup({
-      keymaps = {
-        add_comment = "",
-      },
-    })
-
-    assert.are.same("mc", Config.keymaps.add_comment)
-    assert.are.same(1, #warns)
-    assert.is_truthy(warns[1]:find("keymaps.add_comment", 1, true))
-    assert.is_truthy(warns[1]:find('""', 1, true))
-    assert.is_truthy(warns[1]:find("expected non%-empty string"))
-    assert.is_truthy(warns[1]:find("non%-empty string"))
-  end)
-
-  it("allows empty-string disables only on remap-only actions without warning", function()
-    local warns = {}
-    package.loaded["commentry.util"] = {
-      warn = function(msg)
-        warns[#warns + 1] = msg
-      end,
-    }
-
-    local Config = require("commentry.config")
-    Config.setup({
-      keymaps = {
-        toggle_file_reviewed = "",
-        next_unreviewed_file = "",
-      },
-    })
-
-    assert.are.same("", Config.keymaps.toggle_file_reviewed)
-    assert.are.same("", Config.keymaps.next_unreviewed_file)
-    assert.are.same(0, #warns)
+    Config.setup({ keymaps = { add_comment = "", add_range_comment = "", list_comments = "" } })
+    assert.are.same("", Config.keymaps.add_comment)
+    assert.are.same("", Config.keymaps.add_range_comment)
+    assert.are.same("", Config.keymaps.list_comments)
   end)
 
   it("warns and restores defaults when keymap overrides have invalid types", function()
@@ -123,20 +87,16 @@ describe("commentry config", function()
     local Config = require("commentry.config")
     Config.setup({
       keymaps = {
-        edit_comment = false,
-        delete_comment = {},
+        list_comments = false,
+        add_comment = {},
       },
     })
 
-    assert.are.same("me", Config.keymaps.edit_comment)
-    assert.are.same("md", Config.keymaps.delete_comment)
-    assert.are.same(2, #warns)
-    assert.is_truthy(warns[1]:find("keymaps.edit_comment", 1, true))
-    assert.is_truthy(warns[1]:find("false", 1, true))
-    assert.is_truthy(warns[1]:find("expected non%-empty string"))
-    assert.is_truthy(warns[2]:find("keymaps.delete_comment", 1, true))
-    assert.is_truthy(warns[2]:find("{}", 1, true))
-    assert.is_truthy(warns[2]:find("expected non%-empty string"))
+    assert.are.same("ml", Config.keymaps.list_comments)
+    assert.are.same("mc", Config.keymaps.add_comment)
+    local warning = table.concat(warns, "\n")
+    assert.is_truthy(warning:find("keymaps.list_comments=false", 1, true))
+    assert.is_truthy(warning:find("keymaps.add_comment", 1, true))
   end)
 
   it("warns and restores default when keymap string format is unsupported", function()
@@ -150,14 +110,14 @@ describe("commentry config", function()
     local Config = require("commentry.config")
     Config.setup({
       keymaps = {
-        set_comment_type = "   ",
+        add_range_comment = "   ",
       },
     })
 
-    assert.are.same("mt", Config.keymaps.set_comment_type)
+    assert.are.same("mc", Config.keymaps.add_range_comment)
     assert.are.same(1, #warns)
-    assert.is_truthy(warns[1]:find("keymaps.set_comment_type", 1, true))
-    assert.is_truthy(warns[1]:find("non%-empty string"))
+    assert.is_truthy(warns[1]:find("keymaps.add_range_comment", 1, true))
+    assert.is_truthy(warns[1]:find("string"))
   end)
 
   it("warns and restores default when keymap contains newline characters", function()
@@ -171,14 +131,14 @@ describe("commentry config", function()
     local Config = require("commentry.config")
     Config.setup({
       keymaps = {
-        set_comment_type = "m\nc",
+        add_range_comment = "m\nc",
       },
     })
 
-    assert.are.same("mt", Config.keymaps.set_comment_type)
+    assert.are.same("mc", Config.keymaps.add_range_comment)
     assert.are.same(1, #warns)
-    assert.is_truthy(warns[1]:find("keymaps.set_comment_type", 1, true))
-    assert.is_truthy(warns[1]:find("non%-empty string"))
+    assert.is_truthy(warns[1]:find("keymaps.add_range_comment", 1, true))
+    assert.is_truthy(warns[1]:find("string"))
   end)
 
   it("warns on unknown config keys and ignores them", function()
@@ -192,7 +152,7 @@ describe("commentry config", function()
     local Config = require("commentry.config")
     Config.setup({
       typo_option = true,
-      agent = {
+      diffview = {
         mystery = "value",
       },
     })
@@ -200,7 +160,7 @@ describe("commentry config", function()
     assert.is_nil(Config.typo_option)
     assert.is_false(vim.tbl_contains(warns, ""))
     assert.is_truthy(vim.tbl_contains(warns, "commentry setup: unknown config key: typo_option"))
-    assert.is_truthy(vim.tbl_contains(warns, "commentry setup: unknown config key: agent.mystery"))
+    assert.is_truthy(vim.tbl_contains(warns, "commentry setup: unknown config key: diffview.mystery"))
   end)
 
   it("warns and restores defaults for invalid log config values", function()

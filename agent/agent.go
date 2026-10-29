@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/corymhall/commentry.nvim/executor"
@@ -52,17 +54,45 @@ func Discover(ctx context.Context, project string) (Discovery, error) {
 		return Discovery{}, err
 	}
 	result := Discovery{Sessions: []inbox.Agent{}, Errors: append([]string{}, found.Errors...)}
+	var fallback []inbox.Agent
 	for _, item := range found.Agents {
 		if item.CWD == "" {
 			continue
 		}
 		root, err := inbox.Project(ctx, item.CWD)
-		if err != nil || root != project {
+		if err != nil {
 			continue
 		}
-		result.Sessions = append(result.Sessions, inbox.Agent{ID: item.ID, Project: project, Harness: item.Harness, Name: item.Name, RexSession: item.Session, RexBlock: item.Block})
+		a := inbox.Agent{ID: item.ID, Project: project, Harness: item.Harness, Name: item.Name, RexSession: item.Session, RexBlock: item.Block}
+		if root == project {
+			result.Sessions = append(result.Sessions, a)
+		} else if sameRepository(ctx, root, project) {
+			fallback = append(fallback, a)
+		}
+	}
+	if len(result.Sessions) == 0 {
+		result.Sessions = append(result.Sessions, fallback...)
 	}
 	return result, nil
+}
+
+// commonGitDirectory identifies linked worktrees, excluding separate clones.
+func commonGitDirectory(ctx context.Context, directory string) string {
+	// #nosec G204 -- Git arguments are fixed; the directory is a separate argument.
+	output, err := exec.CommandContext(ctx, "git", "-C", directory, "rev-parse", "--path-format=absolute", "--git-common-dir").Output()
+	if err != nil {
+		return ""
+	}
+	path, err := filepath.EvalSymlinks(strings.TrimSpace(string(output)))
+	if err != nil {
+		return ""
+	}
+	return path
+}
+
+func sameRepository(ctx context.Context, first, second string) bool {
+	common := commonGitDirectory(ctx, first)
+	return common != "" && common == commonGitDirectory(ctx, second)
 }
 
 // Attach selects an existing agent without creating or resuming a session.
@@ -113,7 +143,7 @@ func sessionState(ctx context.Context, a inbox.Agent) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if current.CWD == "" || current.ID != a.ID || current.Session != a.RexSession || current.Block != a.RexBlock || current.Harness != a.Harness || project != a.Project {
+	if current.CWD == "" || current.ID != a.ID || current.Session != a.RexSession || current.Block != a.RexBlock || current.Harness != a.Harness || (project != a.Project && !sameRepository(ctx, project, a.Project)) {
 		return "", fmt.Errorf("selected Rex agent changed; select it again")
 	}
 	return current.State, nil

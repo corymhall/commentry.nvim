@@ -57,6 +57,7 @@ local function inspect(thread)
     vim.list_extend(rows, {
       "Branch   " .. (thread.source.git.branch or "detached"),
       "HEAD     " .. (thread.source.git.head or "unborn"),
+      "Revision " .. (thread.source.git.revision or "capture from editor"),
       "Blob     " .. (thread.source.git.blob or "uncommitted file"),
       "Buffer   " .. (thread.source.modified and "Unsaved changes captured" or "Saved file captured"),
     })
@@ -94,8 +95,8 @@ end
 -- A real buffer keeps multiline editing and save/cancel behavior predictable.
 local function compose(title, initial, save, dispatch)
   local buf = vim.api.nvim_create_buf(false, true)
-  local width = math.max(1, math.min(76, vim.o.columns - 6))
-  local height = math.max(1, math.min(10, vim.o.lines - 6))
+  local width = math.max(1, math.min(math.max(64, math.floor(vim.o.columns * 0.54)), vim.o.columns - 8))
+  local height = math.max(1, math.min(math.max(8, math.floor(vim.o.lines * 0.24)), vim.o.lines - 6))
   local win = vim.api.nvim_open_win(buf, true, {
     relative = "editor",
     width = width,
@@ -103,13 +104,22 @@ local function compose(title, initial, save, dispatch)
     row = math.max(0, math.floor((vim.o.lines - height) / 2) - 1),
     col = math.max(0, math.floor((vim.o.columns - width) / 2)),
     border = "rounded",
-    title = " " .. Render.clip(title, width - 4) .. " ",
-    footer = dispatch and " Ctrl-s save / Ctrl-d save + send / q cancel " or " Ctrl-s save / q cancel ",
+    title = " " .. Render.clip(title, math.max(1, width - 4)) .. " ",
+    title_pos = "center",
+    footer = dispatch and " <C-s> save | <C-d> save + send | <Esc>/q cancel "
+      or " Type freely | <C-s> save | <Esc>/q cancel ",
+    footer_pos = "center",
     style = "minimal",
   })
   vim.bo[buf].bufhidden = "wipe"
   vim.bo[buf].filetype = "markdown"
   vim.wo[win].wrap = true
+  vim.wo[win].number = false
+  vim.wo[win].relativenumber = false
+  vim.wo[win].cursorline = false
+  vim.wo[win].signcolumn = "no"
+  vim.wo[win].spell = false
+  vim.wo[win].winbar = ""
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, initial or { "" })
   local function submit(send)
     local body = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
@@ -136,9 +146,19 @@ local function compose(title, initial, save, dispatch)
       submit(true)
     end, { buffer = buf, desc = "Save and send inbox message" })
   end
-  vim.keymap.set("n", "q", function()
-    vim.api.nvim_win_close(win, true)
-  end, { buffer = buf, desc = "Cancel inbox message" })
+  vim.keymap.set("n", "<CR>", function()
+    submit(false)
+  end, { buffer = buf, desc = "Save inbox message" })
+  -- Insert-mode Escape still enters normal mode, where Enter saves.
+  local function cancel()
+    vim.cmd.stopinsert()
+    if vim.api.nvim_win_is_valid(win) then
+      vim.api.nvim_win_close(win, true)
+    end
+  end
+  for _, key in ipairs({ "q", "<Esc>", "<C-c>" }) do
+    vim.keymap.set("n", key, cancel, { buffer = buf, desc = "Cancel inbox message" })
+  end
   vim.cmd.startinsert()
 end
 
@@ -197,6 +217,10 @@ function M.comment(args)
       return false
     end
     Util.info("Saved inbox thread " .. id)
+    local diffview = require("commentry.diffview")
+    if diffview.get_current_view() then
+      diffview.refresh()
+    end
     return true
   end)
 end
@@ -585,7 +609,14 @@ function M.open(scope, opts)
                 result.failed
               ) .. table.concat(result.errors, "\n")
             )
-          elseif result.sent == 0 and result.queued == 0 then
+          elseif result.queued > 0 then
+            Util.warn(
+              ("Sent %d thread(s). %d queued, not delivered. Press S in the inbox to attach a running project agent.\n"):format(
+                result.sent,
+                result.queued
+              ) .. ("Skipped %d unchanged or resolved."):format(result.skipped)
+            )
+          elseif result.sent == 0 then
             Util.info("Nothing new to send. There are no new comments.")
           else
             Util.info(

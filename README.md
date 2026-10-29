@@ -5,7 +5,7 @@ persisted comments, and optional agent handoff.
 
 ## Universal inbox
 
-The inbox works independently of Diffview and Snacks:
+The inbox works independently of Diffview:
 
 - `:Commentry comment` captures the current file line and opens a multiline
   comment editor. `:'<,'>Commentry comment` captures a visual line range.
@@ -17,7 +17,8 @@ The inbox works independently of Diffview and Snacks:
 - `:Commentry new-thread` starts a project conversation with no selection,
   clipboard contents, or file anchor. Press `n` inside the inbox for the same action.
 
-The editor uses `Ctrl-s` to save and normal-mode `q` to cancel. The inbox uses
+The editor uses `Ctrl-s` or normal-mode `Enter` to save. Normal-mode `Esc`,
+`q`, or `Ctrl-c` cancels. Insert-mode `Esc` returns to normal mode. The inbox uses
 `j`/`k` in its list to select a thread, `r` to reply, `x` to resolve or reopen,
 `gs` to send all new project comments to the agent queue,
 `za` to fold source sections, `e` to expand or collapse surrounding code,
@@ -185,10 +186,11 @@ scroll position. `R` also refreshes comparisons after source edits.
 ### Existing agents through Rex
 
 The inbox sends requests to Pi or Codex already running in Rex. Press `S` to
-select an agent in the current project. Rex supplies discovery, process identity,
+select an agent in the current worktree. If none is found, the picker shows
+agents in other worktrees of the same repository. Separate clones are excluded.
+Rex supplies discovery, process identity,
 status and terminal delivery. The harness manages its own native queue.
-Sidekick only handles the separate legacy `:Commentry send-to-agent` command.
-No `agent.enabled` setting is required for the inbox.
+Agent discovery and delivery use the existing Rex session.
 
 Load the reusable actions in Rex `init.lua` and run `rex config reload`:
 
@@ -433,180 +435,99 @@ Use `read-state --read --seen e-VERSION` to acknowledge the version displayed,
 or `read-state --read=false` to mark unread. Author labels are not authentication.
 Neovim detects committed revisions automatically while the inbox is idle.
 
-The existing Diffview review store and send-to-agent flow remain separate.
-Review-to-inbox linking, OpenCode support, anchor reattachment, branch comparison
-mode, and an OS-wide capture shortcut are follow-up work.
-Removing local connection files does not delete the Executor inbox. Existing
-Diffview drafts remain in their original store.
-
-## Preview
-
-Commentry inside Diffview with draft comments, type labels, and review context
-visible in-place:
-
-![Commentry diff review workflow](docs/images/commentry-diffview-overview.png)
+OpenCode support, anchor reattachment, branch comparison mode and an OS-wide
+capture shortcut remain follow-up work. Removing local connection files does
+not delete the Executor inbox.
 
 ## Install
 
-Using lazy.nvim with Diffview+:
-
-```lua
-{
-  "commentry/commentry.nvim",
-  dependencies = {
-    "dlyongemallo/diffview-plus.nvim",
-  },
-  opts = {},
-}
-```
-
-The upstream `sindrets/diffview.nvim` package is also supported. Install only
-one implementation; both expose the same `diffview` module and commands.
-
 Required:
 
-- Neovim `0.10+`
-- `dlyongemallo/diffview-plus.nvim` or `sindrets/diffview.nvim` for Diffview reviews.
-  The universal inbox does not require either implementation.
+- Neovim 0.10+
+- The Commentry CLI, configured with `commentry executor login` and
+  `commentry executor use`
+- The Commentry Executor app
 
 Optional integrations:
 
-- `folke/snacks.nvim` for `:Commentry list-comments` and `:Commentry reattach`
-- a Sidekick runtime for `:Commentry send-to-agent`
+- `diffview.nvim` for reviewing Git changes and capturing either diff side
+- Rex for clipboard capture and delivery to an existing coding agent
+
+```lua
+{ "corymhall/commentry.nvim", opts = {} }
+```
 
 ## Setup
 
 ```lua
 require("commentry").setup({
-  log = {
-    level = "warn", -- error|warn|info|debug
-    sink = "notify", -- notify|echo|file
-    file = nil, -- path when sink == "file"
-  },
-  diagnostics = {
-    open_style = "split", -- split|vsplit|float
-  },
-  agent = {
-    enabled = false,
-  },
   diffview = {
+    enabled = true,
     auto_attach = true,
-    comment_cards = {
-      max_width = 76,
-      max_body_lines = 6,
-      show_markers = true,
-    },
-    comment_ranges = {
-      enabled = true,
-      line_highlight = true,
-    },
+    comment_cards = { max_width = 76, max_body_lines = 6, show_markers = true },
+    comment_ranges = { enabled = true, line_highlight = true },
+  },
+  keymaps = {
+    add_comment = "mc",
+    add_range_comment = "mc",
+    list_comments = "ml",
   },
 })
 ```
+
+## Diffview
+
+`:Commentry open` opens Diffview for local changes. Arguments pass through to
+Diffview, for example `:Commentry open main...HEAD`. Direct `:DiffviewOpen`
+usage also attaches Commentry when `auto_attach` is enabled.
+
+`mc` opens the inbox composer for the current line. In Visual mode it captures
+the selected range. `Ctrl-s` saves directly to the project inbox. The saved
+source contains the displayed side's text, path and revision, including base
+versions, staged changes, renamed paths and deleted files. It never captures
+Diffview's scratch-buffer name as a path. Empty and binary sides cannot be
+commented on.
+
+Inbox threads show persistent boxed multiline comment cards below matching
+diff lines, with start/end gutter marks and subtle range highlighting. Cards
+follow the latest reply. `gC` opens the thread at
+the cursor, or offers a choice when several threads overlap. `ml` opens the
+project inbox, where replies, read state, resolution and Rex delivery work the
+same as any other conversation. Comments on changed or deleted code remain in
+the inbox with their original source.
+
+### Keymap configuration
+
+| Action | Default | Mode |
+| --- | --- | --- |
+| `add_comment` | `mc` | Normal |
+| `add_range_comment` | `mc` | Visual |
+| `list_comments` | `ml` | Normal |
+
+Each mapping can be changed or disabled with an empty string. Mappings attach
+only to Diffview file buffers. `gC` opens an inbox conversation at the cursor.
+Set `diffview.auto_attach = false` to disable automatic Diffview integration.
+`comment_cards` controls card width, visible body lines and compact line labels.
+Long comments show a continuation hint. `gC` opens their full conversation.
+`comment_ranges` controls gutter rails and line highlighting. All decorations
+use highlight links from your theme.
+
+### Removed draft workflow
+
+The branch-scoped `commentry.json` review store, draft picker, comment types,
+reviewed-file tracking, export and Sidekick handoff have been removed. Existing
+files under `~/.commentry` are left untouched and are no longer loaded. There
+is no automatic import. All new comments go through the shared inbox backend.
 
 ## Commands
 
-`commentry.nvim` provides a `:Commentry` command with subcommands.
-
-- `:Commentry open` opens a diffview for local changes (shortcut).
-- `:Commentry add-range-comment` creates a range comment from the current visual selection.
-- `:Commentry list-comments [active|unresolved|all]` opens a Snacks picker for draft comments across the current review. The file preview renders active comments with the same cards and range marks as Diffview. The default is `active`; unresolved rows include the stale anchor and reason. Delete the current or selected drafts with `<C-d>` / `<M-d>`. Requires `snacks.nvim`.
-- `:Commentry reattach` reattaches a selected unresolved comment at the current diff line. A command range such as `:'<,'>Commentry reattach` uses that exact destination range; normal invocation preserves the comment's previous range length.
-- `:Commentry help` opens the native `commentry` vimdoc.
-- `:Commentry set-comment-type` sets default or per-comment type (`note`, `suggestion`, `issue`, `praise`, `question`).
-- `:Commentry toggle-file-reviewed` toggles reviewed status for the current file's exact displayed change.
-- `:Commentry next-unreviewed` jumps to the next unreviewed diff entry in panel order.
-- `:Commentry export` prints deterministic markdown for active draft comments.
-- `:Commentry export register` writes markdown to the unnamed register.
-- `:Commentry export register:<name>` writes markdown to a specific register (for example `register:a`).
-- `:Commentry debug-store` prints the active review context and the exact on-disk store path.
-- `:Commentry diagnostics` opens a scratch buffer with runtime diagnostics (config/log/store/diffview state).
-- `:Commentry send-to-agent` delegates the current review payload to Sidekick. Requires `agent.enabled = true`.
-
-## Agent Harness Handoff
-
-Commentry delegates agent selection and lifecycle to `require("sidekick.cli").send()`.
-Sidekick reuses an attached agent when possible; otherwise it opens its CLI
-selector and can attach to an existing session or start a new one. Commentry
-does not maintain a separate session inventory or picker.
-
-Sidekick owns the supported-agent list, so Commentry remains provider agnostic.
-Enable agent handoff with:
-
-```lua
-require("commentry").setup({
-  agent = {
-    enabled = true,
-  },
-})
-```
-
-`:Commentry send-to-agent` leaves the Sidekick tool filter unset, so Sidekick
-chooses among any configured agent harnesses.
-
-If you open diffview directly (for example `:DiffviewOpen main`), Commentry will
-auto-attach to diff buffers by default.
-
-You can disable auto-attach with:
-
-```lua
-require("commentry").setup({
-  diffview = {
-    auto_attach = false,
-  },
-})
-```
-
-## Keymap Configuration
-
-Commentry supports nine configurable diffview-local keymap actions:
-
-| Action | Default | Mode | Empty-string disable (`""`) | Command fallback |
-| --- | --- | --- | --- | --- |
-| `add_comment` | `mc` | Normal | No | None |
-| `add_range_comment` | `mc` | Visual | No | `:Commentry add-range-comment` |
-| `edit_comment` | `me` | Normal | No | None |
-| `delete_comment` | `md` | Normal | No | None |
-| `set_comment_type` | `mt` | Normal | No | `:Commentry set-comment-type` |
-| `toggle_file_reviewed` | `mr` | Normal | Yes | `:Commentry toggle-file-reviewed` |
-| `next_unreviewed_file` | `]r` | Normal | Yes | `:Commentry next-unreviewed` |
-| `send_to_agent` | `ms` | Normal | No | `:Commentry send-to-agent` |
-| `list_comments` | `ml` | Normal | No | `:Commentry list-comments` |
-
-Notes:
-
-- Keymaps attach only in buffers marked as Commentry diffview buffers.
-- Empty-string disable is intentionally scoped to `toggle_file_reviewed` and `next_unreviewed_file`.
-- For remap-only actions (`add_comment`, `add_range_comment`, `edit_comment`, `delete_comment`, `set_comment_type`, `send_to_agent`, `list_comments`), `""` is invalid and setup warns, then default/effective mapping remains active.
-- `add_range_comment` mapping normally uses its configured/default value from setup normalization. The fallback chain to resolved `add_comment` (then `mc`) is a defensive runtime path when `Config.keymaps` is missing or bypasses normalization.
-
-Example override (partial remap + selective disable):
-
-```lua
-require("commentry").setup({
-  keymaps = {
-    add_comment = "gc",
-    add_range_comment = "gc",
-    edit_comment = "ge",
-    delete_comment = "gd",
-    set_comment_type = "gt",
-    send_to_agent = "gs",
-    list_comments = "gl",
-    toggle_file_reviewed = "",
-    next_unreviewed_file = "]u",
-  },
-})
-```
-
-Example keep defaults except one mapping:
-
-```lua
-require("commentry").setup({
-  keymaps = {
-    next_unreviewed_file = "]n",
-  },
-})
-```
+- `:Commentry inbox [all|unread|read|open|resolved|queued]` opens the inbox.
+- `:Commentry comment` captures a line or command range, including Diffview.
+- `:Commentry capture-text [register]` comments on copied text.
+- `:Commentry new-thread` creates an unanchored project conversation.
+- `:Commentry open [arguments]` opens Diffview.
+- `:Commentry diagnostics` shows logging, inbox connection and Diffview state.
+- `:Commentry help` opens the vimdoc.
 
 ## Development
 
@@ -638,47 +559,14 @@ Use `mise run format_go`, `mise run lint_go`, and `mise run test_go` for Go-only
 work. `mise run lint:fix` applies Go lint fixes through hk. Install the optional
 git hooks with `mise exec -- hk install`.
 
-## Behavior Notes
-
-- Draft comments are persisted per review context under `~/.commentry/repos/<repo>/contexts/<context-id>/`.
-- Review context identity is branch-scoped (`<root>::review::branch::<branch-name>`), so comments remain stable across
-  different `:DiffviewOpen` range lenses on the same branch until anchors become outdated by code changes.
-- Add/edit/range comment actions open a floating multiline editor (`Enter` for newline, `Ctrl-s` to save, `q`/`Esc` in normal mode to cancel, `Tab` to cycle type).
-- Draft comment bodies are rendered as persistent boxed cards on commented lines, even when the cursor moves away.
-- Range comments render start/mid/end gutter signs (`╭`, `│`, `╰`) with subtle line tinting to show covered lines.
-- Reviewed state is content-addressed from each file's base/head Git blob and mode identities. It survives unstaged -> staged -> committed -> pushed transitions when the displayed before/after content is unchanged, regardless of commit IDs or Diffview range syntax.
-- A file is unreviewed when either displayed endpoint changes. Returning to an exact previously reviewed before/after snapshot restores its reviewed state.
-- Commentry renders `[reviewed]` marks in the Diffview file panel, `[partial]` on partially reviewed directories, per-file active comment counts, and separate unresolved counts. When several states share a narrow panel row, the compact badge uses `R` (reviewed), `c` (active comments), and `u` (unresolved), for example `[R 2c 1u]`. A lightweight `[reviewed]` / `[unreviewed]` indicator also appears in active diff buffers. These marks are independent from Diffview+ batch selections.
-- When code changes invalidate an anchor, the draft remains persisted with an unresolved reason instead of being exported or sent. Use `:Commentry list-comments unresolved` to inspect or permanently delete it, or move to the new destination and run `:Commentry reattach`.
-- Send flow is explicit: open/attach a review (`:Commentry open` or auto-attach), enable the generic agent integration, then run `:Commentry send-to-agent`.
-- Sidekick owns agent selection, attachment, terminal creation, display/focus, and prompt submission. Commentry only builds the review payload and delegates it.
-- Agent sends require an active Commentry review context. Running them outside an attached review buffer/context fails.
-- Send is send-and-forget in v1: Commentry delegates a compact human-readable payload (`COMMENTRY_REVIEW_V1`) once and reports whether delegation started. Sidekick owns subsequent selection or cancellation.
-- v1 does not persist send history, delivery receipts, retries, or any outbound queue state.
-
-## Bug Reports
-
-Use the minimal repro config to isolate issues:
-
-```bash
-nvim --clean -u repro.lua
-```
-
-This bootstraps a clean Neovim with only commentry + diffview loaded.
-
 ## Troubleshooting
 
-- Draft store file does not exist yet:
-  Commentry creates `~/.commentry/repos/<repo>/contexts/<context-id>/commentry.json` lazily on first successful write
-  (add/edit/delete comment, set type, toggle reviewed). If no writes happened in that context yet, the file is absent.
-- `:Commentry list-comments` is unavailable:
-  install `snacks.nvim`, then rerun `:checkhealth commentry` to confirm `picker.select` support.
-- Incompatible pre-snapshot store:
-  reviewed-file persistence now uses `reviewed_changes` snapshots rather than the former `file_reviews` boolean map. Remove the context's `commentry.json` if it predates this format.
-- Wrong context:
-  review context is branch-scoped (`<root>::review::branch::<branch-name>`) and shared across diff ranges on that branch.
-  Use `:Commentry debug-store` to confirm the active context id/path.
-- Comment disappeared after unstaged code changed:
-  anchor reconciliation keeps the draft but marks it unresolved. Run `:Commentry list-comments unresolved` to inspect or delete it. To recover it, move to the replacement line and run `:Commentry reattach`.
-- Agent handoff is unavailable:
-  confirm Sidekick is installed, run `:Commentry send-to-agent` from an active review context, and use Sidekick's selector to attach to or start an agent.
+- Backend missing or unavailable. Build with `mise run build`, configure the
+  Executor connection, then run `:checkhealth commentry`.
+- A captured location moved or disappeared. The thread remains in the inbox.
+  Its saved source is immutable. Agents can attach current code or a focused
+  comparison without losing the discussion.
+- A Diffview mapping is missing. Check `diffview.enabled`, `auto_attach` and
+  the configured key. Empty or binary diff sides cannot accept file comments.
+- Agent delivery fails. Use the inbox agent picker to attach an existing Rex
+  agent pane. The inbox retains the saved conversation and delivery status.

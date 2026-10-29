@@ -3,7 +3,6 @@
 describe("commentry.diagnostics", function()
   local original_diagnostics
   local original_config
-  local original_comments
   local original_diffview
   local original_log
   local original_cmd
@@ -13,7 +12,6 @@ describe("commentry.diagnostics", function()
   before_each(function()
     original_diagnostics = package.loaded["commentry.diagnostics"]
     original_config = package.loaded["commentry.config"]
-    original_comments = package.loaded["commentry.comments"]
     original_diffview = package.loaded["commentry.diffview"]
     original_log = package.loaded["commentry.log"]
     original_cmd = vim.cmd
@@ -25,7 +23,6 @@ describe("commentry.diagnostics", function()
   after_each(function()
     package.loaded["commentry.diagnostics"] = original_diagnostics
     package.loaded["commentry.config"] = original_config
-    package.loaded["commentry.comments"] = original_comments
     package.loaded["commentry.diffview"] = original_diffview
     package.loaded["commentry.log"] = original_log
     vim.cmd = original_cmd
@@ -33,19 +30,9 @@ describe("commentry.diagnostics", function()
     vim.api.nvim_open_win = original_open_win
   end)
 
-  it("dumps config/store/diffview state", function()
+  it("dumps logging, inbox connection and Diffview state", function()
     package.loaded["commentry.config"] = {
       log = { level = "info", sink = "echo" },
-      agent = { enabled = true },
-    }
-    package.loaded["commentry.comments"] = {
-      debug_store_context = function()
-        return {
-          store_path = "/tmp/commentry.json",
-          context_id = "ctx-1",
-          store_exists = true,
-        }
-      end,
     }
     package.loaded["commentry.diffview"] = {
       debug_state = function()
@@ -61,9 +48,8 @@ describe("commentry.diagnostics", function()
 
     assert.is_truthy(text:find("commentry.nvim diagnostics", 1, true))
     assert.is_truthy(text:find("log.level=info", 1, true))
-    assert.is_truthy(text:find("agent.enabled=true", 1, true))
-    assert.is_truthy(text:find("store=/tmp/commentry.json", 1, true))
-    assert.is_truthy(text:find("context=ctx-1", 1, true))
+    assert.is_truthy(text:find("inbox.connection=", 1, true))
+    assert.is_truthy(text:find("inbox.executable=", 1, true))
     assert.is_truthy(text:find("diffview.attached=true", 1, true))
   end)
 

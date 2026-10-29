@@ -4,37 +4,6 @@ local start = vim.health.start or vim.health.report_start
 local ok = vim.health.ok or vim.health.report_ok
 local warn = vim.health.warn or vim.health.report_warn
 local error = vim.health.error or vim.health.report_error
-local uv = vim.uv or vim.loop
-
----@return table
-local function agent_config()
-  local loaded, config = pcall(require, "commentry.config")
-  if not loaded or type(config) ~= "table" or type(config.agent) ~= "table" then
-    return { enabled = false }
-  end
-  return config.agent
-end
-
----@param agent table
-local function agent_health(agent)
-  if not agent.enabled then
-    return
-  end
-
-  local sidekick_ok, sidekick = pcall(require, "commentry.agent.adapters.sidekick")
-  if not sidekick_ok or type(sidekick) ~= "table" or type(sidekick.send) ~= "function" then
-    warn("agent enabled but sidekick adapter is unavailable; install sidekick integration or set agent.enabled=false")
-    return
-  end
-
-  local available = type(sidekick.available) ~= "function" or sidekick.available() == true
-  if not available then
-    warn("agent enabled but sidekick CLI send API is unavailable; check the Sidekick installation")
-    return
-  end
-
-  ok("agent adapter ready; Sidekick resolves the :Commentry send-to-agent target")
-end
 
 local function version_health()
   if vim.fn.has("nvim-0.10") == 1 then
@@ -105,48 +74,16 @@ local function log_health(cfg)
   ok(("log file sink writable: %s"):format(cfg.file))
 end
 
-local function store_writable_health()
-  local home = (uv and uv.os_homedir and uv.os_homedir()) or vim.env.HOME
-  if type(home) ~= "string" or home == "" then
-    warn("comment store health skipped: home directory unavailable")
-    return
-  end
-  local base = vim.fs.joinpath(vim.fs.normalize(home), ".commentry")
-  if vim.fn.isdirectory(base) ~= 1 then
-    ok(("comment store directory does not exist yet (created on first write): %s"):format(base))
-    return
-  end
-  local probe = vim.fs.joinpath(base, ".health-write-test")
-  local wrote, result = pcall(vim.fn.writefile, { "ok" }, probe)
-  if not wrote or result ~= 0 then
-    warn(("comment store directory is not writable: %s"):format(base))
-    return
-  end
-  pcall(vim.fn.delete, probe)
-  ok(("comment store directory is writable: %s"):format(base))
-end
-
 --- check.
 function M.check()
   start("commentry")
   version_health()
   setup_health()
   if pcall(require, "diffview") then
-    ok("diffview.nvim is installed")
+    ok("diffview.nvim available for diff capture")
   else
-    error("diffview.nvim is required for Commentry")
+    ok("diffview.nvim not installed; optional diff capture is unavailable")
   end
-
-  local snacks_ok, snacks = pcall(require, "snacks")
-  if not snacks_ok then
-    warn("snacks.nvim not installed: :Commentry list-comments and :Commentry reattach are unavailable")
-  elseif type(snacks.picker) ~= "table" or type(snacks.picker.select) ~= "function" then
-    warn("snacks.nvim installed but picker.select is unavailable")
-  else
-    ok("snacks.nvim picker.select is available for :Commentry list-comments and :Commentry reattach")
-  end
-
-  store_writable_health()
   local backend = require("commentry.inbox.store").executable()
   if backend and backend ~= "" and vim.fn.executable(backend) == 1 then
     ok("inbox Go backend available: " .. backend)
@@ -154,7 +91,6 @@ function M.check()
     warn("inbox requires the commentry binary; run mise run build or install it on PATH")
   end
   log_health(log_config())
-  agent_health(agent_config())
 end
 
 return M

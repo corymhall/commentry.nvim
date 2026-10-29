@@ -78,9 +78,8 @@ Run commands from repo root.
 
 ## Key Invariants
 
-- Draft store format (`commentry.json`) must remain backwards-compatible. Existing stores must still load after changes to `lua/commentry/store.lua`.
-- Review context identity is branch-scoped (`<root>::review::branch::<branch>`). Do not change the identity scheme without migrating existing stores.
-- Comment types are `note`, `suggestion`, `issue`, `praise`. Do not add types without updating config validation, store schema, and export formatting.
+- All conversations, including Diffview captures, use the inbox backend. Do not reintroduce a separate draft store or branch-scoped comment identity.
+- Captures retain the displayed text and Git provenance. Diffview scratch-buffer names are not filesystem paths.
 - `:Commentry` must remain the single user-facing command entrypoint.
 - `config.lua` validates and normalizes all user input; setup must be idempotent.
 - Keep module namespace aligned (`commentry`) across `plugin/`, `lua/`, `tests/`, and docs.

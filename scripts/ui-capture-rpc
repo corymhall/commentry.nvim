@@ -15,7 +15,7 @@ SINGLE_SCENARIO=""
 CWD=""
 CLEANUP_REPO=""
 
-SCENARIOS=(popup card range review inbox capture)
+SCENARIOS=(popup diffview inbox capture)
 
 cleanup() {
   if [[ -n ${CLEANUP_REPO:-} && -d ${CLEANUP_REPO:-} ]]; then
@@ -46,14 +46,8 @@ scenario_name() {
     popup)
       printf '%s\n' "rpc-comment-popup"
       ;;
-    card)
-      printf '%s\n' "rpc-comment-card"
-      ;;
-    range)
-      printf '%s\n' "rpc-range-comment"
-      ;;
-    review)
-      printf '%s\n' "rpc-review-progress"
+    diffview)
+      printf '%s\n' "rpc-diffview-inbox"
       ;;
     inbox)
       printf '%s\n' "rpc-inbox"
@@ -73,14 +67,8 @@ scenario_title() {
     popup)
       printf '%s\n' "RPC Popup"
       ;;
-    card)
-      printf '%s\n' "RPC Saved Card"
-      ;;
-    range)
-      printf '%s\n' "RPC Range Comment"
-      ;;
-    review)
-      printf '%s\n' "RPC Review Progress"
+    diffview)
+      printf '%s\n' "Diffview inbox capture"
       ;;
     inbox)
       printf '%s\n' "RPC Universal Inbox"
@@ -100,14 +88,8 @@ scenario_caption() {
     popup)
       printf '%s\n' "Rendered from Neovim multigrid redraw events while the Commentry floating editor is open."
       ;;
-    card)
-      printf '%s\n' "Rendered from Neovim multigrid redraw events after saving an inline question comment."
-      ;;
-    range)
-      printf '%s\n' "Rendered from Neovim multigrid redraw events after saving a multi-line issue comment."
-      ;;
-    review)
-      printf '%s\n' "Commentry-owned reviewed marks rendered independently from Diffview selections."
+    diffview)
+      printf '%s\n' "Diffview captures and markers backed by the project inbox."
       ;;
     inbox)
       printf '%s\n' "Project inbox with a focused snapshot diff beside its conversation."
@@ -218,7 +200,7 @@ const links = presets
   .map((preset) => `<li><a href="${preset}/index.html">${preset}</a></li>`)
   .join("\n");
 
-const compareLinks = ["popup", "card", "range", "review", "inbox", "capture"]
+const compareLinks = ["popup", "diffview", "inbox", "capture"]
   .map((scenario) => `<li><a href="compare/${scenario}.html">compare ${scenario}</a></li>`)
   .join("\n");
 
@@ -269,29 +251,12 @@ const outDir = process.argv[2];
 const presets = process.argv.slice(3);
 
 const scenarios = [
+  { key: "diffview", title: "Diffview inbox capture", image: "rpc-diffview-inbox.png", caption: "Saved source comments in Diffview use the shared project inbox." },
   {
     key: "popup",
     title: "Popup Comparison",
     image: "rpc-comment-popup.png",
     caption: "Floating comment editor rendered from real multigrid UI events.",
-  },
-  {
-    key: "card",
-    title: "Saved Card Comparison",
-    image: "rpc-comment-card.png",
-    caption: "Inline saved comment card rendered from real multigrid UI events.",
-  },
-  {
-    key: "range",
-    title: "Range Comment Comparison",
-    image: "rpc-range-comment.png",
-    caption: "Multi-line range comment rendered from real multigrid UI events.",
-  },
-  {
-    key: "review",
-    title: "Review Progress Comparison",
-    image: "rpc-review-progress.png",
-    caption: "Content-addressed reviewed marks rendered in the Diffview panel and active diff.",
   },
   {
     key: "inbox",

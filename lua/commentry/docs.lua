@@ -6,17 +6,8 @@ local public_command_refs = {
   ":Commentry capture-text",
   ":Commentry new-thread",
   ":Commentry open",
-  ":Commentry add-range-comment",
-  ":Commentry list-comments",
-  ":Commentry reattach",
   ":Commentry help",
-  ":Commentry set-comment-type",
-  ":Commentry toggle-file-reviewed",
-  ":Commentry next-unreviewed",
-  ":Commentry export",
-  ":Commentry debug-store",
   ":Commentry diagnostics",
-  ":Commentry send-to-agent",
 }
 
 local required_help_tags = {
@@ -27,8 +18,6 @@ local required_help_tags = {
   "commentry.agent",
   "commentry.keymaps",
   "commentry.commands",
-  "commentry.unresolved",
-  "commentry.v1-boundaries",
   "commentry.persistence",
   "commentry.inbox",
   "commentry.troubleshooting",
@@ -93,7 +82,7 @@ local function validate_public_surface(errors, label, content)
     expect_contains(errors, label, action, content)
   end
 
-  for _, token in ipairs({ "diffview.nvim", "snacks.nvim", "Sidekick", "auto_attach", "comment_ranges" }) do
+  for _, token in ipairs({ "diffview.nvim", "Executor", "Rex", "auto_attach" }) do
     expect_contains(errors, label, token, content)
   end
 end

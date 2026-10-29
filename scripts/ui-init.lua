@@ -49,11 +49,6 @@ require("commentry").setup({
   },
   diffview = {
     auto_attach = true,
-    comment_cards = {
-      max_width = 58,
-      max_body_lines = 6,
-      show_markers = true,
-    },
   },
 })
 
