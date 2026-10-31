@@ -115,12 +115,7 @@ func openCapture(command *cobra.Command, directory, project string, target rex.C
 	if err != nil {
 		return err
 	}
-	binary, err := os.Executable()
-	if err != nil {
-		_ = os.Remove(filename)
-		return err
-	}
-	window, err := target.Open(ctx, "New comment", canonical, []string{binary, "--directory", directory, "rex", "--session", target.Session, "--client", target.Client, "capture-editor", "--input", filename, "--return-window", origin})
+	window, err := target.Open(ctx, "New comment", canonical, []string{"commentry", "--directory", directory, "rex", "--session", target.Session, "--client", target.Client, "capture-editor", "--input", filename, "--return-window", origin})
 	if err != nil {
 		// A timed out creation may have started the editor. Keep its private
 		// snapshot available rather than invalidating an already-created tab.
@@ -166,14 +161,10 @@ func newRexInbox(directory, project *string, target *rex.Client) *cobra.Command 
 		if err != nil {
 			return err
 		}
-		binary, err := os.Executable()
-		if err != nil {
-			return err
-		}
 		if err = selectOriginAgent(ctx, data, canonical, *target); err != nil {
 			return err
 		}
-		result, err := target.OpenInbox(ctx, canonical, data, binary)
+		result, err := target.OpenInbox(ctx, canonical, data)
 		return emit(command, result, err)
 	}}
 }

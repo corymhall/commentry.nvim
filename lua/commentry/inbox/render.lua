@@ -52,7 +52,7 @@ function M.list(view)
   end
   M.write(view.list_buf, #rows > 0 and rows or { "  Your inbox is empty" }, "text")
   for index, thread in ipairs(view.threads) do
-    local status = thread.resolved and "Resolved" or "Open"
+    local status = thread.pending and "Pending review" or thread.resolved and "Resolved" or "Open"
     if view.outdated[thread.id] then
       status = status .. " / Outdated"
     end
@@ -62,7 +62,7 @@ function M.list(view)
         break
       end
       if item.status == "pending" or item.status == "claimed" then
-        status = status .. " / " .. (item.status == "pending" and "Pending" or "Sent")
+        status = status .. " / " .. (item.status == "pending" and "Queued" or "Sent")
         break
       end
     end
@@ -249,7 +249,7 @@ function M.conversation(view, thread)
   if view.reply and view.reply.id == thread.id and vim.bo[view.thread_buf].modified then
     return
   end
-  local status = thread.resolved and "Resolved" or "Open"
+  local status = thread.pending and "Pending review" or thread.resolved and "Resolved" or "Open"
   if view.outdated[thread.id] then
     status = status .. " / Outdated"
   end
@@ -289,7 +289,7 @@ function M.conversation(view, thread)
   local dirty
   rows, dirty = Reply.prepare(view, thread, rows)
   M.write(view.thread_buf, rows, "markdown")
-  vim.bo[view.thread_buf].modifiable = true
+  vim.bo[view.thread_buf].modifiable = not thread.pending
   vim.bo[view.thread_buf].modified = dirty
   if dirty then
     -- Restored drafts retain their displayed history. Folds from the previous

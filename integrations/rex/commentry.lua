@@ -1,8 +1,7 @@
--- Load from Rex init.lua. Set COMMENTRY_CLI for a checkout build if needed.
-local binary = os.getenv("COMMENTRY_CLI") or (os.getenv("HOME") .. "/.local/bin/commentry")
+-- Load from Rex init.lua. Requires commentry on PATH.
 local function launch(ctx, command, empty)
   local args = {
-    binary,
+    "commentry",
     "rex",
     "--session",
     ctx.session_id,
@@ -16,17 +15,6 @@ local function launch(ctx, command, empty)
   if empty then
     args[#args + 1] = "--empty"
   end
-  table.insert(
-    args,
-    1,
-    "PATH="
-      .. os.getenv("HOME")
-      .. "/.local/bin:"
-      .. os.getenv("HOME")
-      .. "/.local/share/mise/shims:/opt/homebrew/bin:"
-      .. (os.getenv("PATH") or "/usr/bin:/bin")
-  )
-  table.insert(args, 1, "env")
   local result, err = rex.exec(args)
   if not result then
     error(err)
@@ -38,7 +26,7 @@ local function launch(ctx, command, empty)
   if not response or not response.ok then
     error(decode_err or "Unable to open Commentry")
   end
-  local waited, wait_err = rex.exec({ "/bin/sleep", "0.2" })
+  local waited, wait_err = rex.exec({ "sleep", "0.2" })
   if not waited or not waited.ok then
     error(wait_err or "Unable to select Commentry")
   end

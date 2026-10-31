@@ -65,6 +65,53 @@ describe("universal inbox", function()
     return result
   end
 
+  it("edits and discards pending comments but freezes them as soon as they are queued", function()
+    local Inbox = require("commentry.inbox")
+    local function save_popup(body)
+      vim.cmd.stopinsert()
+      local popup = vim.api.nvim_get_current_buf()
+      vim.api.nvim_buf_set_lines(popup, 0, -1, false, { body })
+      for _, map in ipairs(vim.api.nvim_buf_get_keymap(popup, "n")) do
+        if map.lhs == "<CR>" then
+          map.callback()
+          return
+        end
+      end
+      error("Missing composer save mapping")
+    end
+    local view = Inbox.open(nil, { project = root })
+    keys(view).n()
+    save_popup("Pending question")
+    local thread = assert(Store.list(root))[1]
+    assert.is_true(thread.pending)
+    keys(view).ge()
+    assert.are.same({ "Pending question" }, vim.api.nvim_buf_get_lines(0, 0, -1, false))
+    save_popup("Revised question")
+    thread = assert(Store.get(thread.id))
+    assert.are.same("Revised question", thread.messages[1].body)
+    assert.are.same(1, #thread.messages)
+    local choose = vim.ui.select
+    vim.ui.select = function(_, _, callback)
+      callback("Discard")
+    end
+    local ok, err = pcall(keys(view).gd)
+    vim.ui.select = choose
+    assert.is_true(ok, tostring(err))
+    assert.are.same(0, #assert(Store.list(root)))
+    keys(view).n()
+    save_popup("Ready to send")
+    thread = assert(Store.list(root))[1]
+    assert(Store.enqueue(thread.id, nil, { defer_delivery = true }))
+    keys(view).R()
+    assert.is_falsy(assert(Store.get(thread.id)).pending)
+    local windows = #vim.api.nvim_list_wins()
+    keys(view).ge()
+    assert.are.same(windows, #vim.api.nvim_list_wins())
+    keys(view).r()
+    assert.are.same(view.thread_buf, vim.api.nvim_get_current_buf())
+    assert.is_true(vim.bo[view.thread_buf].modifiable)
+  end)
+
   it("keeps a failed popup save editable and supports normal-mode save and cancel", function()
     local thread = file({ "local value = 1" }, 1)
     vim.api.nvim_set_current_buf(buf)
@@ -394,6 +441,8 @@ describe("universal inbox", function()
     assert.are.same(1, #threads)
     assert.are.same("general", threads[1].source.origin)
     assert.are.same({}, threads[1].source.lines)
+    assert.is_true(threads[1].pending)
+    assert(Store.enqueue(threads[1].id, nil, { defer_delivery = true }))
     assert(Store.update(threads[1].id, { kind = "reply", author = "Agent", body = "New response" }))
     view = require("commentry.inbox").open("unread")
     -- The standalone creation uses the current project, not the temporary fixture root.

@@ -163,7 +163,7 @@ Rex supplies discovery, status and terminal input for the existing agent.
 
 Load the general-purpose actions in Rex init.lua, then rex config reload:
 >
-  dofile(os.getenv("HOME") .. "/plugins/commentry.nvim/integrations/rex/agents.lua").setup()
+  dofile("/path/to/commentry.nvim/integrations/rex/agents.lua").setup()
 <
 These actions also work independently of Commentry:
 >
@@ -220,7 +220,7 @@ from the harness's native queue.
 Rex clipboard capture:
 Install the binary with mise run install-commentry. In Rex init.lua:
 >
-  dofile(os.getenv("HOME") .. "/plugins/commentry.nvim/integrations/rex/commentry.lua")
+  dofile("/path/to/commentry.nvim/integrations/rex/commentry.lua")
   rex.bind("ctrl+a>a", "commentry_capture")
   rex.bind("ctrl+a>shift+a", "commentry_new")
   rex.bind("ctrl+a>i", "commentry_inbox")
@@ -248,8 +248,8 @@ The bindings work while Rex is focused, not as OS-wide hotkeys.
 
 The same composer runs with commentry capture --project . or --empty.
 commentry rex capture opens it in Rex using REX_SESSION and REX_BLOCK.
-Use --client when several Rex apps are connected. COMMENTRY_REX overrides
-the Rex executable. Capture currently requires local macOS and Neovim 0.10+.
+Use --client when several Rex apps are connected. The rex executable must be
+on PATH. Capture currently requires local macOS and Neovim 0.10+.
 
 Existing session commands:
 >
@@ -273,8 +273,8 @@ External agents and capture tools can invoke scripts/commentry-inbox from the
 plugin checkout. It reads one JSON request from stdin and returns one JSON
 response, by forwarding to the Go backend with commentry rpc. Neovim is not
 required by the external CLI. Build with mise run build or install with
-mise run install-commentry. The inbox uses bin/commentry from the checkout,
-then commentry on PATH. Override the executable with COMMENTRY_CLI.
+mise run install-commentry. The commentry executable must be on PATH for
+Neovim, Rex and external tools. For a checkout build, add its bin/ to PATH.
 Supported requests include:
 >
   {"action":"create","project":"/project","text":"excerpt","body":"comment"}
@@ -460,6 +460,15 @@ COMMANDS                                          *commentry.commands*
     :Commentry open [arguments]
     :Commentry diagnostics
     :Commentry help
+
+PENDING REVIEWS
+
+New Neovim comments and project threads are pending until sent. Saving keeps
+these comments editable without queuing delivery. In the inbox, ge edits and
+gd discards a pending comment after confirmation. r also edits pending comments.
+s sends one thread; gs sends new project comments. Queuing freezes the comment,
+even if delivery fails or is cancelled. Afterwards r adds replies. Edits never
+change captured source. Existing conversations are not converted to pending.
 
 PERSISTENCE                                       *commentry.persistence*
 

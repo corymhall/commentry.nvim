@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/corymhall/commentry.nvim/executor"
@@ -107,10 +106,7 @@ func batchPrompt(items []map[string]string, a inbox.Agent, directory string) str
 		notification.ExecutorApp = backend.Config.App
 	} else {
 		notification.Directory = directory
-		notification.Executable, _ = os.Executable()
-		if notification.Executable == "" {
-			notification.Executable = "commentry"
-		}
+		notification.Executable = "commentry"
 		instructions = "Read these threads with executable --directory directory read THREAD. Each claim's saved queue message contains the submitted context. Reply through executable --directory directory rpc with JSON containing action=finish, thread, claim_ids, author and body."
 	}
 	body, _ := json.Marshal(notification)

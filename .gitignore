@@ -2,6 +2,7 @@
 /.repro
 /.tests
 /.commentry/
+/.beads/backup/
 /build
 /bin/
 /debug

@@ -7,14 +7,6 @@ function M.directory(opts)
 end
 
 function M.executable()
-  if vim.env.COMMENTRY_CLI and vim.env.COMMENTRY_CLI ~= "" then
-    return vim.env.COMMENTRY_CLI
-  end
-  local script = vim.api.nvim_get_runtime_file("scripts/commentry-inbox", false)[1]
-  local local_binary = script and (vim.fs.dirname(vim.fs.dirname(script)) .. "/bin/commentry")
-  if local_binary and vim.fn.executable(local_binary) == 1 then
-    return local_binary
-  end
   return vim.fn.exepath("commentry")
 end
 
@@ -44,7 +36,7 @@ end
 local function request(input, opts)
   local executable = M.executable()
   if not executable or executable == "" then
-    return nil, "Commentry backend is missing. Run mise run build or install the commentry binary"
+    return nil, "Commentry backend is missing. Install commentry and add it to PATH"
   end
   local ok, result = pcall(function()
     return vim

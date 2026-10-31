@@ -78,7 +78,7 @@ func (s *Store) Execute(ctx context.Context, r Request) (any, error) {
 		return s.Revision(ctx)
 	case "changes":
 		return s.Changes(ctx, r.Project, r.Cursor)
-	case "create", "attach", actionRevise, "reply", "resolve", "comparison", "archive-comparison", "read-state", modeQueue, "claim", statusComplete, "cancel", "fail", "retry", "finish":
+	case "edit-pending", "discard-pending", "create", "attach", actionRevise, "reply", "resolve", "comparison", "archive-comparison", "read-state", modeQueue, "claim", statusComplete, "cancel", "fail", "retry", "finish":
 	default:
 		return nil, fmt.Errorf("unknown inbox action: %s", r.Action)
 	}
@@ -135,7 +135,7 @@ func (s *Store) filtered(ctx context.Context, r Request) (any, error) {
 	}
 	summaries := []map[string]any{}
 	for _, t := range selected {
-		summaries = append(summaries, map[string]any{"id": t.ID, "project": t.Project, "title": t.Title, "unread": t.Unread, "incoming": t.Incoming, "resolved": t.Resolved, "messages": t.Messages, modeQueue: t.Queue})
+		summaries = append(summaries, map[string]any{"id": t.ID, "project": t.Project, "title": t.Title, "pending": t.Pending, "unread": t.Unread, "incoming": t.Incoming, "resolved": t.Resolved, "messages": t.Messages, modeQueue: t.Queue})
 	}
 	return summaries, nil
 }
@@ -163,6 +163,9 @@ func matches(t Thread, filter string) bool {
 }
 
 func create(ctx context.Context, tx *sql.Tx, r Request) (any, error) {
+	if r.Pending && r.Author != "You" {
+		return nil, fmt.Errorf("only human comments can be pending")
+	}
 	if !nonempty(r.Body) {
 		return nil, fmt.Errorf("body is required")
 	}
@@ -185,7 +188,7 @@ func create(ctx context.Context, tx *sql.Tx, r Request) (any, error) {
 	if title == "" {
 		title = strings.Split(strings.TrimSpace(r.Body), "\n")[0]
 	}
-	thread := Thread{ID: identity("t-"), Project: r.Project, Title: title, Source: source, CreatedAt: at, UpdatedAt: at, Messages: []Message{message}, Comparisons: []Event{}, Queue: []Queued{}}
+	thread := Thread{Pending: r.Pending, ID: identity("t-"), Project: r.Project, Title: title, Source: source, CreatedAt: at, UpdatedAt: at, Messages: []Message{message}, Comparisons: []Event{}, Queue: []Queued{}}
 	if r.Author != "You" {
 		thread.Incoming = message.ID
 		thread.Unread = true
@@ -203,6 +206,9 @@ func update(ctx context.Context, tx *sql.Tx, r Request) (any, error) {
 	}
 	at := time.Now().UTC().Format(time.RFC3339Nano)
 	event := Event{ID: identity("e-"), Thread: thread.ID, Kind: r.Action, Author: r.Author, At: at, ClaimID: r.ClaimID, QueueID: r.QueueID}
+	if r.Action == "edit-pending" || r.Action == "discard-pending" {
+		return updatePending(ctx, tx, thread, r, event)
+	}
 	var result any
 	switch r.Action {
 	case modeQueue:
@@ -214,6 +220,7 @@ func update(ctx context.Context, tx *sql.Tx, r Request) (any, error) {
 			return item, nil
 		}
 		thread.Queue = append(thread.Queue, item)
+		thread.Pending = false
 		result = item
 	default:
 		result, err = mutate(&thread, r, &event)
@@ -403,6 +410,9 @@ func apply(thread *Thread, r Request, event *Event) error {
 }
 
 func appendMessage(thread *Thread, r Request, event Event) error {
+	if thread.Pending {
+		return fmt.Errorf("send the pending comment before replying")
+	}
 	if !nonempty(r.Body) {
 		return fmt.Errorf("body is required")
 	}

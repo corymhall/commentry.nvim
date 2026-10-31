@@ -80,6 +80,9 @@ type Review struct {
 
 // Thread contains a capture, conversation, comparisons, and read/work state.
 type Thread struct {
+	// Pending permits editing the initial human message until the first queue
+	// transaction commits. Delivery failure or cancellation never restores it.
+	Pending           bool         `json:"pending,omitempty"`
 	Review            *Review      `json:"review,omitempty"`
 	ReviewHistory     []Review     `json:"review_history,omitempty"`
 	PrimaryComparison string       `json:"primary_comparison,omitempty"`
@@ -103,6 +106,10 @@ type Thread struct {
 
 // Request is the shared CLI and Neovim JSON protocol.
 type Request struct {
+	Pending bool `json:"pending,omitempty"`
+	// ExpectedMessage is the initial message ID observed by an editor. Each
+	// pending edit replaces that ID, rejecting stale edits and discards.
+	ExpectedMessage   string        `json:"expected_message,omitempty"`
 	RequestID         string        `json:"request_id,omitempty"`
 	Items             []PublishItem `json:"items,omitempty"`
 	ComparisonID      string        `json:"comparison_id,omitempty"`

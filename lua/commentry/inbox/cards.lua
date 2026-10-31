@@ -23,7 +23,7 @@ local function card(item, cfg)
   local author = review and review.author or message.author
   local body = review and review.summary or message.body
   local range = "L" .. item.first .. (item.last > item.first and "-L" .. item.last or "")
-  local header = author .. " · " .. range
+  local header = author .. " · " .. range .. (thread.pending and " · Pending" or "")
   local rows = { { { "  ┌ ", "CommentryInboxCardBorder" }, { header, "CommentryInboxAccent" } } }
   local lines = {}
   for _, line in ipairs(vim.split(body, "\n", { plain = true })) do

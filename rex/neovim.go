@@ -47,12 +47,12 @@ func neovimSocket(ctx context.Context, pid int) (string, error) {
 
 func vimString(value string) string { return "'" + strings.ReplaceAll(value, "'", "''") + "'" }
 
-func (c Client) openNeovim(ctx context.Context, block string, pid int, project, directory, binary string) error {
-	options, err := json.Marshal(map[string]string{"project": project, "directory": directory, "binary": binary})
+func (c Client) openNeovim(ctx context.Context, block string, pid int, project, directory string) error {
+	options, err := json.Marshal(map[string]string{"project": project, "directory": directory})
 	if err != nil {
 		return err
 	}
-	code := `(function() local o=_A; vim.cmd.stopinsert(); vim.env.COMMENTRY_INBOX_DIR=o.directory; vim.env.COMMENTRY_CLI=o.binary; require('commentry.inbox').open(nil,{project=o.project}); return true end)()`
+	code := `(function() local o=_A; vim.cmd.stopinsert(); vim.env.COMMENTRY_INBOX_DIR=o.directory; require('commentry.inbox').open(nil,{project=o.project}); return true end)()`
 	expression := "luaeval(" + vimString(code) + ",json_decode(" + vimString(string(options)) + "))"
 	socket, socketErr := neovimSocket(ctx, pid)
 	if socketErr == nil {

@@ -12,10 +12,6 @@ import (
 // Do invokes a configured Rex action with JSON on stdin. It never starts a
 // server or terminal and never passes message text through a shell.
 func Do(ctx context.Context, action string, args, result any) error {
-	binary, err := executable()
-	if err != nil {
-		return err
-	}
 	raw, err := json.Marshal(args)
 	if err != nil {
 		return err
@@ -23,7 +19,7 @@ func Do(ctx context.Context, action string, args, result any) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	// #nosec G204 -- The executable is the selected Rex CLI and arguments are separate.
-	command := exec.CommandContext(ctx, binary, "--autostart=false", "do", action, "--args", "-", "--json")
+	command := exec.CommandContext(ctx, "rex", "--autostart=false", "do", action, "--args", "-", "--json")
 	command.Stdin = strings.NewReader(string(raw))
 	output, err := command.Output()
 	if err != nil {

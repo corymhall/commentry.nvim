@@ -137,6 +137,9 @@ describe("Diffview inbox capture", function()
     assert.is_truthy(cards:find("Another independent question", 1, true))
     local _, occurrences = cards:gsub("Review this range", "")
     assert.are.same(1, occurrences)
+    -- Sending freezes the pending comment before replies can be added.
+    assert.is_true(first.pending)
+    assert(Store.enqueue(first.id, nil, { defer_delivery = true }))
     -- Resolution and replies operate on these exact inbox threads.
     assert(Store.update(first.id, { kind = "reply", author = "Agent", body = "The replacement handles retries." }))
     Diffview.refresh()

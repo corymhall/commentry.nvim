@@ -84,6 +84,7 @@ const queued = object({
   delivery_error: string().optional(),
 });
 const thread = object({
+  pending: boolean().optional(),
   id: text,
   project: text,
   title: text,
@@ -151,6 +152,8 @@ const publicationOutput = object({
   ).optional(),
 });
 const request = object({
+  pending: boolean().optional(),
+  expected_message: string().optional(),
   action: text,
   request_id: string().optional(),
   items: array(publishItem).optional(),

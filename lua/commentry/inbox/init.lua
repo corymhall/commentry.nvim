@@ -186,8 +186,12 @@ function M.new_thread()
   local view = active and vim.api.nvim_get_current_tabpage() == active.tab and active or nil
   local project = view and view.project or Source.project()
   compose("New project thread", nil, function(body)
-    local id, err =
-      Store.create({ project = project, body = body, source = { kind = "text", lines = {}, origin = "general" } })
+    local id, err = Store.create({
+      project = project,
+      body = body,
+      pending = true,
+      source = { kind = "text", lines = {}, origin = "general" },
+    })
     if not report(id, err) then
       return false
     end
@@ -212,6 +216,7 @@ function M.comment(args)
   end
   compose("Comment on " .. capture.source.path .. ":" .. first .. "-" .. last, nil, function(body)
     capture.body = body
+    capture.pending = true
     local id, create_err = Store.create(capture)
     if not report(id, create_err) then
       return false
@@ -242,6 +247,7 @@ function M.capture_text(register)
   }
   compose("Comment on captured text", nil, function(body)
     capture.body = body
+    capture.pending = true
     local id, err = Store.create(capture)
     if not report(id, err) then
       return false
@@ -347,7 +353,7 @@ refresh = function(view, select_id)
   vim.wo[view.list_win].winbar = " " .. scope_label:gsub("%%", "%%%%") .. " / " .. view.filter .. " / " .. #view.threads
   vim.wo[view.thread_win].winbar = " Conversation %=%#CommentryInboxMuted#"
     .. view.delivery_mode
-    .. "  r reply  :w save  s send  gs all "
+    .. "  ge edit pending  gd discard  r reply  s send  gs all "
   view.stamp = revision
 end
 
@@ -482,11 +488,53 @@ function M.open(scope, opts)
       end
     end
   end
+  local function edit_pending()
+    local thread = selected(view)
+    if not thread or not thread.pending then
+      Util.warn("Only pending comments can be edited. Sent conversations use replies.")
+      return
+    end
+    if Reply.unsaved(view, nil, thread.id) then
+      return
+    end
+    local version = thread.messages[1].id
+    compose("Edit pending comment", vim.split(thread.messages[1].body, "\n", { plain = true }), function(body)
+      local event, err = Store.update(thread.id, { kind = "edit-pending", body = body, expected_message = version })
+      if not report(event, err) then
+        return false
+      end
+      refresh(view, thread.id)
+      return thread.id
+    end)
+  end
   local function reply()
     local thread = selected(view)
     if thread then
-      Reply.focus(view)
+      if thread.pending then
+        edit_pending()
+      else
+        Reply.focus(view)
+      end
     end
+  end
+  local function discard_pending()
+    local thread = selected(view)
+    if not thread or not thread.pending then
+      Util.warn("Only pending comments can be discarded")
+      return
+    end
+    if Reply.unsaved(view, nil, thread.id) then
+      return
+    end
+    local version = thread.messages[1].id
+    vim.ui.select({ "Keep", "Discard" }, { prompt = "Discard pending comment?" }, function(choice)
+      if choice == "Discard" then
+        local event, err = Store.update(thread.id, { kind = "discard-pending", expected_message = version })
+        if report(event, err) and not view.closed then
+          refresh(view)
+        end
+      end
+    end)
   end
   local function toggle()
     local thread = selected(view)
@@ -538,7 +586,9 @@ function M.open(scope, opts)
         end,
         "Refresh inbox",
       },
-      r = { reply, "Reply to thread" },
+      r = { reply, "Reply or edit pending comment" },
+      ge = { edit_pending, "Edit pending comment" },
+      gd = { discard_pending, "Discard pending comment" },
       n = { M.new_thread, "New standalone thread" },
       ["<CR>"] = { enter, "Open conversation and mark read" },
       u = {
@@ -769,7 +819,9 @@ function M.open(scope, opts)
             "Inbox keys",
             "",
             "j / k   Select a thread in the list",
-            "r       Focus the inline reply",
+            "r       Edit pending comment or focus the inline reply",
+            "ge      Edit a pending comment before sending",
+            "gd      Discard a pending comment",
             "visual r  Quote a source selection into the reply",
             ":write  Save the reply, then s sends it",
             "n       New standalone project thread",
@@ -800,7 +852,7 @@ function M.open(scope, opts)
     }) do
       -- The conversation is an editor now. Leave insert, append, undo, change,
       -- delete and other ordinary text keys available in its normal mode.
-      if buf ~= view.thread_buf or vim.tbl_contains({ "r", "s", "gs", "q", "?", "gf", "gl" }, key) then
+      if buf ~= view.thread_buf or vim.tbl_contains({ "r", "ge", "gd", "s", "gs", "q", "?", "gf", "gl" }, key) then
         vim.keymap.set("n", key, mapping[1], { buffer = buf, desc = mapping[2] })
       end
     end
@@ -833,6 +885,11 @@ function M.open(scope, opts)
     end,
   })
   vim.keymap.set("x", "r", function()
+    local thread = selected(view)
+    if thread and thread.pending then
+      Util.warn("Send the pending comment before quoting into a reply. Use ge to edit it.")
+      return
+    end
     local first, last = vim.fn.getpos("v"), vim.fn.getpos(".")
     local lines = vim.fn.getregion(first, last, {
       type = vim.fn.mode(),

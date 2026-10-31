@@ -23,7 +23,8 @@ function M.prepare(view, thread, history)
   M.remember(view)
   local reply = drafts[thread.id]
   if not reply then
-    local prefix = vim.list_extend(vim.deepcopy(history), { "Reply / :write save / s send", "" })
+    local prompt = thread.pending and "Pending review / ge edit / gd discard / s send" or "Reply / :write save / s send"
+    local prefix = vim.list_extend(vim.deepcopy(history), { prompt, "" })
     reply = {
       id = thread.id,
       project = thread.project,

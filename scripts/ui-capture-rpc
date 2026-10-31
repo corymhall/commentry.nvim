@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+export PATH="$ROOT/bin:$PATH"
 CACHE_ROOT="$ROOT/tmp/ui-cache"
 NVIM_CACHE="$CACHE_ROOT/nvim"
 OUT_DIR="$ROOT/tmp/ui-capture-rpc"

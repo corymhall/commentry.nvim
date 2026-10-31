@@ -17,6 +17,14 @@ The inbox works independently of Diffview:
 - `:Commentry new-thread` starts a project conversation with no selection,
   clipboard contents, or file anchor. Press `n` inside the inbox for the same action.
 
+New Neovim comments and project threads save as pending reviews. In the inbox,
+`ge` edits a pending comment and `gd` discards it after confirmation. `r` also
+opens the editor for pending comments. Saving does not queue delivery. `s` sends
+one thread and `gs` sends new project comments. Queuing freezes the comment,
+even if delivery fails or is cancelled. After sending, `r` adds a reply instead.
+The captured source stays unchanged when editing. Existing conversations are
+not converted to pending reviews.
+
 The editor uses `Ctrl-s` or normal-mode `Enter` to save. Normal-mode `Esc`,
 `q`, or `Ctrl-c` cancels. Insert-mode `Esc` returns to normal mode. The inbox uses
 `j`/`k` in its list to select a thread, `r` to reply, `x` to resolve or reopen,
@@ -195,7 +203,7 @@ Agent discovery and delivery use the existing Rex session.
 Load the reusable actions in Rex `init.lua` and run `rex config reload`:
 
 ```lua
-dofile(os.getenv("HOME") .. "/plugins/commentry.nvim/integrations/rex/agents.lua").setup()
+dofile("/path/to/commentry.nvim/integrations/rex/agents.lua").setup()
 ```
 
 The actions work independently of Commentry:
@@ -269,7 +277,7 @@ while preserving the original capture.
 
 Sending an unchanged active request shows "Nothing new to send. There are no
 new messages."
-With no selected agent, requests remain locally pending. Selecting an agent or
+With no selected agent, requests remain queued in the inbox. Selecting an agent or
 using `a` to deliver pending requests sends them to its native queue. Press `a`
 for status, focus, selection and detach. Detaching leaves delivered work intact.
 A failed or partial write is never replayed automatically. Inspect the agent
@@ -298,7 +306,7 @@ Install the binary with `mise run install-commentry`, then load
 `integrations/rex/commentry.lua` from your Rex `init.lua`:
 
 ```lua
-dofile(os.getenv("HOME") .. "/plugins/commentry.nvim/integrations/rex/commentry.lua")
+dofile("/path/to/commentry.nvim/integrations/rex/commentry.lua")
 rex.bind("ctrl+a>a", "commentry_capture")
 rex.bind("ctrl+a>shift+a", "commentry_new")
 rex.bind("ctrl+a>i", "commentry_inbox")
@@ -329,7 +337,7 @@ The Lua entry point also accepts an explicit project with
 From a shell, use `commentry capture --project .`, or add `--empty` for a
 standalone conversation. `commentry rex capture` opens a temporary tab when
 `REX_SESSION` and `REX_BLOCK` identify the origin. `--client` selects the Rex
-app explicitly when needed. Set `COMMENTRY_REX` to override the Rex executable.
+app explicitly when needed. The `rex` executable must be on PATH.
 This first capture integration is local to macOS and uses Neovim 0.10+ as its
 editor. The Rex keybind applies while Rex is focused; it is not an OS-wide hotkey.
 
@@ -357,9 +365,9 @@ separate project scopes.
 ### Capture and agent replies outside Neovim
 
 Build the Go client with `mise run build`, or install it with
-`mise run install-commentry`. The inbox requires this binary. Neovim uses the
-checkout's `bin/commentry` first, then `commentry` on PATH. `COMMENTRY_CLI` can
-select an explicit executable.
+`mise run install-commentry`. The `commentry` executable must be on PATH for
+Neovim, Rex and external tools. For a checkout build, add the checkout's `bin/`
+directory to PATH.
 
 `commentry rpc` reads one JSON request from standard input and returns one JSON
 response. `scripts/commentry-inbox` forwards to that binary. Neither interface
@@ -388,6 +396,14 @@ The response contains `{"ok":true,"result":"t-..."}`. Use that returned ID:
 {"action":"complete","thread":"t-...","claim_id":"claim-..."}
 {"action":"cancel","thread":"t-...","queue_id":"e-queued-request"}
 ```
+
+To create an editable human comment through RPC, include `pending: true` in
+`create` and omit `author` or use `"You"`. Read the thread, then pass its initial
+`messages[0].id` as `expected_message` to `edit-pending` with a new `body`, or to
+`discard-pending`. Each edit changes that message ID. Stale edits and discards
+are rejected. Captured source is never replaced. The first successful `queue`
+transaction clears `pending` permanently. Existing conversations and agent
+publications are not made editable by this API.
 
 Omit `project` from `list` to list every project. Comparison text is recorded
 verbatim. All attached comparisons appear automatically in the source pane,
@@ -444,8 +460,7 @@ not delete the Executor inbox.
 Required:
 
 - Neovim 0.10+
-- The Commentry CLI, configured with `commentry executor login` and
-  `commentry executor use`
+- The Commentry CLI on PATH, configured with `commentry executor login`
 - The Commentry Executor app
 
 Optional integrations:
@@ -561,8 +576,9 @@ git hooks with `mise exec -- hk install`.
 
 ## Troubleshooting
 
-- Backend missing or unavailable. Build with `mise run build`, configure the
-  Executor connection, then run `:checkhealth commentry`.
+- Backend missing or unavailable. Install `commentry` on PATH, or build with
+  `mise run build` and add the checkout's `bin/` directory to PATH. Configure
+  the Executor connection, then run `:checkhealth commentry`.
 - A captured location moved or disappeared. The thread remains in the inbox.
   Its saved source is immutable. Agents can attach current code or a focused
   comparison without losing the discussion.

@@ -19,10 +19,9 @@ var composer string //nolint:gochecknoglobals // Immutable embedded UI asset.
 
 // Options identifies the immutable capture and its destination.
 type Options struct {
-	Project    string  `json:"project"`
-	Text       *string `json:"text,omitempty"`
-	Directory  string  `json:"directory"`
-	Executable string  `json:"executable"`
+	Project   string  `json:"project"`
+	Text      *string `json:"text,omitempty"`
+	Directory string  `json:"directory"`
 }
 
 // Run starts a dedicated editor process. A failed save leaves its draft open.
@@ -39,10 +38,6 @@ func Run(ctx context.Context, options Options, stdin io.Reader, stdout, stderr i
 		}
 	}
 	options.Directory, err = filepath.Abs(options.Directory)
-	if err != nil {
-		return err
-	}
-	options.Executable, err = os.Executable()
 	if err != nil {
 		return err
 	}

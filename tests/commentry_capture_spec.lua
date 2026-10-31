@@ -22,7 +22,6 @@ describe("external capture composer", function()
       project = root,
       text = "Copied error\nwith context",
       directory = root .. "/data",
-      executable = Store.executable(),
     }
     vim.fn.writefile({ vim.json.encode(options) }, config)
     local script = root .. "/exercise.lua"

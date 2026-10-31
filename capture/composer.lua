@@ -45,7 +45,7 @@ if options.text ~= nil then
 end
 local function request(input)
   local result = vim
-    .system({ options.executable, "--directory", options.directory, "rpc" }, {
+    .system({ "commentry", "--directory", options.directory, "rpc" }, {
       text = true,
       stdin = vim.json.encode(input),
     })
@@ -63,7 +63,7 @@ end
 local function save(queue)
   if not thread then
     local text = table.concat(vim.api.nvim_buf_get_lines(body, 0, -1, false), "\n")
-    thread = request({ action = "create", project = options.project, body = text, text = options.text })
+    thread = request({ action = "create", project = options.project, body = text, text = options.text, pending = true })
     if not thread then
       return
     end

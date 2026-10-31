@@ -113,7 +113,7 @@ func (c Client) neovimPID(ctx context.Context, block string) (int, error) {
 
 // OpenInbox reuses Neovim in the current or a horizontally adjacent pane.
 // If none exists, it creates a right-hand split in the same Rex window.
-func (c Client) OpenInbox(ctx context.Context, project, directory, binary string) (InboxTarget, error) {
+func (c Client) OpenInbox(ctx context.Context, project, directory string) (InboxTarget, error) {
 	window, panes, err := c.inboxNeighbors(ctx)
 	if err != nil {
 		return InboxTarget{}, err
@@ -126,13 +126,13 @@ func (c Client) OpenInbox(ctx context.Context, project, directory, binary string
 		if pid == 0 {
 			continue
 		}
-		if err = c.openNeovim(ctx, pane.block, pid, project, directory, binary); err != nil {
+		if err = c.openNeovim(ctx, pane.block, pid, project, directory); err != nil {
 			return InboxTarget{}, err
 		}
 		target := InboxTarget{Window: window, Block: pane.block, Reused: true}
 		return target, c.focusInbox(ctx, target)
 	}
-	command := []string{"env", "PATH=" + os.Getenv("PATH"), "COMMENTRY_INBOX_DIR=" + directory, "COMMENTRY_CLI=" + binary, "nvim", "-c", `lua require("commentry.inbox").open()`}
+	command := []string{"env", "PATH=" + os.Getenv("PATH"), "COMMENTRY_INBOX_DIR=" + directory, "nvim", "-c", `lua require("commentry.inbox").open()`}
 	var created struct {
 		Blocks []string `json:"block_ids"`
 	}

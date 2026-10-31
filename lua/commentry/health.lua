@@ -88,7 +88,7 @@ function M.check()
   if backend and backend ~= "" and vim.fn.executable(backend) == 1 then
     ok("inbox Go backend available: " .. backend)
   else
-    warn("inbox requires the commentry binary; run mise run build or install it on PATH")
+    warn("inbox requires commentry on PATH; install it, or run mise run build and add bin/ to PATH")
   end
   log_health(log_config())
 end

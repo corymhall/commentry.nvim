@@ -108,7 +108,10 @@ func fakeRex(t *testing.T) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("COMMENTRY_REX", binary)
+	if err = os.Symlink(binary, filepath.Join(root, "rex")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", root+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("COMMENTRY_TEST_REX_FIXTURE", f.file)
 	f.store, err = inbox.Open(t.Context(), f.directory)
 	if err != nil {

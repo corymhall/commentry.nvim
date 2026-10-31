@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -226,12 +225,8 @@ func dataDirectory(directory string) (string, error) {
 }
 
 func deliveryPrompt(item map[string]string, a inbox.Agent, directory string) string {
-	executable, err := os.Executable()
-	if err != nil {
-		executable = "commentry"
-	}
 	delivery := map[string]any{
-		"executable": executable, "directory": directory,
+		"executable": "commentry", "directory": directory,
 		"reply_request": inbox.Request{Action: "finish", Thread: item["thread"], ClaimIDs: []string{item["claim_id"]}, Author: a.Harness, Body: "REPLACE WITH YOUR REPLY"},
 	}
 	if _, err := executor.Open(directory); err == nil {

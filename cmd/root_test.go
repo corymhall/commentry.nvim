@@ -136,7 +136,7 @@ func TestDeferredQueueDoesNotContactTheSelectedAgent(t *testing.T) {
 	if err = store.RegisterAgent(t.Context(), inbox.Agent{ID: "existing", Project: project, Harness: "codex"}, ""); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("COMMENTRY_REX", directory+"/missing-rex")
+	t.Setenv("PATH", t.TempDir())
 	root := cmd.NewRootCmd()
 	root.SetArgs([]string{"--directory", directory, "rpc"})
 	input, _ := json.Marshal(inbox.Request{Action: "queue", Thread: thread, DeferDelivery: true})

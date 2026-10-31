@@ -23,32 +23,14 @@ type Client struct {
 	DeferFocus bool
 }
 
-func executable() (string, error) {
-	if value := os.Getenv("COMMENTRY_REX"); value != "" {
-		return value, nil
-	}
-	if value, err := exec.LookPath("rex"); err == nil {
-		return value, nil
-	}
-	bundled := "/Applications/Rex Beta.app/Contents/Helpers/Rex Server.rex/Contents/MacOS/rex"
-	if _, err := os.Stat(bundled); err == nil {
-		return bundled, nil
-	}
-	return "", fmt.Errorf("rex CLI unavailable; set COMMENTRY_REX or add rex to PATH")
-}
-
 func (c Client) call(ctx context.Context, method string, args any, result any) error {
-	binary, err := executable()
-	if err != nil {
-		return err
-	}
 	raw, err := json.Marshal(args)
 	if err != nil {
 		return err
 	}
 	argv := []string{"api", "call", method, string(raw)}
 	// #nosec G204 -- CLI and method are fixed; JSON arguments are never shell code.
-	command := exec.CommandContext(ctx, binary, argv...)
+	command := exec.CommandContext(ctx, "rex", argv...)
 	output, err := command.Output()
 	if err != nil {
 		var message string

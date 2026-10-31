@@ -124,7 +124,10 @@ func setupPanes(t *testing.T, pid int, left bool) (Client, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("COMMENTRY_REX", binary)
+	if err = os.Symlink(binary, filepath.Join(root, "rex")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", root+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("COMMENTRY_TEST_PANES", file)
 	return Client{Session: "session", Block: "origin", DeferFocus: true}, fixture.Log
 }
@@ -207,7 +210,7 @@ func testReuseEditor(t *testing.T, left bool) {
 		t.Fatal(err)
 	}
 	project := "/project with 'quotes'"
-	result, err := client.OpenInbox(t.Context(), project, t.TempDir(), "/commentry")
+	result, err := client.OpenInbox(t.Context(), project, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -240,7 +243,7 @@ func assertEditorState(t *testing.T, socket, cwd, project string) {
 // TestInboxCreatesRightSplit checks layout and command when no editor exists.
 func TestInboxCreatesRightSplit(t *testing.T) {
 	client, log := setupPanes(t, 0, false)
-	result, err := client.OpenInbox(t.Context(), "/project", "/data", "/commentry")
+	result, err := client.OpenInbox(t.Context(), "/project", "/data")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -264,7 +267,7 @@ func TestInboxCreatesRightSplit(t *testing.T) {
 // TestInboxWithoutRPCReusesEditor checks the Normal-mode fallback command.
 func TestInboxWithoutRPCReusesEditor(t *testing.T) {
 	client, log := setupPanes(t, 99999999, false)
-	result, err := client.OpenInbox(context.Background(), "/project", "/data", "/commentry")
+	result, err := client.OpenInbox(context.Background(), "/project", "/data")
 	if err != nil {
 		t.Fatal(err)
 	}

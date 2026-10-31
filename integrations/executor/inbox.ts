@@ -60,6 +60,8 @@ export interface Queued {
   delivery_error?: string;
 }
 export interface Thread {
+  // Editing ends at the first queue commit, not at successful delivery.
+  pending?: boolean;
   id: string;
   project: string;
   title: string;
@@ -89,6 +91,9 @@ export interface Agent {
   rex_block?: string;
 }
 export interface Request {
+  pending?: boolean;
+  // Initial message ID observed by the editor; replaced on each pending edit.
+  expected_message?: string;
   action: string;
   request_id?: string;
   items?: import("./publish.js").PublishItem[];
@@ -274,6 +279,7 @@ export function read(sql: SqlReader, r: Request): unknown {
         id: t.id,
         project: t.project,
         title: t.title,
+        pending: !!t.pending,
         unread: t.unread,
         incoming: t.incoming ?? "",
         resolved: t.resolved,
@@ -335,6 +341,7 @@ function payload(t: Thread, mode: string) {
   );
 }
 function appendMessage(t: Thread, r: Request, e: Event) {
+  requireThat(!t.pending, "send the pending comment before replying");
   requireThat(nonempty(r.body), "body is required");
   t.messages.push({ id: e.id, author: e.author, body: r.body, at: e.at });
   if (e.author !== "You") t.incoming = e.id;
@@ -369,6 +376,8 @@ export function mutateInside(sql: SqlReader, r: Request): unknown {
   requireThat(
     [
       "create",
+      "edit-pending",
+      "discard-pending",
       "reply",
       "resolve",
       "comparison",
@@ -395,6 +404,10 @@ export function mutateInside(sql: SqlReader, r: Request): unknown {
   requireThat(label(author), "author must be a nonempty single line");
   const at = new Date().toISOString();
   if (r.action === "create") {
+    requireThat(
+      !r.pending || author === "You",
+      "only human comments can be pending",
+    );
     requireThat(nonempty(r.project), "project is required");
     requireThat(nonempty(r.body), "body is required");
     requireThat(r.title === undefined || label(r.title), "invalid title");
@@ -406,6 +419,7 @@ export function mutateInside(sql: SqlReader, r: Request): unknown {
     validateSource(source);
     const message = { id: id("e-"), author, body: r.body, at };
     const t: Thread = {
+      ...(r.pending ? { pending: true } : {}),
       id: id("t-"),
       project: r.project,
       title: r.title ?? r.body.trim().split("\n")[0],
@@ -465,6 +479,35 @@ export function mutateInside(sql: SqlReader, r: Request): unknown {
   if (r.queue_id) e.queue_id = r.queue_id;
   let result: unknown = e;
   switch (r.action) {
+    case "edit-pending":
+    case "discard-pending": {
+      requireThat(
+        t.pending &&
+          t.queue.length === 0 &&
+          t.messages.length === 1 &&
+          t.messages[0].author === author,
+        "only your unsent pending comment can be edited or discarded",
+      );
+      requireThat(
+        r.expected_message === t.messages[0].id,
+        "pending comment changed; refresh before editing",
+      );
+      if (r.action === "discard-pending") {
+        sql.exec("DELETE FROM threads WHERE id=?", t.id);
+        sql.exec(
+          "INSERT INTO changes(thread,project,kind,at) VALUES(?,?,?,?)",
+          t.id,
+          t.project,
+          r.action,
+          at,
+        );
+        return e;
+      }
+      requireThat(nonempty(r.body), "body is required");
+      t.messages[0] = { id: e.id, author, body: r.body, at };
+      t.title = r.body.trim().split("\n")[0];
+      break;
+    }
     case "queue": {
       const mode = r.mode ?? "queue";
       requireThat(["queue", "steer"].includes(mode), "invalid delivery mode");
@@ -493,6 +536,7 @@ export function mutateInside(sql: SqlReader, r: Request): unknown {
         status: "pending",
       };
       t.queue.push(q);
+      t.pending = false;
       result = q;
       break;
     }
