@@ -15,6 +15,7 @@ import (
 )
 
 const (
+	actionCreate   = "create"
 	modeQueue      = "queue"
 	statusComplete = "complete"
 	statusFailed   = "failed"
@@ -56,7 +57,7 @@ func identity(prefix string) string { return prefix + rand.Text() }
 
 // Execute applies one request. Mutations and change records commit atomically.
 func (s *Store) Execute(ctx context.Context, r Request) (any, error) {
-	if r.Project != "" || r.Action == "create" {
+	if r.Project != "" || r.Action == actionCreate {
 		var err error
 		r.Project, err = Project(ctx, r.Project)
 		if err != nil {
@@ -79,7 +80,7 @@ func (s *Store) Execute(ctx context.Context, r Request) (any, error) {
 		return s.Revision(ctx)
 	case "changes":
 		return s.Changes(ctx, r.Project, r.Cursor)
-	case "edit-pending", "discard-pending", "create", "attach", actionRevise, "reply", "resolve", "comparison", "archive-comparison", "read-state", modeQueue, "claim", statusComplete, "cancel", "fail", "retry", actionFinish, "acknowledge", "handoff":
+	case "edit-pending", "discard-pending", actionCreate, "attach", actionRevise, "reply", "resolve", "comparison", "archive-comparison", "read-state", modeQueue, "claim", statusComplete, "cancel", "fail", "retry", actionFinish, "acknowledge", "handoff":
 	default:
 		return nil, fmt.Errorf("unknown inbox action: %s", r.Action)
 	}
@@ -89,8 +90,8 @@ func (s *Store) Execute(ctx context.Context, r Request) (any, error) {
 	if r.Author == "" {
 		r.Author = "You"
 	}
-	if !label(r.Author) {
-		return nil, fmt.Errorf("author must be a nonempty single line")
+	if err := validateActor(r.Author, r.Session); err != nil {
+		return nil, err
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -99,7 +100,7 @@ func (s *Store) Execute(ctx context.Context, r Request) (any, error) {
 	defer func() { _ = tx.Rollback() }() // A committed transaction makes this a no-op.
 	var result any
 	switch r.Action {
-	case "create":
+	case actionCreate:
 		result, err = create(ctx, tx, r)
 	case "claim":
 		result, err = claim(ctx, tx, r)
@@ -194,7 +195,9 @@ func create(ctx context.Context, tx *sql.Tx, r Request) (any, error) {
 		thread.Incoming = message.ID
 		thread.Unread = true
 	}
-	if err := save(ctx, tx, thread, "create"); err != nil {
+	r.Action = actionCreate
+	recordSession(&thread, r, Event{ID: message.ID, At: at})
+	if err := save(ctx, tx, thread, actionCreate); err != nil {
 		return nil, err
 	}
 	return thread.ID, nil
@@ -240,6 +243,7 @@ func update(ctx context.Context, tx *sql.Tx, r Request) (any, error) {
 	rememberReply(&thread, r, fingerprint, event)
 	thread.Unread = thread.ManualUnread || thread.Incoming != thread.Seen
 	thread.UpdatedAt = at
+	recordSession(&thread, r, event)
 	if err := save(ctx, tx, thread, r.Action); err != nil {
 		return nil, err
 	}
@@ -347,6 +351,8 @@ func claim(ctx context.Context, tx *sql.Tx, r Request) (any, error) {
 	item.ClaimID = identity("claim-")
 	item.Author = r.Author
 	thread.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	r.ClaimID = item.ClaimID
+	recordSession(&thread, r, Event{ID: item.ID, At: thread.UpdatedAt})
 	if err = save(ctx, tx, thread, "claim"); err != nil {
 		return nil, err
 	}

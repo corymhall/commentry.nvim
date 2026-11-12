@@ -66,6 +66,7 @@ func acknowledgeOrHandoff(t *Thread, r Request) error {
 	return nil
 }
 
+// Session identity is excluded so a retry cannot relabel the original actor.
 func replyFingerprint(r Request) (string, error) {
 	if r.RequestID == "" || (r.Action != "reply" && r.Action != actionFinish) {
 		return "", nil

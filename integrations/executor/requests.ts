@@ -2,6 +2,8 @@
 import type { SqlReader } from "apps";
 import {
   mutateInside,
+  validateSession,
+  type Session,
   type SQL,
   type Thread,
   type Queued,
@@ -169,6 +171,11 @@ function contextText(
   section: string,
   id?: string,
 ) {
+  if (section === "sessions") {
+    return (thread.session_activity ?? [])
+      .map((activity) => JSON.stringify(activity))
+      .join("\n");
+  }
   if (!saved) {
     check(section === "request", "custom requests have only a request section");
     return q.message;
@@ -257,8 +264,9 @@ export function requestContext(
         "source",
         ...(saved?.attachments?.map((a) => "attachment:" + a.id) ?? []),
         "comparison",
+        "sessions",
       ]
-    : ["request"];
+    : ["request", "sessions"];
   const section = input.section ?? "request";
   const chars = Array.from(
     contextText(found.thread, found.request, saved, section, input.id),
@@ -281,19 +289,21 @@ export function receiveRequests(
   sql: SQL,
   input: Parameters<typeof readRequests>[1],
 ) {
+  validateSession(input.session);
   return sql.transaction((tx) => {
     const page = readRequests(tx, input);
     for (const item of page.items) {
       if (
         ["claimed", "failed"].includes(item.status) &&
-        !item.acknowledged_at
+        (!item.acknowledged_at || input.session)
       ) {
         const e = mutateInside(tx, {
           action: "acknowledge",
           thread: item.thread,
           claim_id: item.claim_id,
+          session: input.session,
         }) as { at: string };
-        item.acknowledged_at = e.at;
+        item.acknowledged_at ??= e.at;
       }
     }
     return page;
@@ -301,7 +311,12 @@ export function receiveRequests(
 }
 export function readRequests(
   sql: SqlReader,
-  input: { project: string; items: readonly Selection[]; cursor?: number },
+  input: {
+    project: string;
+    items: readonly Selection[];
+    cursor?: number;
+    session?: Session;
+  },
 ) {
   check(
     Array.isArray(input.items) &&

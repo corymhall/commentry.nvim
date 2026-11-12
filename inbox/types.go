@@ -85,9 +85,26 @@ type ReplyReceipt struct {
 	Event       Event  `json:"event"`
 }
 
+// Session identifies the acting harness session, not the delivery target.
+type Session struct {
+	Harness string `json:"harness"`
+	ID      string `json:"id"`
+}
+
+// SessionActivity links an acting session to committed thread activity.
+type SessionActivity struct {
+	Session  Session  `json:"session"`
+	Action   string   `json:"action"`
+	At       string   `json:"at"`
+	EventID  string   `json:"event_id"`
+	ClaimID  string   `json:"claim_id,omitempty"`
+	ClaimIDs []string `json:"claim_ids,omitempty"`
+}
+
 // Thread contains a capture, conversation, comparisons, and read/work state.
 type Thread struct {
-	ReplyReceipts map[string]ReplyReceipt `json:"reply_receipts,omitempty"`
+	SessionActivity []SessionActivity       `json:"session_activity,omitempty"`
+	ReplyReceipts   map[string]ReplyReceipt `json:"reply_receipts,omitempty"`
 	// Pending permits editing the initial human message until the first queue
 	// transaction commits. Delivery failure or cancellation never restores it.
 	Pending           bool         `json:"pending,omitempty"`
@@ -114,7 +131,8 @@ type Thread struct {
 
 // Request is the shared CLI and Neovim JSON protocol.
 type Request struct {
-	Pending bool `json:"pending,omitempty"`
+	Session *Session `json:"session,omitempty"`
+	Pending bool     `json:"pending,omitempty"`
 	// ExpectedMessage is the initial message ID observed by an editor. Each
 	// pending edit replaces that ID, rejecting stale edits and discards.
 	ExpectedMessage   string        `json:"expected_message,omitempty"`

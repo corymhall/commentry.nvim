@@ -23,6 +23,14 @@ one work stream in one thread, passing its ID for followups. Use the existing
 list/read operations to recover context rather than creating duplicate threads.
 Do not manage local receivers or terminal keys yourself.
 
+Native Pi mutations and request fetches automatically record the acting session.
+Complete thread reads expose session_activity. For an active delivered request,
+requests.context with section=sessions returns the current, paginated activity
+log. Use those session IDs with the Evaler skill when more context is needed.
+Direct Executor callers may supply session with harness=pi and their actual
+session ID at the top level, outside manifest items. Never infer it from the
+delivery target. Omit unknown identity. Read-only inspection is not logged.
+
 Common native inputs, all scoped to the current project:
 - list: `{filter?: "unread" | "open" | "resolved"}`, returns compact summaries.
 - read: `{thread}`, explicit complete-thread inspection.

@@ -29,6 +29,7 @@ func updatePending(ctx context.Context, tx *sql.Tx, thread Thread, r Request, ev
 	thread.Messages[0] = Message{ID: event.ID, Author: r.Author, Body: r.Body, At: event.At}
 	thread.Title = strings.Split(strings.TrimSpace(r.Body), "\n")[0]
 	thread.UpdatedAt = event.At
+	recordSession(&thread, r, event)
 	if err := save(ctx, tx, thread, r.Action); err != nil {
 		return nil, err
 	}

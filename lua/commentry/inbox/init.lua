@@ -139,6 +139,7 @@ local function compose(title, initial, save, dispatch)
     vim.keymap.set("n", key, cancel, { buffer = buf, desc = "Cancel inbox message" })
   end
   vim.cmd.startinsert()
+  return popup
 end
 
 local function send_thread(id, mode)
@@ -190,15 +191,15 @@ local function edit_pending_comment(thread, saved)
   end)
 end
 
-function M.new_thread()
+function M.new_thread(initial, source, project)
   local view = active and vim.api.nvim_get_current_tabpage() == active.tab and active or nil
-  local project = view and view.project or Source.project()
-  compose("New project thread", nil, function(body)
+  project = project or (view and view.project) or Source.project()
+  return compose("New project thread", initial, function(body)
     local id, err = Store.create({
       project = project,
       body = body,
       pending = true,
-      source = { kind = "text", lines = {}, origin = "general" },
+      source = source or { kind = "text", lines = {}, origin = "general" },
     })
     if not report(id, err) then
       return false
@@ -947,6 +948,8 @@ function M.open(scope, opts)
             "ge      Edit a pending comment before sending",
             "gd      Discard a pending comment",
             "visual r  Quote a source selection into the reply",
+            "visual mc Quote selected thread text into the reply",
+            "visual mn Start a new thread from selected thread text",
             ":write  Save the reply, then s sends it",
             "n       New standalone project thread",
             "Enter   Open and mark read",
@@ -1064,6 +1067,43 @@ function M.open(scope, opts)
       Reply.focus(view, lines)
     end
   end, { buffer = view.source_buf, desc = "Quote source selection in an inline reply" })
+  local function thread_selection()
+    local first, last = vim.fn.getpos("v"), vim.fn.getpos(".")
+    local lines = vim.fn.getregion(first, last, {
+      type = vim.fn.mode(),
+      exclusive = vim.o.selection == "exclusive",
+    })
+    vim.cmd.normal({ args = { "\27" }, bang = true })
+    return lines
+  end
+  vim.keymap.set("x", "mc", function()
+    local thread = selected(view)
+    if not thread or thread.pending then
+      Util.warn("Send the pending comment before quoting into a reply. Use ge to edit it.")
+      return
+    end
+    Reply.focus(view, thread_selection())
+  end, { buffer = view.thread_buf, desc = "Quote selected conversation text in the reply" })
+  vim.keymap.set("x", "mn", function()
+    local thread = selected(view)
+    if not thread then
+      return
+    end
+    local lines = thread_selection()
+    local initial = {}
+    for _, line in ipairs(lines) do
+      initial[#initial + 1] = "> " .. line
+    end
+    vim.list_extend(initial, { "", "" })
+    local popup = M.new_thread(initial, {
+      kind = "text",
+      lines = lines,
+      origin = "thread:" .. thread.id,
+    }, thread.project)
+    if popup and vim.api.nvim_win_is_valid(popup.winid) then
+      vim.api.nvim_win_set_cursor(popup.winid, { #initial, 0 })
+    end
+  end, { buffer = view.thread_buf, desc = "Start a new thread from selected conversation text" })
   vim.api.nvim_create_autocmd("WinClosed", {
     group = group,
     desc = "Dispose of the inbox when a native command closes an owned panel",

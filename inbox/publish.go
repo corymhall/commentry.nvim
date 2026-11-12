@@ -96,8 +96,8 @@ func validatePublication(r Request) error {
 	if err := publicationIdentity(r.Project, r.RequestID); err != nil {
 		return err
 	}
-	if !label(r.Author) {
-		return fmt.Errorf("author is required")
+	if err := validateActor(r.Author, r.Session); err != nil {
+		return err
 	}
 	if len(r.Items) < 1 || len(r.Items) > 25 {
 		return fmt.Errorf("publish requires 1 to 25 topics")
@@ -168,12 +168,12 @@ func (s *Store) publish(ctx context.Context, r Request) (PublishReceipt, error) 
 
 func publishItem(ctx context.Context, tx *sql.Tx, r Request, item PublishItem) (PublishedItem, error) {
 	result := PublishedItem{Key: item.Key, Title: item.Title, Attachments: []EvidenceReceipt{}, Comparisons: []EvidenceReceipt{}}
-	value, err := create(ctx, tx, Request{Project: r.Project, Author: r.Author, Title: item.Title, Body: item.Body, Source: item.Source})
+	value, err := create(ctx, tx, Request{Project: r.Project, Author: r.Author, Title: item.Title, Body: item.Body, Source: item.Source, Session: r.Session})
 	if err != nil {
 		return result, err
 	}
 	result.Thread = value.(string)
-	base := Request{Project: r.Project, Author: r.Author, Thread: result.Thread}
+	base := Request{Project: r.Project, Author: r.Author, Thread: result.Thread, Session: r.Session}
 	for _, a := range item.Attachments {
 		req := base
 		req.Action = "attach"

@@ -299,6 +299,78 @@ describe("universal inbox", function()
     assert.is_truthy(saved.queue[1].message:find("Can we combine these?", 1, true))
   end)
 
+  it("quotes a partial conversation selection without changing history", function()
+    local id = create("hello this is a comment")
+    local view = require("commentry.inbox").open(nil, { project = root, thread = id })
+    vim.api.nvim_set_current_win(view.thread_win)
+    local rows = vim.api.nvim_buf_get_lines(view.thread_buf, 0, -1, false)
+    local row
+    for index, line in ipairs(rows) do
+      if line == "hello this is a comment" then
+        row = index
+      end
+    end
+    assert.is_truthy(row)
+    vim.api.nvim_win_set_cursor(view.thread_win, { row, 6 })
+    vim.cmd("normal! v3l")
+    for _, map in ipairs(vim.api.nvim_buf_get_keymap(view.thread_buf, "x")) do
+      if map.lhs == "mc" then
+        map.callback()
+      end
+    end
+    vim.cmd.stopinsert()
+    rows = vim.api.nvim_buf_get_lines(view.thread_buf, 0, -1, false)
+    assert.are.same({ "> this", "", "" }, { rows[#rows - 2], rows[#rows - 1], rows[#rows] })
+    assert.are.same(#rows, vim.api.nvim_win_get_cursor(view.thread_win)[1])
+    vim.api.nvim_buf_set_lines(view.thread_buf, -2, -1, false, { "Follow up" })
+    vim.cmd.write()
+    local thread = assert(Store.get(id))
+    assert.are.same("hello this is a comment", thread.messages[1].body)
+    assert.are.same("> this\n\nFollow up", thread.messages[#thread.messages].body)
+  end)
+
+  it("branches a conversation in its original project from the all-projects inbox", function()
+    local id = create("An answer worth discussing")
+    local original = assert(Store.get(id))
+    local view = require("commentry.inbox").open("all", { project = root, thread = id })
+    vim.api.nvim_set_current_win(view.thread_win)
+    for row, line in ipairs(vim.api.nvim_buf_get_lines(view.thread_buf, 0, -1, false)) do
+      if line == "An answer worth discussing" then
+        vim.api.nvim_win_set_cursor(view.thread_win, { row, 0 })
+        break
+      end
+    end
+    vim.cmd("normal! V")
+    for _, map in ipairs(vim.api.nvim_buf_get_keymap(view.thread_buf, "x")) do
+      if map.lhs == "mn" then
+        map.callback()
+      end
+    end
+    vim.cmd.stopinsert()
+    local popup = vim.api.nvim_get_current_buf()
+    assert.are.same({ "> An answer worth discussing", "", "" }, vim.api.nvim_buf_get_lines(popup, 0, -1, false))
+    vim.api.nvim_buf_set_lines(popup, -1, -1, false, { "Explore this separately" })
+    for _, map in ipairs(vim.api.nvim_buf_get_keymap(popup, "n")) do
+      if map.lhs == "<CR>" then
+        map.callback()
+        break
+      end
+    end
+    local threads = assert(Store.list(root))
+    assert.are.same(2, #threads)
+    for _, thread in ipairs(threads) do
+      if thread.id ~= id then
+        thread = assert(Store.get(thread.id))
+        assert.is_true(thread.pending)
+        assert.are.same(root, thread.project)
+        assert.are.same("thread:" .. id, thread.source.origin)
+        assert.are.same({ "An answer worth discussing" }, thread.source.lines)
+        assert.are.same(0, #thread.queue)
+      end
+    end
+    assert.are.same(original.messages, assert(Store.get(id)).messages)
+  end)
+
   it("retains inline drafts through refreshes switches closure and a failed save", function()
     local id, other = create("First question"), create("Second question")
     local Inbox = require("commentry.inbox")

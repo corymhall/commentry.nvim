@@ -54,6 +54,12 @@ Replies live beneath the conversation in the thread buffer. Press `r` to start
 editing, `:write` to save the reply, then `s` to send it. In the source pane,
 select text visually and press `r` to quote it into the reply with `>` prefixes.
 Diff markers are preserved and display-only line numbers are omitted.
+In the conversation pane, visual `mc` quotes selected text into the reply.
+Visual `mn` opens a new thread composer with the selection quoted and retains
+it as a text capture linked to the original thread. Save or send explicitly.
+With Snacks animations enabled, jumping to code briefly highlights the target
+range and newly arriving agent messages fade into the conversation. Disable
+these effects with `vim.g.snacks_animate = false` or its buffer-local equivalent.
 Unsaved replies survive thread switches and closing/reopening the inbox during
 the current Neovim session. While a reply is modified its displayed history stays
 fixed; saving reloads the latest conversation. Changes to existing history are
@@ -251,6 +257,29 @@ from the unread filter remains visible while you read it. `R` or changing filter
 reapplies the filter. External writes refresh approximately every 1.5 seconds
 while the inbox is active in normal mode, retaining the selected thread and
 scroll position. `R` also refreshes comparisons after source edits.
+
+### Pi session provenance
+
+Threads retain optional `session_activity` entries identifying the Pi session
+that performed each recorded mutation or fetched an active request. Entries
+include the action, timestamp, event or message ID, and applicable claim IDs.
+This is separate from the delivery target. A replacement session can fetch or
+answer a request without rewriting the original session attribution.
+
+The native Pi tool supplies the current session ID automatically. Direct
+Executor mutations and `requests.read` accept optional
+`session: { harness: "pi", id: "<actual Pi session ID>" }`. Omitted identity
+remains unknown, including historical actions. These are caller provenance,
+not authenticated session ownership or evidence that an agent is working.
+Read-only inspection is not logged.
+
+Full thread reads expose the activity log. For delivered requests, fetch
+`requests.context` with `section: "sessions"` and follow `next_offset` to
+inspect it without loading full captures. Use a recorded session ID with
+`evaler session show SESSION_ID` or `evaler session search SESSION_ID --query "phrase"`
+when Evaler has access to that session. Transcripts are not uploaded to Commentry.
+Retries keep original attribution and do not add duplicate replies or fetches
+from the same session for the same claim.
 
 ### Native Pi integration
 

@@ -39,6 +39,8 @@ Inbox-local keys:
     j/k   Select a thread in the list.
     r     Focus the reply area beneath the conversation.
     visual r Quote selected source text into the reply.
+    visual mc Quote selected conversation text into the reply.
+    visual mn New thread composer from selected conversation text.
     :write Save the inline reply. s sends after saving.
     n     New standalone thread.
     Enter Open the conversation and mark displayed messages read.
@@ -96,6 +98,12 @@ Use :write to save a comment, then s to send the saved conversation. Saving
 again with an empty reply does not add a duplicate. Visual r in the source pane
 quotes the selected text with > prefixes and places the cursor beneath it.
 Diff markers remain in quotes; virtual line numbers are not included.
+Visual mc in the conversation quotes the exact selected text. Visual mn opens
+an independent thread composer with that text quoted and retained as a text
+capture linked to the original thread. Save or send explicitly.
+Optional Snacks animations briefly highlight code jump destinations and new
+agent messages. Set vim.g.snacks_animate = false to disable, or use the
+buffer-local equivalent.
 Drafts survive switches and inbox closure within the current Neovim session.
 Dirty replies keep their displayed history fixed until saved. Saving reloads
 new messages. Existing history cannot be changed through :write. Undo edits
@@ -442,6 +450,19 @@ steering API. The CLI validates target, session, project and inbox directory.
 Native submission errors never trigger terminal fallback. Pi now needs the
 extension by default. Set COMMENTRY_PI_TRANSPORT=rex for an explicit terminal
 fallback. Codex still uses Rex. Threads are not bound to Pi sessions.
+Optional session_activity entries trace acting Pi sessions across mutations
+and active request fetches, separately from the delivery target. Entries retain
+action, timestamp, event/message ID and applicable claim IDs. Native Pi tools
+supply their current session automatically. Direct Executor mutations and
+requests.read accept session = { harness = "pi", id = "<actual session ID>" }.
+Missing and historical identities remain unknown. Read-only inspection is
+not logged. Identity is caller provenance, not authentication or working status.
+Full thread reads expose the log. For a delivered request, requests.context
+section "sessions" provides paginated activity using next_offset. Recorded IDs
+can be inspected with evaler session show SESSION_ID or searched using
+evaler session search SESSION_ID --query "phrase" when locally available.
+Commentry does not upload transcripts. Retries preserve original attribution
+and repeated fetches from one session do not add duplicate claim visits.
 The socket closes on session shutdown, switch and reload. Outside Rex, tools
 are available but native receiver discovery is not implemented.
 A custom COMMENTRY_INBOX_DIR must match in Pi and Neovim.

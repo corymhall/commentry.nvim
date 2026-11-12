@@ -191,6 +191,38 @@ local ok, err = xpcall(function()
     bridge:request("nvim_exec_lua", {
       [[
       local view = _G.commentry_capture_view
+      vim.api.nvim_set_current_tabpage(view.tab)
+      vim.api.nvim_set_current_win(view.thread_win)
+      for row, line in ipairs(vim.api.nvim_buf_get_lines(view.thread_buf, 0, -1, false)) do
+        if line:find('timeout branch', 1, true) then
+          vim.api.nvim_win_set_cursor(view.thread_win, {row, 0})
+          vim.cmd('normal! zvV')
+          break
+        end
+      end
+      for _, map in ipairs(vim.api.nvim_buf_get_keymap(view.thread_buf, 'x')) do
+        if map.lhs == 'mn' then map.callback(); break end
+      end
+      vim.cmd.stopinsert()
+      return true
+    ]],
+      {},
+    }, 5000)
+    bridge:wait_for_flush(5000)
+    local fork = bridge.screen:snapshot("rpc-inbox-selection-thread")
+    Bridge.write_snapshot_files(fork, bridge.screen, out_dir, "rpc-inbox-selection-thread")
+    bridge:request("nvim_exec_lua", {
+      [[
+      for _, map in ipairs(vim.api.nvim_buf_get_keymap(0, 'n')) do
+        if map.lhs == 'q' then map.callback(); break end
+      end
+      return true
+    ]],
+      {},
+    }, 5000)
+    bridge:request("nvim_exec_lua", {
+      [[
+      local view = _G.commentry_capture_view
       for _, thread in ipairs(assert(require("commentry.inbox.store").list(view.project))) do
         if thread.source.origin == "general" then
           require("commentry.inbox").open(nil, { project = thread.project, thread = thread.id })

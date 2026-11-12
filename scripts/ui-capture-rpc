@@ -372,6 +372,11 @@ run_capture_set() {
         "Conversation without source" \
         "Standalone threads use the space beside the list without an empty source panel." \
         "$scenario/rpc-inbox-thread-only.png" >> "$entries_json"
+      rsvg-convert -o "$scenario_dir/rpc-inbox-selection-thread.png" "$scenario_dir/rpc-inbox-selection-thread.svg"
+      printf '%s\t%s\t%s\n' \
+        "Branch a conversation selection" \
+        "The new thread composer quotes the selection and retains its source thread." \
+        "$scenario/rpc-inbox-selection-thread.png" >> "$entries_json"
     fi
 
     if [[ -z $CWD ]]; then

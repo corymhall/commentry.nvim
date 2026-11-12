@@ -62,6 +62,7 @@ function M.status(thread, outdated)
 end
 
 function M.write(buf, contents, filetype)
+  require("commentry.inbox.animate").clear(buf)
   vim.bo[buf].modifiable = true
   vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, #contents > 0 and contents or { "" })
@@ -291,6 +292,13 @@ function M.conversation(view, thread)
     Conversation.decorate(view, view.reply.presentation)
     return
   end
+  local previous = view.message_presentation
+  local known = {}
+  if previous and previous.thread_id == thread.id then
+    for _, message in ipairs(previous.messages) do
+      known[message.id] = true
+    end
+  end
   local status = thread.pending and "Pending review" or thread.resolved and "Resolved" or "Open"
   if view.outdated[thread.id] then
     status = status .. " / Outdated"
@@ -365,6 +373,13 @@ function M.conversation(view, thread)
   -- A restored draft carries the presentation for its frozen history, not the
   -- newer messages that may have arrived while another thread was selected.
   Conversation.apply(view, view.reply.presentation)
+  if previous and previous.thread_id == thread.id and not dirty then
+    for _, message in ipairs(presentation.messages) do
+      if not known[message.id] and not message.human then
+        require("commentry.inbox.animate").flash(view.thread_buf, message.first + 1, message.last - 1)
+      end
+    end
+  end
 end
 
 return M

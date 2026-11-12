@@ -3,6 +3,7 @@ import {
   boolean,
   defineApp,
   json,
+  literal,
   mutation,
   number,
   object,
@@ -85,7 +86,17 @@ const queued = object({
   delivery_error: string().optional(),
   acknowledged_at: string().optional(),
 });
+const session = object({ harness: literal("pi"), id: text });
+const sessionActivity = object({
+  session,
+  action: text,
+  at: text,
+  event_id: text,
+  claim_id: text.optional(),
+  claim_ids: array(text).optional(),
+});
 const thread = object({
+  session_activity: array(sessionActivity).optional(),
   pending: boolean().optional(),
   id: text,
   project: text,
@@ -162,6 +173,7 @@ const publicationOutput = object({
   ).optional(),
 });
 const request = object({
+  session: session.optional(),
   pending: boolean().optional(),
   expected_message: string().optional(),
   action: text,
@@ -227,6 +239,7 @@ export default defineApp(
               project: text,
               request_id: text,
               author,
+              session: session.optional(),
               items: array(publishItem),
             }),
             output: publicationOutput,
@@ -254,6 +267,7 @@ export default defineApp(
                 project: text,
                 items: array(object({ thread: text, claim_ids: array(text) })),
                 cursor: number().optional(),
+                session: session.optional(),
               }),
               output: object({
                 items: array(requestContextOutput),
@@ -314,6 +328,7 @@ export default defineApp(
               text: string().optional(),
               source: source.optional(),
               author,
+              session: session.optional(),
             }),
             output: text,
           },
@@ -332,6 +347,7 @@ export default defineApp(
               thread: text,
               body: text,
               author,
+              session: session.optional(),
               request_id: text.optional(),
             }),
             output: event,
@@ -349,6 +365,7 @@ export default defineApp(
               claim_ids: array(text),
               request_id: text.optional(),
               author,
+              session: session.optional(),
             }),
             output: event,
           },
@@ -365,6 +382,7 @@ export default defineApp(
               source,
               attachment_id: text.optional(),
               author,
+              session: session.optional(),
             }),
             output: attachment,
           },
@@ -386,6 +404,7 @@ export default defineApp(
               label: text,
               comparison_id: text.optional(),
               author,
+              session: session.optional(),
             }),
             output: event,
           },
@@ -396,7 +415,12 @@ export default defineApp(
           {
             description:
               "Withdraw your own misleading or obsolete comparison from the active source view. Keeps the complete comparison in history and clears primary selection if needed. Original capture, discussion and submitted requests remain unchanged.",
-            input: object({ thread: text, comparison_id: text, author }),
+            input: object({
+              thread: text,
+              comparison_id: text,
+              author,
+              session: session.optional(),
+            }),
             output: event,
           },
           async ({ sql }, input) =>
@@ -413,6 +437,7 @@ export default defineApp(
               primary_comparison: string().optional(),
               expected_review: text.optional(),
               author,
+              session: session.optional(),
             }),
             output: review,
           },
@@ -426,7 +451,12 @@ export default defineApp(
           {
             description:
               "Explicitly resolve or reopen a conversation. Resolving also marks current activity read. Reopening preserves read state. Replies and completed requests never resolve it automatically.",
-            input: object({ thread: text, resolved: boolean(), author }),
+            input: object({
+              thread: text,
+              resolved: boolean(),
+              author,
+              session: session.optional(),
+            }),
             output: event,
           },
           async ({ sql }, input) =>

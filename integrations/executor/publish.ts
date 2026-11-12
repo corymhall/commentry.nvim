@@ -6,6 +6,8 @@ import {
   type Event,
   type Review,
   type Attachment,
+  type Session,
+  validateSession,
 } from "./inbox.js";
 
 export interface PublishItem {
@@ -18,6 +20,7 @@ export interface PublishItem {
   primary_comparison?: string;
 }
 export interface Publication {
+  session?: Session;
   project: string;
   request_id: string;
   author: string;
@@ -86,6 +89,7 @@ export async function publish(
   input: Publication,
 ): Promise<PublishReceipt> {
   identity(input.project, input.request_id);
+  validateSession(input.session);
   check(label(input.author), "author is required");
   check(
     Array.isArray(input.items) &&
@@ -116,6 +120,7 @@ export async function publish(
       "primary_comparison must name a comparison key in its topic",
     );
   }
+  // Exclude session identity so replacement-session retries keep the first actor.
   // Hash outside the transaction; no transaction waits on an async operation.
   const digest = await crypto.subtle.digest(
     "SHA-256",
@@ -153,7 +158,11 @@ export async function publish(
       items: [],
     };
     for (const item of input.items) {
-      const common = { project: input.project, author: input.author };
+      const common = {
+        project: input.project,
+        author: input.author,
+        session: input.session,
+      };
       const thread = mutateInside(tx, {
         ...common,
         action: "create",

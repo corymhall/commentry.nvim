@@ -30,6 +30,12 @@ explicit input and output schemas. `rpc` preserves the CLI protocol; its queue
 operation persists a snapshot but never reaches local Rex. `finish` completes
 only supplied active claims and preserves the conversation's resolution state.
 
+Optional acting Pi session metadata is retained in each thread's JSON state as
+`session_activity`; no SQL migration is needed. Deploy the updated app before
+reloading the native Pi extension to enable automatic attribution. Direct
+Executor callers must supply their actual session explicitly. Read-only tools
+do not record visits. Existing untagged history stays unknown.
+
 For cutover, keep clients idle, export and back up the old database, import the
 snapshot, verify it, then select the remote backend. Imports preserve IDs,
 timestamps and original captures. A conflicting existing thread aborts its

@@ -154,6 +154,7 @@ function M.jump(thread, win)
     vim.keymap.set("n", "gC", M.open_at_cursor, { buffer = buf, desc = "Open inbox thread at cursor" })
   end
   M.draw(buf)
+  require("commentry.inbox.animate").flash(buf, target.first, target.last)
   return true
 end
 

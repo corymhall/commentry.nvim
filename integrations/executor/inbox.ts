@@ -60,7 +60,20 @@ export interface Queued {
   delivery_error?: string;
   acknowledged_at?: string;
 }
+export interface Session {
+  harness: "pi";
+  id: string;
+}
+export interface SessionActivity {
+  session: Session;
+  action: string;
+  at: string;
+  event_id: string;
+  claim_id?: string;
+  claim_ids?: readonly string[];
+}
 export interface Thread {
+  session_activity?: SessionActivity[];
   // Editing ends at the first queue commit, not at successful delivery.
   pending?: boolean;
   id: string;
@@ -93,6 +106,7 @@ export interface Agent {
   rex_block?: string;
 }
 export interface Request {
+  session?: Session;
   pending?: boolean;
   // Initial message ID observed by the editor; replaced on each pending edit.
   expected_message?: string;
@@ -374,8 +388,30 @@ function transition(t: Thread, r: Request) {
       "Delivery failed or its acceptance is unknown. Inspect before retrying.";
   } else q.status = r.action === "complete" ? "complete" : "cancelled";
 }
+export function validateSession(session: Session | undefined) {
+  requireThat(
+    session === undefined ||
+      (session !== null &&
+        session.harness === "pi" &&
+        label(session.id) &&
+        session.id.length <= 256),
+    "invalid acting session",
+  );
+}
+function recordSession(t: Thread, r: Request, e: Pick<Event, "id" | "at">) {
+  if (!r.session) return;
+  (t.session_activity ??= []).push({
+    session: { harness: r.session.harness, id: r.session.id },
+    action: r.action,
+    at: e.at,
+    event_id: e.id,
+    ...(r.claim_id ? { claim_id: r.claim_id } : {}),
+    ...(r.claim_ids ? { claim_ids: [...r.claim_ids] } : {}),
+  });
+}
 // The caller must own the synchronous SQL transaction.
 export function mutateInside(sql: SqlReader, r: Request): unknown {
+  validateSession(r.session);
   requireThat(
     [
       "create",
@@ -438,6 +474,7 @@ export function mutateInside(sql: SqlReader, r: Request): unknown {
       unread: author !== "You",
     };
     if (t.unread) t.incoming = message.id;
+    recordSession(t, r, message);
     save(sql, t, "create");
     return t.id;
   }
@@ -461,6 +498,7 @@ export function mutateInside(sql: SqlReader, r: Request): unknown {
     q.claim_id = id("claim-");
     q.author = author;
     t.updated_at = at;
+    recordSession(t, { ...r, claim_id: q.claim_id }, { id: q.id, at });
     save(sql, t, "claim");
     return {
       thread: t.id,
@@ -482,6 +520,8 @@ export function mutateInside(sql: SqlReader, r: Request): unknown {
     };
   if (r.claim_id) e.claim_id = r.claim_id;
   if (r.queue_id) e.queue_id = r.queue_id;
+  // A retry from a replacement session must return the original attribution.
+  // Session identity is deliberately not part of the idempotency fingerprint.
   const fingerprint = JSON.stringify([
     r.action,
     author,
@@ -577,8 +617,19 @@ export function mutateInside(sql: SqlReader, r: Request): unknown {
           ["claimed", "failed"].includes(q.status),
       );
       requireThat(q, "no matching active queued request");
-      if (q.acknowledged_at) return e;
-      q.acknowledged_at = at;
+      if (
+        q.acknowledged_at &&
+        (!r.session ||
+          t.session_activity?.some(
+            (a) =>
+              a.action === "acknowledge" &&
+              a.claim_id === r.claim_id &&
+              a.session.harness === r.session!.harness &&
+              a.session.id === r.session!.id,
+          ))
+      )
+        return { ...e, at: q.acknowledged_at };
+      q.acknowledged_at ??= at;
       break;
     }
     case "handoff": {
@@ -762,6 +813,7 @@ export function mutateInside(sql: SqlReader, r: Request): unknown {
     };
   t.unread = !!t.manual_unread || (t.incoming ?? "") !== (t.seen ?? "");
   t.updated_at = at;
+  recordSession(t, r, e);
   save(sql, t, r.action);
   return result;
 }
