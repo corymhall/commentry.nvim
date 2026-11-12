@@ -65,6 +65,112 @@ describe("universal inbox", function()
     return result
   end
 
+  it("shows saved comments as persistent cards in ordinary unsaved buffers", function()
+    local original = file({ "start", "selected", "end" }, 2)
+    vim.api.nvim_set_current_buf(buf)
+    vim.api.nvim_buf_set_lines(buf, 0, 0, false, { "unsaved header" })
+    vim.api.nvim_win_set_cursor(0, { 3, 0 })
+    local Inbox = require("commentry.inbox")
+    Inbox.comment()
+    vim.cmd.stopinsert()
+    local popup = vim.api.nvim_get_current_buf()
+    vim.api.nvim_buf_set_lines(popup, 0, -1, false, { "Comment from a normal buffer", "Second line" })
+    for _, mapping in ipairs(vim.api.nvim_buf_get_keymap(popup, "n")) do
+      if mapping.lhs == "<CR>" then
+        mapping.callback()
+        break
+      end
+    end
+    assert.are.same(buf, vim.api.nvim_get_current_buf())
+    assert.is_true(vim.bo[buf].modified)
+    local ns = vim.api.nvim_get_namespaces()["commentry.inbox.locations"]
+    local function cards()
+      local result = {}
+      for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(buf, ns, 0, -1, { details = true })) do
+        if mark[4].virt_lines then
+          result[#result + 1] = mark
+        end
+      end
+      return result
+    end
+    local rendered = cards()
+    assert.are.same(1, #rendered)
+    assert.are.same(2, rendered[1][2])
+    local text = vim.inspect(rendered[1][4].virt_lines)
+    assert.is_truthy(text:find("Explain this code", 1, true))
+    assert.is_truthy(text:find("Comment from a normal buffer", 1, true))
+    assert.is_truthy(text:find("Second line", 1, true))
+    assert.is_function(vim.fn.maparg("gC", "n", false, true).callback)
+    -- Cards follow unsaved edits rather than the on-disk coordinates.
+    vim.api.nvim_buf_set_lines(buf, 0, 0, false, { "another header" })
+    vim.api.nvim_exec_autocmds("TextChanged", { buffer = buf })
+    assert.are.same(3, cards()[1][2])
+    assert(Store.update(original.id, { kind = "resolve", resolved = true }))
+    local Locations = require("commentry.inbox.locations")
+    Locations.set(assert(Store.list(root)))
+    assert.is_falsy(vim.inspect(cards()):find("Explain this code", 1, true))
+    vim.api.nvim_buf_set_lines(buf, 3, 4, false, { "changed selection" })
+    vim.api.nvim_exec_autocmds("TextChanged", { buffer = buf })
+    assert.are.same(0, #cards())
+    Locations.set({})
+  end)
+
+  it("edits a pending range at its start without changing its capture or sent comments", function()
+    local original = file({ "start", "selected", "also selected", "end" }, 2, 3)
+    local id =
+      assert(Store.create({ project = root, pending = true, body = "Draft range comment", source = original.source }))
+    local before = assert(Store.get(id))
+    local Locations = require("commentry.inbox.locations")
+    Locations.set(assert(Store.list(root)))
+    vim.api.nvim_set_current_buf(buf)
+    vim.api.nvim_win_set_cursor(0, { 2, 0 })
+    local select = vim.ui.select
+    local offered = {}
+    vim.ui.select = function(items, _, callback)
+      offered = items
+      for _, item in ipairs(items) do
+        if item.id == id then
+          callback(item)
+          return
+        end
+      end
+      error("Pending range was not offered")
+    end
+    local ok, err = pcall(function()
+      require("commentry.commands").cmd({ args = "edit" })
+    end)
+    vim.ui.select = select
+    assert.is_true(ok, tostring(err))
+    assert.are.same(2, #offered)
+    vim.cmd.stopinsert()
+    local popup = vim.api.nvim_get_current_buf()
+    assert.are.same({ "Draft range comment" }, vim.api.nvim_buf_get_lines(popup, 0, -1, false))
+    vim.api.nvim_buf_set_lines(popup, 0, -1, false, { "Edited range comment", "More detail" })
+    for _, mapping in ipairs(vim.api.nvim_buf_get_keymap(popup, "n")) do
+      if mapping.lhs == "<CR>" then
+        mapping.callback()
+        break
+      end
+    end
+    assert.are.same(buf, vim.api.nvim_get_current_buf())
+    local edited = assert(Store.get(id))
+    assert.are.same(before.source, edited.source)
+    assert.are.same("Edited range comment\nMore detail", edited.messages[1].body)
+    assert.are.same(1, #edited.messages)
+    assert.are.same("Explain this code", assert(Store.get(original.id)).messages[1].body)
+    local ns = vim.api.nvim_get_namespaces()["commentry.inbox.locations"]
+    local marks = vim.api.nvim_buf_get_extmarks(buf, ns, 0, -1, { details = true })
+    assert.is_truthy(vim.inspect(marks):find("Edited range comment", 1, true))
+    -- Keep the cached pending thread deliberately stale after sending.
+    assert(Store.enqueue(id, nil, { defer_delivery = true }))
+    Locations.set({ edited })
+    local windows = #vim.api.nvim_list_wins()
+    require("commentry.inbox").edit()
+    assert.are.same(windows, #vim.api.nvim_list_wins())
+    assert.are.same("Edited range comment\nMore detail", assert(Store.get(id)).messages[1].body)
+    Locations.set({})
+  end)
+
   it("edits and discards pending comments but freezes them as soon as they are queued", function()
     local Inbox = require("commentry.inbox")
     local function save_popup(body)
@@ -287,13 +393,14 @@ describe("universal inbox", function()
     assert.are.same(view.tab, vim.api.nvim_get_current_tabpage())
     assert.are.same(id, view.threads[vim.api.nvim_win_get_cursor(view.list_win)[1]].id)
     require("commentry.inbox").open(nil, { project = root, thread = thread.id })
-    local previews = {}
+    local cards = {}
     for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(buf, ns, 0, -1, { details = true })) do
-      if mark[4].virt_text then
-        previews[#previews + 1] = mark[4].virt_text[1][1]
+      if mark[4].virt_lines then
+        cards[#cards + 1] = mark[4].virt_lines
       end
     end
-    assert.are.same({ "  You: Explain this code" }, previews)
+    assert.are.same(1, #cards)
+    assert.is_truthy(vim.inspect(cards[1]):find("Explain this code", 1, true))
     vim.api.nvim_buf_set_lines(buf, 2, 3, false, { "local replacement = 2" })
     local located = Source.with_location(assert(Store.get(id)))
     local target, err = Source.locate(located)
@@ -577,6 +684,40 @@ describe("universal inbox", function()
     assert.is_nil(Store.update(id, { kind = "complete", claim_id = second.claim_id }))
   end)
 
+  it("notifies again without creating another request and renders fetch acknowledgement", function()
+    local id = create()
+    assert(Store.enqueue(id))
+    local claim = assert(Store.claim(root, "Agent"))
+    local view = require("commentry.inbox").open("all")
+    assert.is_truthy(
+      table
+        .concat(vim.api.nvim_buf_get_lines(view.thread_buf, 0, -1, false), "\n")
+        :find("has not acknowledged", 1, true)
+    )
+    local original_command, original_select = Store.command, vim.ui.select
+    local called
+    Store.command = function(args)
+      called = args
+      return { sent = 1 }
+    end
+    vim.ui.select = function(_, _, callback)
+      callback("Notify again")
+    end
+    local ok, err = pcall(function()
+      keys(view).gn()
+      assert.are.same("notify", called[4])
+      assert.are.same(id, called[5])
+      assert.are.same(1, #assert(Store.get(id)).queue)
+      assert(Store.update(id, { kind = "acknowledge", claim_id = claim.claim_id }))
+      keys(view).R()
+      assert.is_truthy(
+        table.concat(vim.api.nvim_buf_get_lines(view.thread_buf, 0, -1, false), "\n"):find("Fetched by agent", 1, true)
+      )
+    end)
+    Store.command, vim.ui.select = original_command, original_select
+    assert.is_true(ok, tostring(err))
+  end)
+
   it("explains skipped sends and allows sending after a new reply", function()
     local id = create()
     assert(Store.enqueue(id))
@@ -589,7 +730,7 @@ describe("universal inbox", function()
     end
     local ok, err = pcall(function()
       keys(view).s()
-      assert.are.same("Nothing new to send. There are no new messages.", messages[#messages])
+      assert.are.same("Nothing new to send. Use gn to notify again about outstanding work.", messages[#messages])
       assert.are.same(1, #assert(Store.get(id)).queue)
       assert(Store.update(id, { kind = "reply", body = "One more thing to check" }))
       keys(view).s()

@@ -32,7 +32,9 @@ The editor uses `Ctrl-s` or normal-mode `Enter` to save. Normal-mode `Esc`,
 `za` to fold source sections, `e` to expand or collapse surrounding code,
 `i` to inspect capture and Git details, `?` for help, `R` to refresh,
 and `q` to close. `Ctrl-h/j/k/l` moves between panels. Plain `h/j/k/l` retains
-normal text navigation. Closing an inbox panel with a native window command
+normal text navigation. Resolving also marks the item read. Reopening preserves
+read state, and later incoming activity can make a resolved item unread again.
+Closing an inbox panel with a native window command
 closes the inbox view; `:Commentry inbox` opens it again.
 Replies live beneath the conversation in the thread buffer. Press `r` to start
 editing, `:write` to save the reply, then `s` to send it. In the source pane,
@@ -119,7 +121,7 @@ file's lines, and optional filetype, modified and Git metadata.
 The Commentry Executor app owns inbox conversations, captures, comparisons,
 read state, request claims and agent selections in its SQLite database. Agents
 use the same operations through Executor codemode. The local Go CLI handles
-capture, Git context and Rex terminal delivery, and forwards inbox operations
+capture, Git context, native Pi delivery and Rex terminal delivery, and forwards inbox operations
 to the configured app. Executor never starts or controls local terminals.
 
 Deploy the app source in `integrations/executor` to your Executor instance,
@@ -165,12 +167,40 @@ It returns at most five claims per page and 2000 Unicode characters of context
 per claim. Continue with `next_cursor`; use `requests.context` and
 `context.next_offset` for more text. Earlier answered discussion is available
 through its history section. The saved submission excludes later replies.
-Inactive claims return status only. Full `read` remains the editor's complete
+Inactive claims return status only. The read mutation acknowledges fetched claims
+and includes bounded recent history and section metadata. Full `read` remains the editor's complete
 thread protocol. Print Executor's checked execution value rather than both MCP
 response representations.
 
 Project identities are canonical checkout paths supplied by the local client;
 matching other machines' checkout paths is not automatic.
+
+### Delivery receipts and recovery
+
+Submission to the harness is not proof the agent read a request. Claimed work
+shows **Submitted / Not acknowledged** until the agent calls Executor's
+`requests.read`. That mutation records `acknowledged_at` only for the returned
+page. It does not mark human activity read, complete work, or resolve threads.
+Fetched work shows **Fetched / Awaiting answer**.
+
+Press `gn` in the inbox to notify again about an outstanding request, retaining
+its snapshot and claim. Repeated notifications are reminders, not new work.
+To use a different selected agent, explicitly choose handoff. Handoff invalidates
+the old claim before redispatching the same request. A late old answer is rejected.
+The CLI equivalent is `commentry agent --project . notify t-THREAD --queue-id
+e-REQUEST`, adding `--handoff` only for an intentional change of agent.
+A reminder is not a guarantee against an agent independently repeating effects.
+
+Context reads include bounded recent history, available sections, and the
+current and submitted last message IDs, separate from the frozen submission. Large context
+still requires continuation. Legacy local clients acknowledge with
+`commentry acknowledge t-THREAD --claim-id claim-ID`.
+
+Use a durable `request_id` on `reply` and `finish`, or CLI `--request-id`.
+Exact retries return the original receipt without another message; changed
+content at the same ID is rejected. Finish saves the answer and completes the
+specified claims atomically, without resolving the thread. Answer in the original
+inbox thread rather than only terminal chat.
 
 ### Read state and filters
 
@@ -191,13 +221,65 @@ reapplies the filter. External writes refresh approximately every 1.5 seconds
 while the inbox is active in normal mode, retaining the selected thread and
 scroll position. `R` also refreshes comparisons after source edits.
 
+### Native Pi integration
+
+Requires Pi 1.5+ on macOS or Linux. Install the CLI and load the local Pi package:
+
+```sh
+mise run install-commentry
+pi install /absolute/path/to/commentry.nvim/integrations/pi
+```
+
+Install the shared `skills/commentry` skill in your agent's skill directory if
+it is not already discoverable. Restart Pi or use `/reload`. The extension
+activates its `commentry` tool only in interactive or RPC sessions with a
+configured Executor connection. Authentication stays in the Go client.
+
+In Rex, the extension owns a private Unix socket for its foreground process.
+The CLI verifies the target, Pi session, project and inbox directory before
+submitting through Pi's native follow-up or steering API. It never pastes into
+the composer or presses terminal keys. Socket acceptance is separate from
+agent fetch acknowledgement and answer completion. Lifecycle shutdown closes
+the receiver; a stale or unavailable receiver fails visibly.
+
+Select the running Pi through the existing inbox agent picker. Threads remain
+session-independent. Queue and steer controls are unchanged. `/commentry`
+opens the project's Neovim inbox through the existing Rex opener. Outside Rex,
+the extension provides tools and guidance but no receiver for agent selection.
+
+Pi delivery now requires the native extension by default. For an intentional
+terminal-only fallback, set `COMMENTRY_PI_TRANSPORT=rex` in the environment of
+the CLI or Neovim. Native errors never trigger fallback. Codex continues through
+Rex. A custom `COMMENTRY_INBOX_DIR` must agree between Pi and Neovim.
+`COMMENTRY_EXECUTABLE` selects the CLI for the extension; otherwise it prefers
+`~/.local/bin/commentry`, then PATH. `COMMENTRY_PI_RUNTIME_DIR` can override the
+private socket directory, normally `/tmp/commentry-pi-UID`.
+
+The extension briefs new sessions to use Commentry for decisions and substantial
+handoffs. Detailed operation and recovery guidance stays in the skill.
+Plannotator is optional. To enable it for one session without globally
+installing its extension:
+
+```sh
+pi -e npm:@plannotator/pi-extension
+```
+
+That opt-in session can receive Plannotator's own tools and guidance. Do not
+publish the same question or report into both inboxes by default. No web UI,
+cross-machine project identity, or general-purpose background bridge is added.
+
+Run `mise run test_pi` for isolated socket tests. With Pi installed,
+`mise run smoke_pi` exercises the real host, native delivery, a controlled
+same-thread reply and session replacement without model calls or user inbox data.
+
 ### Existing agents through Rex
 
 The inbox sends requests to Pi or Codex already running in Rex. Press `S` to
 select an agent in the current worktree. If none is found, the picker shows
 agents in other worktrees of the same repository. Separate clones are excluded.
 Rex supplies discovery, process identity,
-status and terminal delivery. The harness manages its own native queue.
+status and terminal delivery for Codex or explicit Pi fallback. Pi normally uses
+the native extension. The harness manages its own native queue.
 Agent discovery and delivery use the existing Rex session.
 
 Load the reusable actions in Rex `init.lua` and run `rex config reload`:
@@ -229,8 +311,9 @@ Press `gs` in the inbox to send all open threads with new comments from you,
 including threads hidden by the current filter. It always uses the native agent
 queue as one compact notification. The agent fetches each thread and its
 submitted snapshot through Executor, then replies to each thread separately.
-Comment bodies, captures and repeated delivery instructions are omitted from
-the notification. In the all-projects view it uses the selected thread's project.
+Notifications include up to 1200 Unicode characters of the newest submitted
+human message per request, with an explicit truncation flag. Captures and full
+history stay behind the context tools. In the all-projects view it uses the selected thread's project.
 Resolved threads, agent-only notes and already delivered comments are skipped.
 Existing pending requests are delivered without adding copies. With no agent
 attached, requests are saved for delivery. The result reports sent, saved and
@@ -240,7 +323,8 @@ explicit retry after inspection.
 The new-thread composer uses `Ctrl-s` to save and `Ctrl-d` to save and send.
 Inline replies use `:write` to save, followed by `s` to send. Press `m` to
 choose queue or steer, then `s` to send the selected thread. Both modes submit
-immediately, including while the agent is working:
+immediately, including while the agent is working. Pi normally uses its native
+extension APIs. For terminal delivery, the adapter keys are:
 
 | Harness | Queue | Steer |
 | --- | --- | --- |
@@ -250,8 +334,9 @@ immediately, including while the agent is working:
 Queue uses the harness's native follow-up behavior. Steer uses its direct
 submission behavior. When idle, the harness can begin processing immediately.
 There is no Commentry worker waiting for idle and no new agent session.
-Messages use bracketed paste and the submission key in one terminal write.
-This uses the existing composer, so it should be clear of unfinished drafts.
+Terminal delivery uses bracketed paste and the submission key in one write.
+That fallback uses the existing composer, which should be clear of unfinished
+drafts. Native Pi delivery does not touch the composer.
 Blocked, unknown and error states require attention before delivery. Status
 reports must identify the foreground process. Approvals stay in the agent UI.
 
@@ -262,7 +347,7 @@ its defaults. Values are terminal byte sequences:
 dofile("/path/to/agents.lua").setup({
   adapters = {
     codex = { queue = "\t", steer = "\r" },
-    pi = { queue = "\27\r", steer = "\r" },
+    pi = { queue = "\27[13;3u", steer = "\r" },
   },
 })
 ```
@@ -303,7 +388,12 @@ the original file line represented by `lines[0]` in a focused excerpt.
 ### Clipboard capture through Rex
 
 Install the binary with `mise run install-commentry`, then load
-`integrations/rex/commentry.lua` from your Rex `init.lua`:
+`integrations/rex/commentry.lua` from your Rex `init.lua`.
+The actions extend Rex's PATH with `~/.local/bin`, `REX_BIN_DIR` or the managed
+macOS Rex install directory, and the standard Homebrew directories. This makes
+Commentry's nested `rex` and `nvim` commands available even when Rex was launched
+without your shell's PATH:
+
 
 ```lua
 dofile("/path/to/commentry.nvim/integrations/rex/commentry.lua")
@@ -511,7 +601,53 @@ project inbox, where replies, read state, resolution and Rex delivery work the
 same as any other conversation. Comments on changed or deleted code remain in
 the inbox with their original source.
 
-### Keymap configuration
+### Global keymaps
+
+Calling `setup()` installs these mappings in normal buffers and Diffview.
+Set `vim.g.mapleader` before calling `setup()`.
+
+| Action in `global_keymaps` | Default | Mode |
+| --- | --- | --- |
+| `add_comment` | `<leader>cc` | Normal, comment on current line |
+| `add_range_comment` | `<leader>cc` | Visual, comment on selected lines |
+| `edit_comment` | `<leader>ce` | Normal, edit pending comment at cursor |
+| `new_thread` | `<leader>cn` | Normal, new unanchored project thread |
+| `inbox` | `<leader>ci` | Normal, project inbox |
+| `unread` | `<leader>cu` | Normal, project unread inbox |
+| `all_projects` | `<leader>ca` | Normal, inbox across all projects |
+| `clipboard` | `<leader>cp` | Normal, comment on clipboard text |
+| `open_diff` | `<leader>cd` | Normal, open Diffview |
+
+Override individual keys or use an empty string to disable them:
+
+```lua
+require("commentry").setup({
+  global_keymaps = {
+    inbox = "<leader>ci",
+    clipboard = "",
+  },
+})
+```
+
+Existing mappings are preserved with a warning. Repeating `setup()` removes
+old mappings owned by Commentry before applying the new configuration.
+Mappings have descriptions for keymap discovery tools such as which-key,
+without requiring a dependency. Inbox-local keys are unchanged.
+
+Use `<leader>ce` or `:Commentry edit` on a commented line to edit an unsent
+comment's text. This works at the start or anywhere within its range, in normal
+buffers and Diffview. Overlapping threads offer a picker. The original range
+and capture stay unchanged. Sent comments use replies instead.
+
+Comments on ordinary file buffers also show persistent cards and range marks.
+They refresh after saving a comment and follow unchanged code through unsaved
+edits. Use `gC` at a marked line to open its conversation. Resolved threads are
+hidden unless selected in the inbox. Card appearance uses the same
+`diffview.comment_cards` and `diffview.comment_ranges` settings on both surfaces.
+
+### Diffview keymap configuration
+
+The existing `keymaps` options remain optional buffer-local shortcuts.
 
 | Action | Default | Mode |
 | --- | --- | --- |
@@ -538,6 +674,7 @@ is no automatic import. All new comments go through the shared inbox backend.
 
 - `:Commentry inbox [all|unread|read|open|resolved|queued]` opens the inbox.
 - `:Commentry comment` captures a line or command range, including Diffview.
+- `:Commentry edit` edits a pending comment at the cursor.
 - `:Commentry capture-text [register]` comments on copied text.
 - `:Commentry new-thread` creates an unanchored project conversation.
 - `:Commentry open [arguments]` opens Diffview.
@@ -549,7 +686,7 @@ is no automatic import. All new comments go through the shared inbox backend.
 - Install development tools: `mise install`, then `mise run setup_executor`
 - Format Lua, Go and TypeScript: `mise run format`
 - Lint Lua, Go and TypeScript: `mise run lint`
-- Run Lua, Go and Executor SQLite tests: `mise run test`
+- Run Lua, Go, Executor SQLite and Pi receiver tests: `mise run test`
 - Validate docs: `mise run docs`
 - Full local checks: `mise run ci`
 - Build the standalone Go CLI: `mise run build`

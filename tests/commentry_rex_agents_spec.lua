@@ -54,7 +54,7 @@ describe("Rex agent actions", function()
     assert.are.same("\27[200~First line\nSecond line\27[201~\t", writes[1])
     process.name, record.app = "pi", "pi"
     actions.agent_queue({}, { target = id, text = "Pi follow-up" })
-    assert.are.same("\27[200~Pi follow-up\27[201~\27\r", writes[2])
+    assert.are.same("\27[200~Pi follow-up\27[201~\27[13;3u", writes[2])
   end)
 
   it("uses direct submission for steering and allows native idle submission", function()

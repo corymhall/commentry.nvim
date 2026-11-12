@@ -21,6 +21,7 @@ const (
 	statusPending  = "pending"
 	statusClaimed  = "claimed"
 	actionRevise   = "revise"
+	actionFinish   = "finish"
 )
 
 // Project resolves a project directory to its Git root or canonical directory.
@@ -78,7 +79,7 @@ func (s *Store) Execute(ctx context.Context, r Request) (any, error) {
 		return s.Revision(ctx)
 	case "changes":
 		return s.Changes(ctx, r.Project, r.Cursor)
-	case "edit-pending", "discard-pending", "create", "attach", actionRevise, "reply", "resolve", "comparison", "archive-comparison", "read-state", modeQueue, "claim", statusComplete, "cancel", "fail", "retry", "finish":
+	case "edit-pending", "discard-pending", "create", "attach", actionRevise, "reply", "resolve", "comparison", "archive-comparison", "read-state", modeQueue, "claim", statusComplete, "cancel", "fail", "retry", actionFinish, "acknowledge", "handoff":
 	default:
 		return nil, fmt.Errorf("unknown inbox action: %s", r.Action)
 	}
@@ -204,6 +205,13 @@ func update(ctx context.Context, tx *sql.Tx, r Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	fingerprint, receipt, err := previousReply(thread, r)
+	if err != nil {
+		return nil, err
+	}
+	if receipt != nil {
+		return receipt.Event, nil
+	}
 	at := time.Now().UTC().Format(time.RFC3339Nano)
 	event := Event{ID: identity("e-"), Thread: thread.ID, Kind: r.Action, Author: r.Author, At: at, ClaimID: r.ClaimID, QueueID: r.QueueID}
 	if r.Action == "edit-pending" || r.Action == "discard-pending" {
@@ -229,6 +237,7 @@ func update(ctx context.Context, tx *sql.Tx, r Request) (any, error) {
 		}
 	}
 
+	rememberReply(&thread, r, fingerprint, event)
 	thread.Unread = thread.ManualUnread || thread.Incoming != thread.Seen
 	thread.UpdatedAt = at
 	if err := save(ctx, tx, thread, r.Action); err != nil {
@@ -301,7 +310,7 @@ func transition(thread *Thread, r Request) error {
 			return nil
 		}
 		if r.Action == "retry" && item.ID == r.QueueID && item.Status == statusFailed {
-			item.Status, item.ClaimID, item.Author, item.Error = statusPending, "", "", ""
+			item.Status, item.ClaimID, item.Author, item.Error, item.AcknowledgedAt = statusPending, "", "", "", ""
 			return nil
 		}
 		if r.Action == statusComplete && r.ClaimID != "" && item.ClaimID == r.ClaimID && item.Status == statusClaimed {
@@ -401,8 +410,14 @@ func apply(thread *Thread, r Request, event *Event) error {
 			return fmt.Errorf("resolved must be a boolean")
 		}
 		thread.Resolved = *r.Resolved
-	case "finish":
+		if thread.Resolved {
+			thread.Seen = thread.Incoming
+			thread.ManualUnread = false
+		}
+	case actionFinish:
 		return finish(thread, r, *event)
+	case "acknowledge", "handoff":
+		return acknowledgeOrHandoff(thread, r)
 	case statusComplete, "cancel", "fail", "retry":
 		return transition(thread, r)
 	}

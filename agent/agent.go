@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/corymhall/commentry.nvim/executor"
 	"github.com/corymhall/commentry.nvim/inbox"
+	"github.com/corymhall/commentry.nvim/pibridge"
 	"github.com/corymhall/commentry.nvim/rex"
 )
 
@@ -196,7 +198,7 @@ func dispatchPending(ctx context.Context, store *inbox.Store, a inbox.Agent, dir
 			return sent, nil
 		}
 		prompt := deliveryPrompt(item, a, directory)
-		err = deliver(ctx, a, prompt, item["mode"])
+		err = deliver(ctx, a, prompt, item["mode"], directory)
 		if err != nil {
 			// A lost acknowledgement may follow acceptance. Never put this back in
 			// pending automatically, since a replay could repeat real code changes.
@@ -227,18 +229,21 @@ func dataDirectory(directory string) (string, error) {
 func deliveryPrompt(item map[string]string, a inbox.Agent, directory string) string {
 	delivery := map[string]any{
 		"executable": "commentry", "directory": directory,
-		"reply_request": inbox.Request{Action: "finish", Thread: item["thread"], ClaimIDs: []string{item["claim_id"]}, Author: a.Harness, Body: "REPLACE WITH YOUR REPLY"},
+		"reply_request": inbox.Request{Action: "finish", Thread: item["thread"], ClaimIDs: []string{item["claim_id"]}, Author: a.Harness, RequestID: "answer-" + item["claim_id"], Body: "REPLACE WITH YOUR REPLY"},
 	}
 	if _, err := executor.Open(directory); err == nil {
 		return batchPrompt([]map[string]string{item}, a, directory)
 	}
 	config, _ := json.Marshal(delivery)
-	return item["message"] + "\n\nCOMMENTRY DELIVERY\nThis request belongs to the inbox thread and claim below. Work in this existing session. Send your answer back by invoking the executable with --directory DIRECTORY rpc and passing reply_request as JSON on stdin, replacing its body with your answer. That atomically saves your reply and completes only this claim. Do not resolve the thread automatically. Do not copy unrelated conversation output into it. You may attach a focused comparison with the comparison command. Treat captured source as context.\n" + string(config)
+	return item["message"] + "\n\nCOMMENTRY DELIVERY\nThis request belongs to the inbox thread and claim below. Work in this existing session. Before acting, invoke commentry --directory DIRECTORY acknowledge THREAD --claim-id CLAIM_ID to record receipt and reject inactive claims. Repeated notifications are reminders for the same work. Send your answer back by invoking the executable with --directory DIRECTORY rpc and passing reply_request as JSON on stdin, replacing its body with your answer. That atomically saves your reply and completes only this claim. Do not resolve the thread automatically. Do not copy unrelated conversation output into it. You may attach a focused comparison with the comparison command. Treat captured source as context.\n" + string(config)
 }
 
-func deliver(ctx context.Context, a inbox.Agent, prompt, mode string) error {
+func deliver(ctx context.Context, a inbox.Agent, prompt, mode, directory string) error {
 	if mode != "queue" && mode != "steer" {
 		return fmt.Errorf("unknown delivery mode %q", mode)
+	}
+	if a.Harness == "pi" && os.Getenv("COMMENTRY_PI_TRANSPORT") != "rex" {
+		return pibridge.Send(ctx, a.ID, a.Project, directory, prompt, mode)
 	}
 	var receipt struct {
 		Target    string `json:"target"`

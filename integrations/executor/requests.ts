@@ -1,6 +1,14 @@
 // Agent reads are separate from the editor's complete thread protocol.
 import type { SqlReader } from "apps";
-import type { Thread, Queued, Source, Message, Review } from "./inbox.js";
+import {
+  mutateInside,
+  type SQL,
+  type Thread,
+  type Queued,
+  type Source,
+  type Message,
+  type Review,
+} from "./inbox.js";
 
 type Snapshot = {
   title?: string;
@@ -26,6 +34,11 @@ export type RequestInput = RequestRef & {
 export type RequestResult = RequestRef & {
   status: string;
   earlier_messages?: number;
+  acknowledged_at?: string;
+  latest_activity?: string;
+  submitted_activity?: string;
+  sections?: string[];
+  recent_history?: { author: string; body: string; abbreviated: boolean }[];
   context?: { text: string; total_chars: number; next_offset?: number };
 };
 function check(ok: unknown, message: string): asserts ok {
@@ -226,7 +239,26 @@ export function requestContext(
   const found = selected(sql, input);
   result.status = found.status;
   if (!found.thread || !found.request) return result;
+  result.acknowledged_at = found.request.acknowledged_at;
+  result.latest_activity = found.thread.messages.at(-1)?.id;
   const saved = snapshot(found.request, found.thread);
+  result.submitted_activity = saved?.messages.at(-1)?.id;
+  result.recent_history = saved?.messages
+    .slice(Math.max(0, contextStart(saved) - 3), contextStart(saved))
+    .map((m) => ({
+      author: m.author,
+      body: Array.from(m.body).slice(0, 400).join(""),
+      abbreviated: Array.from(m.body).length > 400,
+    }));
+  result.sections = saved
+    ? [
+        "request",
+        "history",
+        "source",
+        ...(saved?.attachments?.map((a) => "attachment:" + a.id) ?? []),
+        "comparison",
+      ]
+    : ["request"];
   const section = input.section ?? "request";
   const chars = Array.from(
     contextText(found.thread, found.request, saved, section, input.id),
@@ -242,6 +274,30 @@ export function requestContext(
       contextStart(saved) +
       (contextStart(saved) === 0 && supersededFinding(saved) ? 1 : 0);
   return result;
+}
+// Fetch and acknowledge only the page actually returned, in one transaction.
+// Human read state and immutable submitted context are never modified.
+export function receiveRequests(
+  sql: SQL,
+  input: Parameters<typeof readRequests>[1],
+) {
+  return sql.transaction((tx) => {
+    const page = readRequests(tx, input);
+    for (const item of page.items) {
+      if (
+        ["claimed", "failed"].includes(item.status) &&
+        !item.acknowledged_at
+      ) {
+        const e = mutateInside(tx, {
+          action: "acknowledge",
+          thread: item.thread,
+          claim_id: item.claim_id,
+        }) as { at: string };
+        item.acknowledged_at = e.at;
+      }
+    }
+    return page;
+  });
 }
 export function readRequests(
   sql: SqlReader,

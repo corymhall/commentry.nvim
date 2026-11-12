@@ -85,8 +85,8 @@ func batchNotification(t *testing.T, f *fixture) []batchItem {
 		t.Fatalf("expected one native queue notification, got %v", writes)
 	}
 	prompt := writes[0]["text"]
-	if strings.Contains(prompt, "Original capture") || strings.Contains(prompt, "Question") || strings.Contains(prompt, "COMMENTRY_THREAD_V1") {
-		t.Fatal("notification copied conversation content")
+	if strings.Contains(prompt, "Original capture") || !strings.Contains(prompt, "Question") || strings.Contains(prompt, "COMMENTRY_THREAD_V1") {
+		t.Fatal("notification must include human previews but exclude captures and queue snapshots")
 	}
 	var notification struct {
 		Project string      `json:"project"`

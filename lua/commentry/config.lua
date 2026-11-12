@@ -26,11 +26,23 @@ M.ns = vim.api.nvim_create_namespace("commentry")
 ---@class commentry.Config
 ---@field debug boolean
 ---@field keymaps commentry.Keymaps
+---@field global_keymaps table<string, string>
 ---@field diffview commentry.DiffviewConfig
 ---@field log commentry.LogConfig
 ---@field diagnostics commentry.DiagnosticsConfig
 local defaults = {
   debug = false,
+  global_keymaps = {
+    add_comment = "<leader>cc",
+    add_range_comment = "<leader>cc",
+    edit_comment = "<leader>ce",
+    new_thread = "<leader>cn",
+    inbox = "<leader>ci",
+    unread = "<leader>cu",
+    all_projects = "<leader>ca",
+    clipboard = "<leader>cp",
+    open_diff = "<leader>cd",
+  },
   keymaps = {
     add_comment = "mc",
     add_range_comment = "mc",
@@ -54,8 +66,6 @@ local defaults = {
 
 -- Canonical defaults shared across setup normalization and runtime fallback.
 M.default_keymaps = vim.deepcopy(defaults.keymaps)
-
-local keymap_keys = { "add_comment", "add_range_comment", "list_comments" }
 
 local log_levels = {
   error = true,
@@ -281,25 +291,25 @@ end
 ---@param provided unknown
 ---@param expected string
 local function warn_keymap_validation(action, provided, expected)
-  Util.warn(("commentry setup: keymaps.%s=%s is invalid; expected %s"):format(action, vim.inspect(provided), expected))
+  Util.warn(("commentry setup: %s=%s is invalid; expected %s"):format(action, vim.inspect(provided), expected))
 end
 
 ---@param keymaps unknown
 ---@return commentry.Keymaps
-local function normalize_keymaps(keymaps)
-  local normalized = vim.deepcopy(defaults.keymaps)
+local function normalize_keymaps(keymaps, section)
+  local normalized = vim.deepcopy(defaults[section])
   if type(keymaps) ~= "table" then
     return normalized
   end
 
-  for _, key in ipairs(keymap_keys) do
+  for key in pairs(defaults[section]) do
     local value = keymaps[key]
     if value ~= nil then
       local expected_shape = 'string (use "" to disable)'
       local valid = type(value) == "string" and (value == "" or is_valid_keymap_format(value))
 
       if not valid then
-        warn_keymap_validation(key, value, expected_shape)
+        warn_keymap_validation(section .. "." .. key, value, expected_shape)
       else
         normalized[key] = value
       end
@@ -327,7 +337,8 @@ function M.setup(opts)
   local sanitized = sanitize_known_keys(provided, defaults, "")
   config = vim.tbl_deep_extend("force", {}, vim.deepcopy(defaults), sanitized)
   config = normalize_config(config)
-  config.keymaps = normalize_keymaps(config.keymaps)
+  config.keymaps = normalize_keymaps(config.keymaps, "keymaps")
+  config.global_keymaps = normalize_keymaps(config.global_keymaps, "global_keymaps")
 
   -- Register the command if the plugin/ entrypoint hasn't already done so.
   if vim.fn.exists(":Commentry") ~= 2 then

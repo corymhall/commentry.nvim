@@ -169,7 +169,7 @@ local function send_thread(id, mode)
   end
   if not result.delivery_error then
     if result.skipped then
-      Util.info("Nothing new to send. There are no new messages.")
+      Util.info("Nothing new to send. Use gn to notify again about outstanding work.")
     else
       Util.info(
         mode == "queue" and (result.status == "claimed" and "Sent to the agent queue" or "Saved for delivery")
@@ -180,6 +180,35 @@ local function send_thread(id, mode)
   if active and vim.api.nvim_tabpage_is_valid(active.tab) then
     refresh(active)
   end
+end
+
+local function refresh_code(project)
+  local diffview = require("commentry.diffview")
+  if diffview.current_file_context() then
+    diffview.refresh()
+  else
+    local threads, err = Store.list(project)
+    if report(threads, err) then
+      Render.highlights()
+      require("commentry.inbox.locations").set(threads)
+    end
+  end
+end
+
+local function edit_pending_comment(thread, saved)
+  if not thread.pending then
+    Util.warn("Only pending comments can be edited. Sent conversations use replies.")
+    return
+  end
+  local version = thread.messages[1].id
+  compose("Edit pending comment", vim.split(thread.messages[1].body, "\n", { plain = true }), function(body)
+    local event, err = Store.update(thread.id, { kind = "edit-pending", body = body, expected_message = version })
+    if not report(event, err) then
+      return false
+    end
+    saved(thread)
+    return thread.id
+  end)
 end
 
 function M.new_thread()
@@ -222,11 +251,22 @@ function M.comment(args)
       return false
     end
     Util.info("Saved inbox thread " .. id)
-    local diffview = require("commentry.diffview")
-    if diffview.get_current_view() then
-      diffview.refresh()
-    end
+    refresh_code(capture.project)
     return true
+  end)
+end
+
+function M.edit()
+  require("commentry.inbox.locations").choose_at_cursor(function(candidate)
+    if not candidate then
+      return
+    end
+    local thread, err = Store.get(candidate.id)
+    if report(thread, err) then
+      edit_pending_comment(thread, function()
+        refresh_code(thread.project)
+      end)
+    end
   end)
 end
 
@@ -497,14 +537,8 @@ function M.open(scope, opts)
     if Reply.unsaved(view, nil, thread.id) then
       return
     end
-    local version = thread.messages[1].id
-    compose("Edit pending comment", vim.split(thread.messages[1].body, "\n", { plain = true }), function(body)
-      local event, err = Store.update(thread.id, { kind = "edit-pending", body = body, expected_message = version })
-      if not report(event, err) then
-        return false
-      end
+    edit_pending_comment(thread, function()
       refresh(view, thread.id)
-      return thread.id
     end)
   end
   local function reply()
@@ -635,6 +669,42 @@ function M.open(scope, opts)
           end
         end,
         "Queue or send selected thread",
+      },
+      gn = {
+        function()
+          local thread = selected(view)
+          if not thread then
+            return
+          end
+          for _, item in ipairs(thread.queue) do
+            if item.status == "claimed" or item.status == "failed" then
+              local choices = { "Notify again", "Hand off to selected agent", "Cancel" }
+              vim.ui.select(
+                choices,
+                { prompt = "Remind the agent, or invalidate the old claim for a handoff?" },
+                function(choice)
+                  if not choice or choice == "Cancel" then
+                    return
+                  end
+                  local args = { "agent", "--project", thread.project, "notify", thread.id, "--queue-id", item.id }
+                  if choice == "Hand off to selected agent" then
+                    args[#args + 1] = "--handoff"
+                  end
+                  local result, err = Store.command(args)
+                  if report(result, err) then
+                    Util.info("Notification submitted. This does not prove the agent fetched it.")
+                    if vim.api.nvim_tabpage_is_valid(view.tab) then
+                      refresh(view)
+                    end
+                  end
+                end
+              )
+              return
+            end
+          end
+          Util.info("No outstanding submitted request. Use s to send new comments.")
+        end,
+        "Notify again or explicitly hand off an outstanding request",
       },
       gs = {
         function()
@@ -831,6 +901,7 @@ function M.open(scope, opts)
             "m       Choose queue or steer mode",
             "s       Queue or send the selected thread",
             "gs      Send all new project comments to the agent queue",
+            "gn      Notify again or explicitly hand off outstanding work",
             "S       Attach an existing project agent",
             "a       Attached agent status and delivery",
             "t       Retry a failed request",

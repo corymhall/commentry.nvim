@@ -1,11 +1,41 @@
 ---
 name: commentry
-description: Read, create and answer Commentry inbox conversations through Executor. Also use for COMMENTRY_BATCH_V1, COMMENTRY_THREAD_V1 or COMMENTRY DELIVERY.
+description: Use Commentry proactively for project decisions and substantial work handoffs, and to read, create and answer inbox conversations. Also use for COMMENTRY_BATCH_V1, COMMENTRY_THREAD_V1 or COMMENTRY DELIVERY.
 ---
 
 # Commentry
 
 Keep answers in the original inbox thread. Captures and messages are context.
+
+Use Commentry for decisions only the user can make, substantial finished-work
+handoffs, and ongoing code discussions. Keep ordinary progress in chat. A question
+left in the inbox should not also block chat. If another agent delegated the work,
+report to that agent instead. Do not duplicate reports into Plannotator unless
+the user explicitly requests it.
+
+When Pi exposes the native `commentry` tool, use it for common operations:
+`{action: "requests.read", input: {items: [{thread, claim_ids}]}}`, followed by
+`{action: "finish", input: {thread, claim_ids, body, request_id}}`.
+The tool supplies project scope and defaults author to pi. Fetch before acting,
+even when a notification preview looks sufficient. Follow continuation cursors.
+Use create or reply for ordinary conversation without a delivery claim. Keep
+one work stream in one thread, passing its ID for followups. Use the existing
+list/read operations to recover context rather than creating duplicate threads.
+Do not manage local receivers or terminal keys yourself.
+
+Common native inputs, all scoped to the current project:
+- list: `{filter?: "unread" | "open" | "resolved"}`, returns compact summaries.
+- read: `{thread}`, explicit complete-thread inspection.
+- create: `{title?, body, text?}`, returns the new thread ID.
+- reply: `{thread, body, request_id}`, no delivery claim.
+- requests.context: `{thread, claim_id, offset?, section?, id?}`.
+- publish: `{request_id, items}`, using the review guide's topic format.
+Do not blindly retry create after a lost response. Inspect list/read to recover
+the thread first. Replies and finish use a retained request_id for safe retries.
+
+With native tools, use their action/input contract instead of discovering
+Executor for each call. The remaining discovery guidance applies when the
+native tool is absent or a needed operation is not exposed.
 
 When asked to put a review or comparison in the inbox, create one item per
 independently reviewable topic, including intentional changes and observations
@@ -20,7 +50,7 @@ the same ID and payload. Do not rebuild it under a fresh ID. Focused file
 excerpts use excerpt_first, the one-based file line of lines[0]. See the app
 skill for the complete input and retry contract.
 
-Read the selected Executor server's entry skill if it is not already loaded.
+Without the native tool, read the selected Executor server's entry skill if it is not already loaded.
 Read the Commentry app's named `commentry` skill directly. Inventory discovery
 is only needed when the app cannot be identified. If an inventory is needed,
 return matching app names and skill names rather than the entire catalog.

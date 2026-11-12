@@ -28,7 +28,7 @@ func newAgent(directory *string) *cobra.Command {
 		}
 		return emit(command, result, nil)
 	}
-	root.AddCommand(list, attach, newAgentBatch(directory, &project))
+	root.AddCommand(list, attach, newAgentBatch(directory, &project), newAgentNotify(directory, &project))
 	for _, action := range []string{"status", "dispatch", "detach", "focus", "steer"} {
 		root.AddCommand(newAgentControl(action, directory, &project))
 	}

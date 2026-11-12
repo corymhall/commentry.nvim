@@ -7,6 +7,7 @@ import {
   number,
   object,
   query,
+  record,
   router,
   string,
   type JsonValue,
@@ -27,7 +28,7 @@ import {
   type Thread,
 } from "./inbox.js";
 
-import { readRequests, requestContext } from "./requests.js";
+import { receiveRequests, requestContext } from "./requests.js";
 import { publish, publication, type Publication } from "./publish.js";
 
 const text = string({ minLength: 1 });
@@ -82,6 +83,7 @@ const queued = object({
   error: string().optional(),
   skipped: boolean().optional(),
   delivery_error: string().optional(),
+  acknowledged_at: string().optional(),
 });
 const thread = object({
   pending: boolean().optional(),
@@ -104,12 +106,20 @@ const thread = object({
   incoming: string().optional(),
   seen: string().optional(),
   manual_unread: boolean().optional(),
+  reply_receipts: record(object({ fingerprint: string(), event })).optional(),
 });
 const requestContextOutput = object({
   thread: text,
   claim_id: text,
   status: text,
   earlier_messages: number().optional(),
+  acknowledged_at: string().optional(),
+  latest_activity: string().optional(),
+  submitted_activity: string().optional(),
+  sections: array(string()).optional(),
+  recent_history: array(
+    object({ author: text, body: string(), abbreviated: boolean() }),
+  ).optional(),
   context: object({
     text: string(),
     total_chars: number(),
@@ -236,10 +246,10 @@ export default defineApp(
           ),
         }),
         requests: router({
-          read: query(
+          read: mutation(
             {
               description:
-                "Start here for delivered comments. Read exact supplied thread/claim IDs in compact pages, without queue history, full files or comparisons. Five claims per page; follow next_cursor with the same items. Context continuation uses requests.context and next_offset. Inactive claims return status only.",
+                "Start here for delivered comments. Read exact supplied thread/claim IDs in compact pages, without queue history, full files or comparisons. Five claims per page; follow next_cursor with the same items. Context continuation uses requests.context and next_offset. Inactive claims return status only. Atomically acknowledges fetched claims, independently of human read state. Recent history, available sections and latest activity ID accompany submitted context.",
               input: object({
                 project: text,
                 items: array(object({ thread: text, claim_ids: array(text) })),
@@ -250,7 +260,7 @@ export default defineApp(
                 next_cursor: number().optional(),
               }),
             },
-            async ({ sql }, input) => readRequests(sql, input),
+            async ({ sql }, input) => receiveRequests(sql, input),
           ),
           context: query(
             {
@@ -317,8 +327,13 @@ export default defineApp(
         reply: mutation(
           {
             description:
-              "Add a comment. To answer a delivered request, use finish so its claims also complete.",
-            input: object({ thread: text, body: text, author }),
+              "Add a comment. To answer a delivered request, use finish so its claims also complete. Supply a durable request_id for safe retries; changed content at that ID is rejected.",
+            input: object({
+              thread: text,
+              body: text,
+              author,
+              request_id: text.optional(),
+            }),
             output: event,
           },
           async ({ sql }, input) =>
@@ -327,11 +342,12 @@ export default defineApp(
         finish: mutation(
           {
             description:
-              "Atomically save a reply and complete exactly the supplied active claims. Does not resolve the conversation. A retained uncertain-delivery claim may finish until explicitly retried.",
+              "Atomically save a reply and complete exactly the supplied active claims. Does not resolve the conversation. A retained uncertain-delivery claim may finish until explicitly retried or handed off. Supply a durable request_id; an exact retry returns the original receipt without a duplicate answer.",
             input: object({
               thread: text,
               body: text,
               claim_ids: array(text),
+              request_id: text.optional(),
               author,
             }),
             output: event,
@@ -409,7 +425,7 @@ export default defineApp(
         resolve: mutation(
           {
             description:
-              "Explicitly resolve or reopen a conversation. Replies and completed requests never resolve it automatically.",
+              "Explicitly resolve or reopen a conversation. Resolving also marks current activity read. Reopening preserves read state. Replies and completed requests never resolve it automatically.",
             input: object({ thread: text, resolved: boolean(), author }),
             output: event,
           },

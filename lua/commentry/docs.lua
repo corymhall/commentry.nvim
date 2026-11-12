@@ -3,6 +3,7 @@ local M = {}
 local public_command_refs = {
   ":Commentry inbox",
   ":Commentry comment",
+  ":Commentry edit",
   ":Commentry capture-text",
   ":Commentry new-thread",
   ":Commentry open",

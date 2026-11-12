@@ -10,12 +10,22 @@ path and input entries before printing; omit unrelated tools and catalog data.
 When wrapping MCP in codemode, check status and execution.ok
 and print only execution.value, not the whole text/structured result envelope.
 
+Use Commentry proactively for decisions only the user can make and substantial
+finished-work handoffs. Start a conversation with create, and use reply for
+followups in that thread. Do not duplicate reports into another inbox unless
+explicitly requested. Pi may expose a native commentry tool backed by these
+same operations; prefer that tool for supported actions.
+
 ## Delivered requests
 
-Call requests.read with the notification's exact project and items. For an
+Call requests.read with the notification's exact project and items containing
+only thread and claim_ids. Omit notification preview and truncated fields. For an
 older single-thread delivery, form one item from its thread and claim_ids.
 Split manifests larger than 100 claims into groups of at most 100.
-It returns at most five claims per page, with up to 2000 Unicode characters
+This mutation atomically acknowledges only fetched active claims, independently
+of human read state. Repeated notifications for the same claim are reminders,
+not new work. Fetch even when a notification preview looks sufficient, so stale
+claims are rejected. It returns at most five claims per page, with up to 2000 Unicode characters
 of context each. Continue next_cursor with the same project and items.
 
 Only claimed and failed statuses are answerable. Failed may be a lost delivery
@@ -26,7 +36,11 @@ Context is the saved submission, not messages that arrived later. Recent
 submitted discussion comes first, newest message first. Earlier answered history is omitted and
 counted in earlier_messages. Long preceding agent answers are explicitly
 abbreviated; section=history retrieves them when relevant. Capture excerpts retain first/last and
-excerpt_first coordinates. No queue history or full file snapshots are returned.
+excerpt_first coordinates. No queue history or full file snapshots are returned. The result also includes
+bounded recent_history, available sections, and latest_activity so a replacement
+session can orient itself with one call. latest_activity names the current last
+message, not an addition to the frozen request. Compare latest_activity with submitted_activity. Different IDs mean
+newer activity may exist; use full read explicitly if needed.
 
 If context.next_offset is present, requests.context continues the same text
 using project, thread, claim_id and offset. Read enough pages to understand the
@@ -41,7 +55,10 @@ through history rather than repeating in default context. Human questions remain
 visible. Full read remains available for explicit complete inspection.
 
 Use finish separately for each answer, passing its thread, claim_ids, author
-and body. Return compact saved reply IDs from writes. Chat output alone does not
+and body. Choose and retain a durable request_id before reply or finish. An
+exact retry returns the original receipt; changed content at that ID is rejected.
+After a lost response retry the same ID and payload, never a fresh ID. Claims
+explicitly handed off cannot be finished by their old recipient. Return compact saved reply IDs from writes. Chat output alone does not
 answer the inbox. Completion does not resolve a thread or acknowledge human reads.
 Do not copy one item's answer into another.
 

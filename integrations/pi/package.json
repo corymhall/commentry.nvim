@@ -1,0 +1,14 @@
+{
+  "name": "commentry-pi",
+  "private": true,
+  "type": "module",
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=1.5.0",
+    "typebox": "*"
+  }
+}

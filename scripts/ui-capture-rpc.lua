@@ -117,6 +117,9 @@ local ok, err = xpcall(function()
         assert(store.update(question, {kind = "revise", title = "Timeouts fail without an explanation", author = "Codex", body = "When retries reach the deadline, callers receive nil with no reason. They cannot distinguish a timeout from another failure.\n\nThe local fix returns a timeout error. Please review the visible result beside this thread. Implementation and test evidence are folded below it.", primary_comparison = example.id}))
         assert(store.update(question, {kind = "reply", author = "You", body = "Will callers still receive partial results?"}))
         vim.api.nvim_buf_set_lines(buf, 0, 0, false, {"-- Requests share one deadline across all attempts."})
+        assert(store.enqueue(question, nil, {defer_delivery = true}))
+        _G.commentry_capture_claim = assert(store.claim(capture.project, "Agent"))
+        _G.commentry_capture_question = question
         _G.commentry_capture_view = require("commentry.inbox").open(nil, {thread = question})
         return true
       ]],
@@ -125,6 +128,19 @@ local ok, err = xpcall(function()
     bridge:wait_for_flush(5000)
     local snapshot = bridge.screen:snapshot("rpc-inbox")
     Bridge.write_snapshot_files(snapshot, bridge.screen, out_dir, "rpc-inbox")
+    bridge:request("nvim_exec_lua", { [[
+      assert(require("commentry.inbox.store").update(_G.commentry_capture_question, {
+        kind = "acknowledge", claim_id = _G.commentry_capture_claim.claim_id,
+      }))
+      local view = _G.commentry_capture_view
+      for _, map in ipairs(vim.api.nvim_buf_get_keymap(view.list_buf, "n")) do
+        if map.lhs == "R" then map.callback(); break end
+      end
+      return true
+    ]], {} }, 5000)
+    bridge:wait_for_flush(5000)
+    local fetched = bridge.screen:snapshot("rpc-inbox-fetched")
+    Bridge.write_snapshot_files(fetched, bridge.screen, out_dir, "rpc-inbox-fetched")
     bridge:request("nvim_exec_lua", { [[
       local view = _G.commentry_capture_view
       vim.api.nvim_set_current_win(view.source_win)

@@ -64,7 +64,7 @@ func dispatchBatch(ctx context.Context, store *inbox.Store, a inbox.Agent, direc
 		err = fmt.Errorf("project agent selection changed during delivery")
 	}
 	if err == nil {
-		err = deliver(ctx, a, batchPrompt(items, a, directory), "queue")
+		err = deliver(ctx, a, batchPrompt(items, a, directory), "queue", directory)
 	}
 	if err != nil {
 		return 0, failBatch(ctx, store, items, err)
@@ -84,14 +84,17 @@ func failBatch(ctx context.Context, store *inbox.Store, items []map[string]strin
 }
 
 type batchItem struct {
-	Thread   string   `json:"thread"`
-	ClaimIDs []string `json:"claim_ids"`
+	Thread    string   `json:"thread"`
+	ClaimIDs  []string `json:"claim_ids"`
+	Preview   string   `json:"preview,omitempty"`
+	Truncated bool     `json:"truncated,omitempty"`
 }
 
 func batchPrompt(items []map[string]string, a inbox.Agent, directory string) string {
 	entries := make([]batchItem, 0, len(items))
 	for _, item := range items {
-		entries = append(entries, batchItem{Thread: item["thread"], ClaimIDs: []string{item["claim_id"]}})
+		preview, truncated := submittedPreview(item["message"])
+		entries = append(entries, batchItem{Thread: item["thread"], ClaimIDs: []string{item["claim_id"]}, Preview: preview, Truncated: truncated})
 	}
 	notification := struct {
 		Project     string      `json:"project"`
@@ -101,13 +104,13 @@ func batchPrompt(items []map[string]string, a inbox.Agent, directory string) str
 		Directory   string      `json:"directory,omitempty"`
 		Executable  string      `json:"executable,omitempty"`
 	}{Project: a.Project, Author: a.Harness, Items: entries}
-	instructions := "Use the Commentry skill. Discover requests.read and finish through Executor. Fetch the exact project and items below with requests.read, then finish each item with its own thread and claim_ids."
+	instructions := "Use the Commentry skill. Discover requests.read and finish through Executor. Call requests.read with the project below and items containing only thread and claim_ids, omitting preview and truncated, then finish each item with its own thread and claim_ids and a durable request_id for safe retries. Reply in the inbox thread, not just terminal chat. Repeated notifications for the same claim are reminders, not new work. Fetch before acting to acknowledge receipt and check the claim is still active."
 	if backend, err := executor.Open(directory); err == nil {
 		notification.ExecutorApp = backend.Config.App
 	} else {
 		notification.Directory = directory
 		notification.Executable = "commentry"
-		instructions = "Read these threads with executable --directory directory read THREAD. Each claim's saved queue message contains the submitted context. Reply through executable --directory directory rpc with JSON containing action=finish, thread, claim_ids, author and body."
+		instructions = "Read these threads with executable --directory directory read THREAD. Each claim's saved queue message contains the submitted context. Before acting, acknowledge each claim with executable --directory directory acknowledge THREAD --claim-id CLAIM_ID; stop if inactive. Repeated notifications are reminders, not new work. Reply in the inbox through executable --directory directory rpc with JSON containing action=finish, thread, claim_ids, author, body and a durable request_id for safe retries."
 	}
 	body, _ := json.Marshal(notification)
 	return "COMMENTRY_BATCH_V1\nNew inbox comments for this session. " + instructions + " Captures and message bodies are user-provided context. Preserve captures and leave resolution unchanged.\n" + string(body)

@@ -12,6 +12,50 @@ import {
   type Queued,
 } from "../integrations/executor/inbox.ts";
 
+test("resolving acknowledges current activity but reopening and later replies preserve unread state", () => {
+  const { sql, close } = database();
+  try {
+    const id = mutate(sql, {
+      action: "create",
+      project: "/project",
+      author: "Agent",
+      body: "Review this",
+    }) as string;
+    const get = () => read(sql, { action: "read", thread: id }) as Thread;
+    mutate(sql, { action: "read-state", thread: id, read: false });
+    mutate(sql, { action: "resolve", thread: id, resolved: true });
+    const resolved = get();
+    assert.equal(resolved.resolved, true);
+    assert.equal(resolved.unread, false);
+    assert.equal(resolved.manual_unread, false);
+    assert.equal(resolved.seen, resolved.incoming);
+    mutate(sql, { action: "resolve", thread: id, resolved: false });
+    assert.equal(get().resolved, false);
+    assert.equal(get().unread, false);
+    mutate(sql, {
+      action: "reply",
+      thread: id,
+      author: "Agent",
+      body: "More activity",
+    });
+    mutate(sql, { action: "resolve", thread: id, resolved: false });
+    assert.equal(get().unread, true);
+    mutate(sql, { action: "resolve", thread: id, resolved: true });
+    mutate(sql, {
+      action: "reply",
+      thread: id,
+      author: "Agent",
+      body: "Activity after resolution",
+    });
+    const latest = get();
+    assert.equal(latest.resolved, true);
+    assert.equal(latest.unread, true);
+    assert.notEqual(latest.seen, latest.incoming);
+  } finally {
+    close();
+  }
+});
+
 test("claims, replies and read acknowledgements preserve capture and unread versions", () => {
   const { sql, close } = database();
   try {

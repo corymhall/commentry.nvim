@@ -26,6 +26,8 @@ This file defines the operating contract for humans and AI agents working in thi
 - `inbox/`: Go inbox protocol/client and legacy SQLite export backend.
 - `executor/`: Authenticated Executor API client and browser device login.
 - `integrations/executor/`: TypeScript app, SQL migrations, and agent skill.
+- `integrations/pi/`: Native Pi extension and private local receiver.
+- `pibridge/`: Go native transport and authenticated thin-tool adapter.
 - `lua/commentry/inbox/store.lua`: Neovim adapter to the Go JSON interface.
 - `.golangci.yml`: Go lint, modernization, and formatter configuration.
 - `hk.pkl`: Go checks and optional git hooks, adapted from Evaler.
@@ -47,6 +49,8 @@ Run commands from repo root.
 - Install the Go CLI: `mise run install-commentry`
 - Executor setup: `mise run setup_executor`
 - Executor checks: `mise run test_executor`, `mise run lint_executor`
+- Native Pi receiver tests: `mise run test_pi`, `mise run lint_pi`
+- Optional installed-host smoke: `mise run smoke_pi`
 - Go-only checks: `mise run format_go`, `mise run lint_go`, `mise run test_go`
 - Apply Go lint fixes: `mise run lint:fix`
 
@@ -84,6 +88,9 @@ Run commands from repo root.
 - `config.lua` validates and normalizes all user input; setup must be idempotent.
 - Keep module namespace aligned (`commentry`) across `plugin/`, `lua/`, `tests/`, and docs.
 - Keep changes deterministic and offline-safe for CI/headless runs.
+- Pi transport is local-only. Never fall back to terminal paste after a native submission error.
+- Skills and startup guidance use Commentry by default. Plannotator remains explicit opt-in.
+- Keep local transport, Neovim rendering and credentials out of the Executor app.
 - Keep README/docs claims aligned with actual behavior.
 - Preserve ASCII unless a file already requires Unicode.
 

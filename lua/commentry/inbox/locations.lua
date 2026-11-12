@@ -1,4 +1,3 @@
-local Render = require("commentry.inbox.render")
 local Source = require("commentry.inbox.source")
 local M = {}
 local ns = vim.api.nvim_create_namespace("commentry.inbox.locations")
@@ -25,7 +24,8 @@ local function display(buf)
   if context then
     return vim.fs.joinpath(context.project, context.file_path), vim.api.nvim_buf_get_lines(buf, 0, -1, false)
   end
-  return vim.api.nvim_buf_get_name(buf)
+  return vim.api.nvim_buf_get_name(buf),
+    vim.bo[buf].buftype == "" and vim.api.nvim_buf_get_lines(buf, 0, -1, false) or nil
 end
 
 function M.draw(buf)
@@ -37,7 +37,7 @@ function M.draw(buf)
   if vim.bo[buf].buftype ~= "" and not contents then
     return
   end
-  local marked, cards, seen = {}, {}, {}
+  local cards, seen = {}, {}
   for _, thread in ipairs(threads) do
     if not thread.resolved or thread.id == current then
       for _, attachment in ipairs(locations(thread)) do
@@ -45,37 +45,10 @@ function M.draw(buf)
         if source.kind == "file" and vim.fs.joinpath(thread.project, source.path) == path then
           local target = Source.locate(vim.tbl_extend("force", thread, { source = source }), contents)
           if target then
-            if contents then
-              local key = thread.id .. ":" .. target.first .. ":" .. target.last
-              if not seen[key] then
-                cards[#cards + 1] = { thread = thread, first = target.first, last = target.last }
-                seen[key] = true
-              end
-            else
-              local row = target.first - 1
-              vim.api.nvim_buf_set_extmark(buf, ns, row, 0, {
-                sign_text = "C",
-                sign_hl_group = "CommentryInboxAccent",
-                priority = 90,
-              })
-              local opts = { priority = 90 }
-              if thread.id == current then
-                opts.end_row = target.last
-                opts.hl_group = "CommentryInboxSelection"
-                opts.hl_eol = true
-              end
-              if thread.id == current and not marked[row] then
-                local message = thread.messages[#thread.messages]
-                local review = #thread.messages == 1 and thread.review
-                local author = review and review.author or message.author
-                local body = review and review.summary or message.body
-                opts.virt_text = {
-                  { Render.clip("  " .. author .. ": " .. body:gsub("%s+", " "), 70), "CommentryInboxMuted" },
-                }
-                opts.virt_text_pos = "eol"
-                marked[row] = true
-              end
-              vim.api.nvim_buf_set_extmark(buf, ns, row, 0, opts)
+            local key = thread.id .. ":" .. target.first .. ":" .. target.last
+            if not seen[key] then
+              cards[#cards + 1] = { thread = thread, first = target.first, last = target.last }
+              seen[key] = true
             end
           end
         end
@@ -84,10 +57,17 @@ function M.draw(buf)
   end
   if contents then
     require("commentry.inbox.cards").draw(buf, ns, cards)
+    if #cards > 0 then
+      vim.api.nvim_buf_call(buf, function()
+        if vim.fn.maparg("gC", "n") == "" then
+          vim.keymap.set("n", "gC", M.open_at_cursor, { buffer = buf, desc = "Open inbox thread at cursor" })
+        end
+      end)
+    end
   end
 end
 
-function M.open_at_cursor()
+function M.choose_at_cursor(callback)
   local path, contents = display(vim.api.nvim_get_current_buf())
   local row = vim.api.nvim_win_get_cursor(0)[1]
   local candidates, seen = {}, {}
@@ -101,23 +81,26 @@ function M.open_at_cursor()
       end
     end
   end
-  local function open(thread)
-    if thread then
-      require("commentry.inbox").open(nil, { project = thread.project, thread = thread.id })
-    end
-  end
   if #candidates == 1 then
-    open(candidates[1])
+    callback(candidates[1])
   elseif #candidates > 1 then
     vim.ui.select(candidates, {
       prompt = "Code conversations",
       format_item = function(t)
         return t.title
       end,
-    }, open)
+    }, callback)
   else
     require("commentry.util").info("No inbox thread at this line")
   end
+end
+
+function M.open_at_cursor()
+  M.choose_at_cursor(function(thread)
+    if thread then
+      require("commentry.inbox").open(nil, { project = thread.project, thread = thread.id })
+    end
+  end)
 end
 
 function M.set(items, selected)

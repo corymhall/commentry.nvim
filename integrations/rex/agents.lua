@@ -131,7 +131,9 @@ function M.setup(options)
   local adapters = options.adapters
     or {
       codex = { queue = "\t", steer = "\r" },
-      pi = { queue = "\27\r", steer = "\r" },
+      -- Explicit CSI-u Alt+Enter. ESC+CR left pasted text in Pi's editor
+      -- instead of invoking its native follow-up action in fullscreen mode.
+      pi = { queue = "\27[13;3u", steer = "\r" },
     }
   for name, adapter in pairs(adapters) do
     if type(adapter.queue) ~= "string" or type(adapter.steer) ~= "string" then

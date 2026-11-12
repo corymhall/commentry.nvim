@@ -73,6 +73,39 @@ func TestUnreadAcknowledgesOnlyDisplayedMessages(t *testing.T) {
 	}
 }
 
+// TestResolutionAcknowledgesCurrentActivity keeps future replies unread.
+func TestResolutionAcknowledgesCurrentActivity(t *testing.T) {
+	t.Parallel()
+	store := openStore(t, t.TempDir())
+	id := run(t, store, inbox.Request{Action: "create", Project: t.TempDir(), Author: "Agent", Body: "Review this"}).(string)
+	read := false
+	run(t, store, inbox.Request{Action: "read-state", Thread: id, Read: &read})
+	resolved := true
+	run(t, store, inbox.Request{Action: "resolve", Thread: id, Resolved: &resolved})
+	current := run(t, store, inbox.Request{Action: "read", Thread: id}).(inbox.Thread)
+	if !current.Resolved || current.Unread || current.ManualUnread || current.Seen != current.Incoming {
+		t.Fatalf("resolution did not acknowledge current activity: %+v", current)
+	}
+	resolved = false
+	run(t, store, inbox.Request{Action: "resolve", Thread: id, Resolved: &resolved})
+	current = run(t, store, inbox.Request{Action: "read", Thread: id}).(inbox.Thread)
+	if current.Resolved || current.Unread {
+		t.Fatalf("reopening changed read state: %+v", current)
+	}
+	run(t, store, inbox.Request{Action: "reply", Thread: id, Author: "Agent", Body: "More activity"})
+	run(t, store, inbox.Request{Action: "resolve", Thread: id, Resolved: &resolved})
+	if !run(t, store, inbox.Request{Action: "read", Thread: id}).(inbox.Thread).Unread {
+		t.Fatal("reopening acknowledged unread activity")
+	}
+	resolved = true
+	run(t, store, inbox.Request{Action: "resolve", Thread: id, Resolved: &resolved})
+	run(t, store, inbox.Request{Action: "reply", Thread: id, Author: "Agent", Body: "Activity after resolution"})
+	current = run(t, store, inbox.Request{Action: "read", Thread: id}).(inbox.Thread)
+	if !current.Resolved || !current.Unread || current.Seen == current.Incoming {
+		t.Fatalf("resolution hid later incoming activity: %+v", current)
+	}
+}
+
 // TestConcurrentIndependentWritersAndClaims protects cross-process state.
 func TestConcurrentIndependentWritersAndClaims(t *testing.T) {
 	t.Parallel()

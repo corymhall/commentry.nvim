@@ -1,4 +1,25 @@
--- Load from Rex init.lua. Requires commentry on PATH.
+-- Load from Rex init.lua. GUI-launched Rex may have only a system PATH.
+local function command_environment()
+  local path = os.getenv("PATH") or "/usr/bin:/bin"
+  local home = os.getenv("HOME")
+  if home and home ~= "" then
+    path = path .. ":" .. home .. "/.local/bin"
+  end
+  local rex_bin = os.getenv("REX_BIN_DIR")
+  if (not rex_bin or rex_bin == "") and home and home ~= "" then
+    -- Rex injects REX_BIN_DIR into terminals, but its config actions may not
+    -- inherit it. Use the managed macOS install's stable Current path.
+    rex_bin = home
+      .. "/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS"
+  end
+  if rex_bin and rex_bin ~= "" then
+    path = path .. ":" .. rex_bin
+  end
+  -- The CLI also starts Neovim. Include both standard Homebrew prefixes
+  -- without invoking a login shell or interpolating action arguments.
+  path = path .. ":/opt/homebrew/bin:/usr/local/bin"
+  return { PATH = path }
+end
 local function launch(ctx, command, empty)
   local args = {
     "commentry",
@@ -15,7 +36,7 @@ local function launch(ctx, command, empty)
   if empty then
     args[#args + 1] = "--empty"
   end
-  local result, err = rex.exec(args)
+  local result, err = rex.exec(args, { env = command_environment() })
   if not result then
     error(err)
   end

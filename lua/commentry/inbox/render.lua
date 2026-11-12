@@ -62,7 +62,13 @@ function M.list(view)
         break
       end
       if item.status == "pending" or item.status == "claimed" then
-        status = status .. " / " .. (item.status == "pending" and "Queued" or "Sent")
+        status = status
+          .. " / "
+          .. (
+            item.status == "pending" and "Queued"
+            or item.acknowledged_at and "Fetched / Awaiting answer"
+            or "Submitted / Not acknowledged"
+          )
         break
       end
     end
@@ -256,6 +262,14 @@ function M.conversation(view, thread)
   local rows =
     { thread.title, status .. " / " .. (thread.unread and "Unread / " or "") .. #thread.messages .. " messages", "" }
   for _, item in ipairs(thread.queue) do
+    if item.status == "claimed" then
+      vim.list_extend(rows, {
+        item.acknowledged_at and "Fetched by agent / Awaiting answer"
+          or "Submitted / Agent has not acknowledged receipt",
+        "Press gn to notify again or explicitly hand off.",
+        "",
+      })
+    end
     if item.status == "failed" then
       vim.list_extend(rows, vim.split("Request failed: " .. (item.error or "Delivery failed"), "\n", { plain = true }))
       vim.list_extend(rows, { "Inspect partial work, then press t to retry.", "" })

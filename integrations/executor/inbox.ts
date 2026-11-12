@@ -58,6 +58,7 @@ export interface Queued {
   error?: string;
   skipped?: boolean;
   delivery_error?: string;
+  acknowledged_at?: string;
 }
 export interface Thread {
   // Editing ends at the first queue commit, not at successful delivery.
@@ -81,6 +82,7 @@ export interface Thread {
   incoming?: string;
   seen?: string;
   manual_unread?: boolean;
+  reply_receipts?: Record<string, { fingerprint: string; event: Event }>;
 }
 export interface Agent {
   id: string;
@@ -360,6 +362,7 @@ function transition(t: Thread, r: Request) {
   );
   requireThat(q, "no matching active queued request");
   if (r.action === "retry") {
+    delete q.acknowledged_at;
     q.status = "pending";
     delete q.claim_id;
     delete q.author;
@@ -392,6 +395,8 @@ export function mutateInside(sql: SqlReader, r: Request): unknown {
       "fail",
       "retry",
       "finish",
+      "acknowledge",
+      "handoff",
     ].includes(r.action),
     "unknown inbox action",
   );
@@ -477,6 +482,30 @@ export function mutateInside(sql: SqlReader, r: Request): unknown {
     };
   if (r.claim_id) e.claim_id = r.claim_id;
   if (r.queue_id) e.queue_id = r.queue_id;
+  const fingerprint = JSON.stringify([
+    r.action,
+    author,
+    r.body,
+    [...(r.claim_ids ?? [])].sort(),
+  ]);
+  if (r.request_id && ["reply", "finish"].includes(r.action)) {
+    requireThat(
+      label(r.request_id) && r.request_id.length <= 200,
+      "invalid request_id",
+    );
+    // Request IDs are caller-provided keys, not inherited object properties.
+    const receipt =
+      t.reply_receipts && Object.hasOwn(t.reply_receipts, r.request_id)
+        ? t.reply_receipts[r.request_id]
+        : undefined;
+    if (receipt) {
+      requireThat(
+        JSON.stringify(JSON.parse(receipt.fingerprint)) === fingerprint,
+        "request_id already used with different reply",
+      );
+      return receipt.event;
+    }
+  }
   let result: unknown = e;
   switch (r.action) {
     case "edit-pending":
@@ -538,6 +567,34 @@ export function mutateInside(sql: SqlReader, r: Request): unknown {
       t.queue.push(q);
       t.pending = false;
       result = q;
+      break;
+    }
+    case "acknowledge": {
+      const q = t.queue.find(
+        (q) =>
+          q.claim_id === r.claim_id &&
+          nonempty(r.claim_id) &&
+          ["claimed", "failed"].includes(q.status),
+      );
+      requireThat(q, "no matching active queued request");
+      if (q.acknowledged_at) return e;
+      q.acknowledged_at = at;
+      break;
+    }
+    case "handoff": {
+      const q = t.queue.find(
+        (q) =>
+          q.id === r.queue_id &&
+          q.claim_id === r.claim_id &&
+          nonempty(r.claim_id) &&
+          ["claimed", "failed"].includes(q.status),
+      );
+      requireThat(q, "no matching active queued request");
+      q.status = "pending";
+      delete q.claim_id;
+      delete q.author;
+      delete q.error;
+      delete q.acknowledged_at;
       break;
     }
     case "reply":
@@ -681,6 +738,10 @@ export function mutateInside(sql: SqlReader, r: Request): unknown {
         "resolved must be a boolean",
       );
       t.resolved = r.resolved;
+      if (t.resolved) {
+        t.seen = t.incoming ?? "";
+        t.manual_unread = false;
+      }
       break;
     case "read-state":
       requireThat(typeof r.read === "boolean", "read must be a boolean");
@@ -694,6 +755,11 @@ export function mutateInside(sql: SqlReader, r: Request): unknown {
     default:
       transition(t, r);
   }
+  if (r.request_id && ["reply", "finish"].includes(r.action))
+    t.reply_receipts = {
+      ...t.reply_receipts,
+      [r.request_id]: { fingerprint, event: e },
+    };
   t.unread = !!t.manual_unread || (t.incoming ?? "") !== (t.seen ?? "");
   t.updated_at = at;
   save(sql, t, r.action);

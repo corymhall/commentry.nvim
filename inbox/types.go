@@ -56,17 +56,18 @@ type Event struct {
 // Queued retains an immutable request body alongside its delivery state.
 // Skipped and DeliveryError describe one CLI attempt and are not persisted.
 type Queued struct {
-	Skipped       bool   `json:"skipped,omitempty"`
-	DeliveryError string `json:"delivery_error,omitempty"`
-	Error         string `json:"error,omitempty"`
-	ID            string `json:"id"`
-	Message       string `json:"message"`
-	Mode          string `json:"mode"`
-	At            string `json:"at"`
-	Clock         string `json:"clock"`
-	Status        string `json:"status"`
-	ClaimID       string `json:"claim_id,omitempty"`
-	Author        string `json:"author,omitempty"`
+	AcknowledgedAt string `json:"acknowledged_at,omitempty"`
+	Skipped        bool   `json:"skipped,omitempty"`
+	DeliveryError  string `json:"delivery_error,omitempty"`
+	Error          string `json:"error,omitempty"`
+	ID             string `json:"id"`
+	Message        string `json:"message"`
+	Mode           string `json:"mode"`
+	At             string `json:"at"`
+	Clock          string `json:"clock"`
+	Status         string `json:"status"`
+	ClaimID        string `json:"claim_id,omitempty"`
+	Author         string `json:"author,omitempty"`
 }
 
 // Review is the current explanation, independent of message history.
@@ -78,8 +79,15 @@ type Review struct {
 	At      string `json:"at"`
 }
 
+// ReplyReceipt retains an idempotent reply result.
+type ReplyReceipt struct {
+	Fingerprint string `json:"fingerprint"`
+	Event       Event  `json:"event"`
+}
+
 // Thread contains a capture, conversation, comparisons, and read/work state.
 type Thread struct {
+	ReplyReceipts map[string]ReplyReceipt `json:"reply_receipts,omitempty"`
 	// Pending permits editing the initial human message until the first queue
 	// transaction commits. Delivery failure or cancellation never restores it.
 	Pending           bool         `json:"pending,omitempty"`

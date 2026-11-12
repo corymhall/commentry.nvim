@@ -68,6 +68,23 @@ describe("commentry config", function()
     assert.is_truthy(warns[1]:find("invalid", 1, true))
   end)
 
+  it("validates global overrides independently of Diffview mappings", function()
+    local warns = {}
+    package.loaded["commentry.util"] = {
+      warn = function(message)
+        warns[#warns + 1] = message
+      end,
+    }
+    local Config = require("commentry.config")
+    Config.setup({ global_keymaps = { inbox = "", new_thread = "gcn", clipboard = false } })
+    assert.are.same("", Config.global_keymaps.inbox)
+    assert.are.same("gcn", Config.global_keymaps.new_thread)
+    assert.are.same("<leader>cp", Config.global_keymaps.clipboard)
+    assert.are.same("<leader>cc", Config.global_keymaps.add_comment)
+    assert.are.same("mc", Config.keymaps.add_comment)
+    assert.is_truthy(table.concat(warns, "\n"):find("global_keymaps.clipboard", 1, true))
+  end)
+
   it("allows disabling each Diffview keymap", function()
     local Config = require("commentry.config")
     Config.setup({ keymaps = { add_comment = "", add_range_comment = "", list_comments = "" } })

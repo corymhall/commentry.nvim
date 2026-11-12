@@ -9,7 +9,7 @@ node = "26.7.0"
 
 [tasks.test]
 description = "Run Lua and Go tests"
-depends = ["test_lua", "test_go", "test_executor"]
+depends = ["test_lua", "test_go", "test_executor", "test_pi"]
 
 [tasks.test_lua]
 description = "Run mini.test suite"
@@ -46,7 +46,7 @@ run = "selene --display-style=quiet --allow-warnings lua plugin"
 
 [tasks.lint]
 description = "Run all lint checks"
-depends = ["lint_stylua", "lint_selene", "lint_go", "lint_executor"]
+depends = ["lint_stylua", "lint_selene", "lint_go", "lint_executor", "lint_pi"]
 
 [tasks.lint_go]
 description = "Check Go code with hk and golangci-lint"
@@ -94,12 +94,12 @@ run = "node --import ./tests/executor_loader.mjs --disable-warning=ExperimentalW
 
 [tasks.format_executor]
 description = "Format Executor TypeScript sources"
-run = "integrations/executor/node_modules/.bin/prettier --write 'integrations/executor/*.{ts,json}' 'tests/executor*.ts' tests/executor_loader.mjs scripts/agent-trial.ts"
+run = "integrations/executor/node_modules/.bin/prettier --write 'integrations/executor/*.{ts,json}' 'tests/executor*.ts' tests/executor_loader.mjs scripts/agent-trial.ts 'integrations/pi/*.{ts,json}' 'tests/pi*.ts' scripts/pi-smoke.mjs"
 
 [tasks.lint_executor]
 description = "Type-check and check formatting of the Executor app"
 run = """
-integrations/executor/node_modules/.bin/prettier --check 'integrations/executor/*.{ts,json}' 'tests/executor*.ts' tests/executor_loader.mjs scripts/agent-trial.ts
+integrations/executor/node_modules/.bin/prettier --check 'integrations/executor/*.{ts,json}' 'tests/executor*.ts' tests/executor_loader.mjs scripts/agent-trial.ts 'integrations/pi/*.{ts,json}' 'tests/pi*.ts' scripts/pi-smoke.mjs
 integrations/executor/node_modules/.bin/tsc --ignoreConfig --noEmit --strict --skipLibCheck --module nodenext --moduleResolution nodenext --target es2022 integrations/executor/index.ts
 """
 
@@ -107,3 +107,16 @@ integrations/executor/node_modules/.bin/tsc --ignoreConfig --noEmit --strict --s
 [tasks.agent_trials]
 description = "Run isolated Commentry consumer trial fixtures"
 run = "node --import ./tests/executor_loader.mjs --disable-warning=ExperimentalWarning scripts/agent-trial.ts"
+
+[tasks.test_pi]
+description = "Test the private Pi receiver with isolated local sockets"
+run = "node --test tests/pi*.test.ts"
+
+[tasks.lint_pi]
+description = "Type-check the native receiver and its socket tests"
+run = "integrations/executor/node_modules/.bin/tsc --ignoreConfig --noEmit --strict --skipLibCheck --module nodenext --moduleResolution nodenext --target es2022 --types node --typeRoots integrations/executor/node_modules/@types --allowImportingTsExtensions integrations/pi/receiver.ts tests/pi_receiver.test.ts"
+
+[tasks.smoke_pi]
+description = "Offline native-delivery smoke with an installed Pi host, no model calls"
+depends = ["build_go"]
+run = "node scripts/pi-smoke.mjs"

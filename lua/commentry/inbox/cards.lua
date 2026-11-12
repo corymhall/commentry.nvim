@@ -1,4 +1,4 @@
--- Diffview cards are presentation of shared inbox threads. They never own or
+-- Code cards are presentation of shared inbox threads. They never own or
 -- persist a second comment model.
 local Config = require("commentry.config")
 local M = {}

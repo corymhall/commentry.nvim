@@ -6,6 +6,7 @@ function M.setup(opts)
   Config.setup(opts)
   require("commentry.log").setup(Config.log)
   require("commentry.commands").setup()
+  require("commentry.keymaps").setup(Config.global_keymaps)
   require("commentry.diffview").setup()
 end
 

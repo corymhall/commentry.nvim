@@ -35,10 +35,10 @@ func NewRootCmd() *cobra.Command {
 		RunE: func(command *cobra.Command, _ []string) error { return command.Help() },
 	}
 	root.PersistentFlags().StringVar(&directory, "directory", "", "Inbox data directory, defaults to COMMENTRY_INBOX_DIR or Neovim's data directory")
-	for _, action := range []string{actionList, actionRead, "create", "reply", actionFinish, actionResolve, actionComparison, actionArchiveComparison, actionRevise, "attach", actionReadState, actionQueue, "claim", "complete", "cancel", "retry", "revision", "changes"} {
+	for _, action := range []string{actionList, actionRead, "create", "reply", actionFinish, actionResolve, actionComparison, actionArchiveComparison, actionRevise, "attach", actionReadState, actionQueue, "claim", "complete", "acknowledge", "cancel", "retry", "revision", "changes"} {
 		root.AddCommand(newAction(action, &directory))
 	}
-	root.AddCommand(newPublish(&directory), newAction("publication", &directory), newRPC(&directory), newWatch(&directory), newCapture(&directory), newRex(&directory), newAgent(&directory), newExecutor(&directory))
+	root.AddCommand(newPi(&directory), newPublish(&directory), newAction("publication", &directory), newRPC(&directory), newWatch(&directory), newCapture(&directory), newRex(&directory), newAgent(&directory), newExecutor(&directory))
 	return root
 }
 
@@ -138,7 +138,7 @@ func newAction(action string, directory *string) *cobra.Command {
 	command := &cobra.Command{Use: action, Short: actionDescription(action), Args: cobra.NoArgs}
 	flags := command.Flags()
 	switch action {
-	case actionRead, "attach", "reply", actionFinish, actionResolve, actionComparison, actionArchiveComparison, actionRevise, actionReadState, actionQueue, "complete", "cancel", "retry":
+	case actionRead, "attach", "reply", actionFinish, actionResolve, actionComparison, actionArchiveComparison, actionRevise, actionReadState, actionQueue, "complete", "acknowledge", "cancel", "retry":
 		command.Use += " <thread>"
 		command.Args = cobra.ExactArgs(1)
 	}
@@ -187,6 +187,7 @@ func bindActionFlags(command *cobra.Command, options *actionOptions) {
 		flags.StringVar(&request.Label, "label", "", "Location label")
 		flags.StringVar(&request.AttachmentID, "attachment-id", "", "Replace this attachment, preserving its ID")
 	case "reply", "finish":
+		flags.StringVar(&request.RequestID, "request-id", "", "Durable reply ID for idempotent retries")
 		flags.StringVar(&request.Body, "body", "", "Reply body")
 		if action == actionFinish {
 			flags.StringSliceVar(&request.ClaimIDs, "claim-id", nil, "Active claim IDs completed atomically with this reply")
@@ -206,7 +207,7 @@ func bindActionFlags(command *cobra.Command, options *actionOptions) {
 	case actionQueue:
 		flags.BoolVar(&request.DeferDelivery, "defer-delivery", false, "Save the request without submitting it to Rex")
 		flags.StringVar(&request.Message, "message", "", "Explicit immutable request, otherwise capture thread context")
-	case "complete":
+	case "complete", "acknowledge":
 		flags.StringVar(&request.ClaimID, "claim-id", "", "Active claim ID")
 	case "retry":
 		flags.StringVar(&request.QueueID, "queue-id", "", "Failed request to retry after inspecting partial work")
