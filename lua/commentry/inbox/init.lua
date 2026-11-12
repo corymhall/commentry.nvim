@@ -3,10 +3,12 @@ local Render = require("commentry.inbox.render")
 local Reply = require("commentry.inbox.reply")
 local Source = require("commentry.inbox.source")
 local Store = require("commentry.inbox.store")
+local UI = require("commentry.inbox.ui")
 local Util = require("commentry.util")
 local M = {}
 local active
 local refresh
+local layout
 
 local function close_view(view)
   Reply.remember(view)
@@ -28,6 +30,10 @@ local function close_view(view)
       vim.cmd.tabnew()
     end
     vim.cmd("tabclose " .. vim.api.nvim_tabpage_get_number(view.tab))
+  end
+  -- The optional source buffer survives while its panel is hidden.
+  if vim.api.nvim_buf_is_valid(view.source_buf) then
+    vim.api.nvim_buf_delete(view.source_buf, { force = true })
   end
 end
 
@@ -66,60 +72,33 @@ local function inspect(thread)
 end
 
 local function details(rows)
-  local buf = vim.api.nvim_create_buf(false, true)
-  local width = math.max(1, math.min(88, vim.o.columns - 6))
-  local height = math.max(1, math.min(#rows, vim.o.lines - 6))
-  local win = vim.api.nvim_open_win(buf, true, {
-    relative = "editor",
-    width = width,
-    height = height,
-    row = math.max(0, math.floor((vim.o.lines - height) / 2) - 1),
-    col = math.max(0, math.floor((vim.o.columns - width) / 2)),
-    border = "rounded",
-    style = "minimal",
-    title = " Commentry ",
-    footer = " q close ",
-  })
-  vim.bo[buf].bufhidden = "wipe"
-  vim.wo[win].wrap = true
+  local popup = UI.popup({ title = "Commentry", height = #rows, footer = "q / Esc close" })
+  if not popup then
+    return
+  end
+  local buf = popup.bufnr
   write(buf, rows, "text")
   Render.mark(buf, 0, "Title")
-  vim.keymap.set("n", "q", function()
-    vim.api.nvim_win_close(win, true)
-  end, { buffer = buf, desc = "Close inbox details" })
-  vim.keymap.set("n", "<Esc>", function()
-    vim.api.nvim_win_close(win, true)
-  end, { buffer = buf, desc = "Close inbox details" })
+  for _, key in ipairs({ "q", "<Esc>" }) do
+    popup:map("n", key, function()
+      popup:unmount()
+    end, { desc = "Close inbox details" })
+  end
 end
 
 -- A real buffer keeps multiline editing and save/cancel behavior predictable.
 local function compose(title, initial, save, dispatch)
-  local buf = vim.api.nvim_create_buf(false, true)
-  local width = math.max(1, math.min(math.max(64, math.floor(vim.o.columns * 0.54)), vim.o.columns - 8))
-  local height = math.max(1, math.min(math.max(8, math.floor(vim.o.lines * 0.24)), vim.o.lines - 6))
-  local win = vim.api.nvim_open_win(buf, true, {
-    relative = "editor",
-    width = width,
-    height = height,
-    row = math.max(0, math.floor((vim.o.lines - height) / 2) - 1),
-    col = math.max(0, math.floor((vim.o.columns - width) / 2)),
-    border = "rounded",
-    title = " " .. Render.clip(title, math.max(1, width - 4)) .. " ",
-    title_pos = "center",
-    footer = dispatch and " <C-s> save | <C-d> save + send | <Esc>/q cancel "
-      or " Type freely | <C-s> save | <Esc>/q cancel ",
-    footer_pos = "center",
-    style = "minimal",
+  local popup = UI.popup({
+    title = title,
+    width = math.min(100, math.max(60, math.floor(vim.o.columns * 0.6))),
+    height = math.max(6, math.floor(vim.o.lines * 0.35)),
+    filetype = "markdown",
+    footer = dispatch and "Ctrl-s save / Ctrl-d send / Esc cancel" or "Ctrl-s save / Esc cancel",
   })
-  vim.bo[buf].bufhidden = "wipe"
-  vim.bo[buf].filetype = "markdown"
-  vim.wo[win].wrap = true
-  vim.wo[win].number = false
-  vim.wo[win].relativenumber = false
-  vim.wo[win].cursorline = false
-  vim.wo[win].signcolumn = "no"
-  vim.wo[win].spell = false
-  vim.wo[win].winbar = ""
+  if not popup then
+    return
+  end
+  local buf, win = popup.bufnr, popup.winid
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, initial or { "" })
   local function submit(send)
     local body = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
@@ -131,7 +110,7 @@ local function compose(title, initial, save, dispatch)
     if result then
       vim.cmd.stopinsert()
       if vim.api.nvim_win_is_valid(win) then
-        vim.api.nvim_win_close(win, true)
+        popup:unmount()
       end
       if send and dispatch then
         dispatch(result)
@@ -153,7 +132,7 @@ local function compose(title, initial, save, dispatch)
   local function cancel()
     vim.cmd.stopinsert()
     if vim.api.nvim_win_is_valid(win) then
-      vim.api.nvim_win_close(win, true)
+      popup:unmount()
     end
   end
   for _, key in ipairs({ "q", "<Esc>", "<C-c>" }) do
@@ -225,7 +204,7 @@ function M.new_thread()
       return false
     end
     if view then
-      view.filter = "all"
+      view.filter = "open"
       refresh(view, id)
     end
     return id
@@ -313,17 +292,54 @@ local function render_detail(view)
   if not thread then
     Render.remember_source(view)
     view.source_sections = nil
+    Render.clear_conversation(view)
     Reply.remember(view)
     view.reply = nil
-    write(view.source_buf, { "No threads in this scope.", "", ":Commentry comment", ":Commentry capture-text" }, "text")
-    write(view.thread_buf, { "Capture code or text to start a conversation." }, "markdown")
+    view.detail_thread = nil
+    layout(view, false)
+    write(view.thread_buf, {
+      "",
+      "  No threads in this scope",
+      "",
+      "  n   Start a project conversation",
+      "  f   Choose another filter",
+      "",
+      "  Capture code with :Commentry comment",
+      "  Capture text with :Commentry capture-text",
+    }, "markdown")
+    Render.mark(view.thread_buf, 1, "Title")
     vim.bo[view.thread_buf].modified = false
     return
   end
   Render.selection(view, vim.api.nvim_win_get_cursor(view.list_win)[1])
-  Render.source(view, thread, Source.sections(thread, view.context))
-  vim.wo[view.source_win].winbar = " Source and changes %=%#CommentryInboxMuted#za fold  gl sections  gf code "
+  local sections = Source.sections(thread, view.context)
+  -- Sections include a placeholder for unanchored conversations. A file location
+  -- is still useful when unavailable, but empty text alone should not open a pane.
+  local has_source = false
+  for _, section in ipairs(sections) do
+    if
+      (section.source and section.source.kind == "file") or table.concat(section.comparison.lines, "\n"):find("%S")
+    then
+      has_source = true
+      break
+    end
+  end
+  layout(view, has_source)
+  if has_source then
+    Render.source(view, thread, sections)
+  else
+    view.source_sections = {}
+    view.source_thread = nil
+  end
   Render.conversation(view, thread)
+  if view.detail_thread ~= thread.id then
+    -- A shorter thread must not inherit a previous conversation's scroll offset.
+    vim.api.nvim_win_call(view.thread_win, function()
+      vim.fn.winrestview({ topline = 1, lnum = 1, col = 0, leftcol = 0, skipcol = 0 })
+    end)
+    view.detail_thread = thread.id
+  end
+  UI.headers(view)
 end
 
 refresh = function(view, select_id)
@@ -344,6 +360,15 @@ refresh = function(view, select_id)
   if not report(threads, err) then
     return
   end
+  -- Direct navigation may deliberately visit an already resolved thread.
+  -- Do not pin an open thread, so resolving it removes it from the default view.
+  if view.filter == "open" and select_id then
+    for _, thread in ipairs(threads) do
+      if thread.id == select_id and thread.resolved then
+        view.pin_id = select_id
+      end
+    end
+  end
   view.threads, view.outdated = threads, {}
   view.location_threads = threads
   view.threads = vim.tbl_filter(function(thread)
@@ -354,7 +379,7 @@ refresh = function(view, select_id)
       return not thread.unread
     end
     if view.filter == "open" then
-      return not thread.resolved
+      return not thread.resolved or view.pin_id == thread.id
     end
     if view.filter == "resolved" then
       return thread.resolved
@@ -389,11 +414,7 @@ refresh = function(view, select_id)
       end
     end
   end
-  local scope_label = view.project and vim.fs.basename(view.project) or "All projects"
-  vim.wo[view.list_win].winbar = " " .. scope_label:gsub("%%", "%%%%") .. " / " .. view.filter .. " / " .. #view.threads
-  vim.wo[view.thread_win].winbar = " Conversation %=%#CommentryInboxMuted#"
-    .. view.delivery_mode
-    .. "  ge edit pending  gd discard  r reply  s send  gs all "
+  UI.headers(view)
   view.stamp = revision
 end
 
@@ -414,50 +435,62 @@ local function window(buf)
   vim.wo.linebreak = true
   vim.wo.breakindent = true
   vim.wo.cursorline = false
-  vim.wo.fillchars = "eob: "
+  vim.wo.fillchars = "eob: ,fold: "
   vim.wo.statusline = "%#CommentryInboxMuted#%=%l / %L "
   return vim.api.nvim_get_current_win()
 end
 
-local function layout(view)
+layout = function(view, has_source)
   if view.closed then
     return
   end
+  if has_source == nil then
+    has_source = view.has_source or false
+  end
   local wide = vim.o.columns >= 140
-  if view.wide == wide then
+  local focus = vim.api.nvim_get_current_win()
+  local focus_source = focus == view.source_win
+  local focus_list = focus == view.list_win
+  local rebuild_source = view.has_source ~= has_source or view.wide ~= wide
+  local resized = view.columns ~= vim.o.columns or view.lines ~= vim.o.lines
+  -- Selection and refresh should preserve native resizing and restored zoom sizes.
+  if not rebuild_source and (view.zoomed or not resized) then
     return
   end
-  Render.remember_source(view)
   view.reflowing = true
-  local focus = vim.api.nvim_get_current_win()
-  local target = focus == view.thread_win and "thread_win" or focus == view.source_win and "source_win" or "list_win"
-  for _, buf in ipairs({ view.source_buf, view.thread_buf }) do
-    vim.bo[buf].bufhidden = "hide"
+  if rebuild_source then
+    view.zoomed = false
+    Render.remember_source(view)
+    if vim.api.nvim_win_is_valid(view.source_win or -1) then
+      vim.api.nvim_win_close(view.source_win, true)
+    end
+    view.source_win = -1
   end
-  for _, win in ipairs({ view.source_win or -1, view.thread_win or -1 }) do
-    if vim.api.nvim_win_is_valid(win) then
-      vim.api.nvim_win_close(win, true)
+  if not vim.api.nvim_win_is_valid(view.thread_win or -1) then
+    vim.api.nvim_set_current_win(view.list_win)
+    vim.cmd("rightbelow vsplit")
+    view.thread_win = window(view.thread_buf)
+  end
+  if has_source and not vim.api.nvim_win_is_valid(view.source_win) then
+    vim.api.nvim_set_current_win(view.thread_win)
+    vim.cmd(wide and "rightbelow vsplit" or "rightbelow split")
+    view.source_win = window(view.source_buf)
+  end
+  local list_width = math.min(48, math.max(24, math.floor(vim.o.columns * 0.22)))
+  vim.api.nvim_win_set_width(view.list_win, list_width)
+  if has_source then
+    if wide then
+      vim.api.nvim_win_set_width(view.source_win, math.floor((vim.o.columns - list_width - 2) * 0.5))
+    else
+      vim.api.nvim_win_set_height(view.source_win, math.max(3, math.floor((vim.o.lines - 6) * 0.45)))
     end
   end
-  vim.api.nvim_set_current_win(view.list_win)
-  vim.cmd("rightbelow vsplit")
-  view.source_win = window(view.source_buf)
-  vim.cmd(wide and "rightbelow vsplit" or "rightbelow split")
-  view.thread_win = window(view.thread_buf)
-  for _, buf in ipairs({ view.source_buf, view.thread_buf }) do
-    vim.bo[buf].bufhidden = "wipe"
-  end
-  vim.wo[view.source_win].winbar = " Source and changes %=%#CommentryInboxMuted#za fold  e context "
-  vim.wo[view.thread_win].winbar = " Conversation %=%#CommentryInboxMuted#r reply  ? help "
-  vim.api.nvim_win_set_width(view.list_win, math.min(40, math.floor(vim.o.columns / 4)))
-  if wide then
-    vim.api.nvim_win_set_width(
-      view.thread_win,
-      math.floor((vim.o.columns - vim.api.nvim_win_get_width(view.list_win)) * 0.48)
-    )
-  end
-  view.wide = wide
-  vim.api.nvim_set_current_win(view[target])
+  view.wide, view.has_source = wide, has_source
+  view.columns, view.lines = vim.o.columns, vim.o.lines
+  UI.headers(view)
+  local target = focus_source and has_source and view.source_win or focus_list and view.list_win or view.thread_win
+  -- Changing the window tree is a preview update, not an explicit read action.
+  vim.api.nvim_set_current_win(target)
   view.reflowing = false
 end
 
@@ -474,11 +507,9 @@ function M.open(scope, opts)
   if active and vim.api.nvim_tabpage_is_valid(active.tab) then
     vim.api.nvim_set_current_tabpage(active.tab)
     active.project = project
-    active.filter = scope and scope ~= "" and scope ~= "all" and scope or "all"
+    active.filter = scope and scope ~= "" and scope ~= "all" and scope or "open"
     active.pin_id = nil
     layout(active)
-    vim.wo[active.list_win].winbar = " Inbox / "
-      .. (project and vim.fs.basename(project):gsub("%%", "%%%%") or "All projects")
     refresh(active, opts and opts.thread)
     if vim.api.nvim_win_is_valid(origin) and vim.bo[vim.api.nvim_win_get_buf(origin)].buftype == "" then
       active.origin_win = origin
@@ -490,7 +521,8 @@ function M.open(scope, opts)
     tab = vim.api.nvim_get_current_tabpage(),
     project = project,
     context = 4,
-    filter = scope and scope ~= "" and scope ~= "all" and scope or "all",
+    filter = scope and scope ~= "" and scope ~= "all" and scope or "open",
+    source_win = -1,
     delivery_mode = "queue",
     threads = {},
     origin_win = origin,
@@ -500,21 +532,12 @@ function M.open(scope, opts)
     thread_buf = scratch("commentry://thread"),
   }
   active = view
+  vim.bo[view.source_buf].bufhidden = "hide"
   view.list_win = window(view.list_buf)
   layout(view)
-  vim.wo[view.list_win].winbar = " Inbox / "
-    .. (project and vim.fs.basename(project):gsub("%%", "%%%%") or "All projects")
-  vim.wo[view.source_win].winbar = " Source and changes %=%#CommentryInboxMuted#za fold  e context "
-  vim.wo[view.thread_win].winbar = " Conversation %=%#CommentryInboxMuted#r reply  ? help "
+  UI.headers(view)
   vim.wo[view.list_win].wrap = false
   vim.wo[view.list_win].scrolloff = 2
-  vim.api.nvim_win_set_width(view.list_win, math.min(40, math.floor(vim.o.columns / 4)))
-  if vim.o.columns >= 140 then
-    vim.api.nvim_win_set_width(
-      view.thread_win,
-      math.floor((vim.o.columns - vim.api.nvim_win_get_width(view.list_win)) * 0.48)
-    )
-  end
   vim.api.nvim_set_current_win(view.list_win)
   local function close()
     close_view(view)
@@ -610,8 +633,33 @@ function M.open(scope, opts)
     vim.api.nvim_set_current_win(view.thread_win)
     mark_read(true)
   end
+  local function find_thread()
+    require("commentry.inbox.picker").open(view.threads, function(id)
+      if not view.closed and vim.api.nvim_win_is_valid(view.list_win) then
+        vim.api.nvim_set_current_win(view.list_win)
+        refresh(view, id)
+      end
+    end)
+  end
+  local function zoom()
+    if view.zoomed then
+      vim.cmd(view.zoom_restore)
+      view.zoomed = false
+      layout(view)
+    else
+      view.zoom_restore = vim.fn.winrestcmd()
+      view.zoomed = true
+      vim.cmd("wincmd |")
+      vim.cmd("wincmd _")
+    end
+    Render.list(view)
+    render_detail(view)
+  end
+  vim.keymap.set("n", "/", find_thread, { buffer = view.list_buf, desc = "Find inbox conversation" })
   for _, buf in ipairs({ view.list_buf, view.source_buf, view.thread_buf }) do
     for key, mapping in pairs({
+      ["g/"] = { find_thread, "Find inbox conversation" },
+      gz = { zoom, "Maximize or restore inbox panel" },
       q = { close, "Close inbox" },
       R = {
         function()
@@ -817,6 +865,10 @@ function M.open(scope, opts)
           if not thread then
             return
           end
+          if not vim.api.nvim_win_is_valid(view.source_win) then
+            Util.info("This conversation has no source sections")
+            return
+          end
           vim.ui.select(view.source_sections, {
             prompt = "Source sections",
             format_item = function(item)
@@ -843,7 +895,9 @@ function M.open(scope, opts)
           if not thread then
             return
           end
-          local section = Render.source_section(view, vim.api.nvim_win_get_cursor(view.source_win)[1])
+          local row = vim.api.nvim_win_is_valid(view.source_win) and vim.api.nvim_win_get_cursor(view.source_win)[1]
+            or 1
+          local section = Render.source_section(view, row)
           -- Outside the source pane, default to the first code section rather
           -- than assigning a file to an unrelated saved comparison.
           if vim.api.nvim_get_current_win() ~= view.source_win and (not section or not section.source) then
@@ -908,10 +962,14 @@ function M.open(scope, opts)
             "d       Remove the oldest pending queue request",
             "Ctrl-d  Save and send from the composer",
             "Ctrl-h/j/k/l  Move between panels",
+            "Tab / Shift-Tab  Cycle panels",
+            "/ in list, g/ anywhere  Find a conversation",
+            "gz      Maximize or restore the current panel",
             "x       Resolve or reopen",
             "gl      Jump to a source section",
             "gf      Go to code, gC returns to its thread",
-            "za      Fold or unfold a source section",
+            "za      Fold or unfold a message or source section",
+            "zR      Expand all messages or source sections",
             "e       Expand or collapse code context",
             "i       Inspect capture and Git details",
             "R       Refresh",
@@ -923,15 +981,36 @@ function M.open(scope, opts)
     }) do
       -- The conversation is an editor now. Leave insert, append, undo, change,
       -- delete and other ordinary text keys available in its normal mode.
-      if buf ~= view.thread_buf or vim.tbl_contains({ "r", "ge", "gd", "s", "gs", "q", "?", "gf", "gl" }, key) then
+      if
+        buf ~= view.thread_buf
+        or vim.tbl_contains({ "r", "ge", "gd", "s", "gs", "q", "?", "gf", "gl", "g/", "gz" }, key)
+      then
         vim.keymap.set("n", key, mapping[1], { buffer = buf, desc = mapping[2] })
       end
+    end
+    for key, step in pairs({ ["<Tab>"] = 1, ["<S-Tab>"] = -1 }) do
+      vim.keymap.set("n", key, function()
+        local wins = { view.list_win, view.thread_win }
+        if vim.api.nvim_win_is_valid(view.source_win) then
+          wins[#wins + 1] = view.source_win
+        end
+        local index = vim.fn.index(wins, vim.api.nvim_get_current_win())
+        vim.api.nvim_set_current_win(wins[(index + step) % #wins + 1])
+      end, { buffer = buf, desc = "Cycle inbox panels" })
     end
     for key, direction in pairs({ h = "h", j = "j", k = "k", l = "l" }) do
       vim.keymap.set("n", "<C-" .. key .. ">", function()
         vim.cmd("wincmd " .. direction)
       end, { buffer = buf, desc = "Move to the " .. direction .. " panel" })
     end
+  end
+  for _, key in ipairs({ "za", "zA", "zo", "zO", "zc", "zC", "zr", "zm", "zR", "zM" }) do
+    local command = key
+    vim.keymap.set("n", key, function()
+      local count = vim.v.count > 0 and tostring(vim.v.count) or ""
+      vim.cmd("normal! " .. count .. command)
+      Render.decorate_conversation(view)
+    end, { buffer = view.thread_buf, desc = "Update message headers after " .. key })
   end
   local group = vim.api.nvim_create_augroup("CommentryInbox", { clear = true })
   view.group = group

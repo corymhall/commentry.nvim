@@ -512,7 +512,10 @@ describe("universal inbox", function()
     assert.is_nil(plain.l)
     local control = keys(view)["<C-L>"] or keys(view)["<C-l>"]
     control()
-    assert.are.same(view.source_win, vim.api.nvim_get_current_win())
+    assert.are.same(view.thread_win, vim.api.nvim_get_current_win())
+    assert.is_true(
+      vim.api.nvim_win_get_position(view.thread_win)[2] < vim.api.nvim_win_get_position(view.source_win)[2]
+    )
     vim.o.columns = 100
     vim.api.nvim_exec_autocmds("VimResized", {})
     assert.are.same(
@@ -521,6 +524,58 @@ describe("universal inbox", function()
     )
     assert.is_true(vim.api.nvim_buf_is_valid(view.source_buf))
     assert.is_true(vim.api.nvim_buf_is_valid(view.thread_buf))
+  end)
+
+  it("searches without acknowledging previews and preserves drafts on selection", function()
+    local first = create("First conversation")
+    local second = create("Second conversation")
+    assert(Store.update(second, { kind = "reply", author = "Agent", body = "Incoming answer" }))
+    local view = require("commentry.inbox").open("all", { thread = first })
+    vim.api.nvim_buf_set_lines(view.thread_buf, -1, -1, false, { "Unsaved reply to first" })
+    local original_select = vim.ui.select
+    local original_snacks = package.loaded["snacks"]
+    -- A failed require takes the generic vim.ui.select path, without relying
+    -- on any user's picker installation.
+    local original_preload = package.preload["snacks"]
+    package.loaded["snacks"] = nil
+    package.preload["snacks"] = function()
+      error("Snacks deliberately absent")
+    end
+    local ok, err = pcall(function()
+      vim.ui.select = function(items, _, callback)
+        assert.are.same(2, #items)
+        callback(nil)
+      end
+      keys(view)["/"]()
+      assert.is_true(assert(Store.get(second)).unread)
+      vim.ui.select = function(items, _, callback)
+        for _, thread in ipairs(items) do
+          if thread.id == second then
+            callback(thread)
+            return
+          end
+        end
+      end
+      keys(view)["/"]()
+      assert.is_true(assert(Store.get(second)).unread)
+      assert.are.same(second, view.reply.id)
+      vim.ui.select = function(items, _, callback)
+        for _, thread in ipairs(items) do
+          if thread.id == first then
+            callback(thread)
+            return
+          end
+        end
+      end
+      keys(view)["/"]()
+      assert.is_true(vim.bo[view.thread_buf].modified)
+      assert.are.same("Unsaved reply to first", vim.api.nvim_buf_get_lines(view.thread_buf, -2, -1, false)[1])
+    end)
+    vim.ui.select = original_select
+    package.loaded["snacks"] = original_snacks
+    package.preload["snacks"] = original_preload
+    keys(view).q()
+    assert.is_true(ok, tostring(err))
   end)
 
   it("opens an external project's inbox without changing the editor directory", function()
@@ -532,6 +587,41 @@ describe("universal inbox", function()
     assert.are.same(1, #view.threads)
     assert.are.same(id, view.threads[1].id)
     assert.are.same(cwd, vim.fn.getcwd())
+  end)
+
+  it("defaults project and all-project inboxes to open threads without removing explicit filters", function()
+    local open_id = create("Open")
+    local resolved_id = create("Resolved")
+    assert(Store.update(resolved_id, { kind = "resolve", resolved = true }))
+    local Inbox = require("commentry.inbox")
+    local view = Inbox.open(nil, { project = root })
+    assert.are.same("open", view.filter)
+    assert.are.same(1, #view.threads)
+    assert.are.same(open_id, view.threads[1].id)
+    view = Inbox.open("all")
+    assert.are.same("open", view.filter)
+    assert.are.same(1, #view.threads)
+    local select = vim.ui.select
+    vim.ui.select = function(_, _, callback)
+      callback("all")
+    end
+    local ok, err = pcall(keys(view).f)
+    vim.ui.select = select
+    assert.is_true(ok, tostring(err))
+    assert.are.same(2, #view.threads)
+    view = Inbox.open("resolved", { project = root })
+    assert.are.same(1, #view.threads)
+    assert.are.same(resolved_id, view.threads[1].id)
+    -- An explicitly requested resolved thread can still be visited.
+    view = Inbox.open(nil, { project = root, thread = resolved_id })
+    assert.are.same(resolved_id, view.reply.id)
+    keys(view).R()
+    assert.are.same(1, #view.threads)
+    assert.are.same(open_id, view.threads[1].id)
+    view = Inbox.open(nil, { project = root, thread = open_id })
+    keys(view).x()
+    assert.are.same(0, #view.threads)
+    assert.is_false(vim.api.nvim_win_is_valid(view.source_win))
   end)
 
   it("creates standalone threads inside the inbox and can filter new activity", function()
@@ -549,6 +639,11 @@ describe("universal inbox", function()
     assert.are.same("general", threads[1].source.origin)
     assert.are.same({}, threads[1].source.lines)
     assert.is_true(threads[1].pending)
+    assert.are.same("open", view.filter)
+    assert.is_false(vim.api.nvim_win_is_valid(view.source_win))
+    assert.are.same(2, #vim.api.nvim_tabpage_list_wins(view.tab))
+    keys(view).gf()
+    keys(view).gl()
     assert(Store.enqueue(threads[1].id, nil, { defer_delivery = true }))
     assert(Store.update(threads[1].id, { kind = "reply", author = "Agent", body = "New response" }))
     view = require("commentry.inbox").open("unread")

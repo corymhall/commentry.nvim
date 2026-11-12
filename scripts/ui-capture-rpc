@@ -366,6 +366,14 @@ run_capture_set() {
       "$(scenario_caption "$scenario")" \
       "$scenario/$name.png" >> "$entries_json"
 
+    if [[ $scenario == inbox ]]; then
+      rsvg-convert -o "$scenario_dir/rpc-inbox-thread-only.png" "$scenario_dir/rpc-inbox-thread-only.svg"
+      printf '%s\t%s\t%s\n' \
+        "Conversation without source" \
+        "Standalone threads use the space beside the list without an empty source panel." \
+        "$scenario/rpc-inbox-thread-only.png" >> "$entries_json"
+    fi
+
     if [[ -z $CWD ]]; then
       rm -rf "$cwd_to_use"
       CLEANUP_REPO=""

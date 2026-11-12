@@ -672,7 +672,7 @@ function M.render_svg(snapshot)
           font_weight = "700"
         end
 
-        parts[#parts + 1] = ('<text x="%d" y="%d" fill="%s" font-size="13" font-family="Iosevka, SFMono-Regular, Menlo, monospace" font-weight="%s" font-style="%s">%s</text>'):format(
+        parts[#parts + 1] = ('<text xml:space="preserve" x="%d" y="%d" fill="%s" font-size="13" font-family="Iosevka, SFMono-Regular, Menlo, monospace" font-weight="%s" font-style="%s">%s</text>'):format(
           col_x,
           row_y + 15,
           fg,

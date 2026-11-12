@@ -22,6 +22,18 @@ if not vim.uv.fs_stat(diffview_root) then
   })
 end
 
+local nui_root = cache_root .. "/nui.nvim"
+if not vim.uv.fs_stat(nui_root) then
+  vim.fn.system({ "git", "clone", "https://github.com/MunifTanjim/nui.nvim.git", nui_root })
+  if vim.v.shell_error ~= 0 then
+    error("Unable to install nui.nvim for UI capture")
+  end
+end
+vim.fn.system({ "git", "-C", nui_root, "checkout", "10fc361835c856ba4233ef5ea135b919bf3dce97" })
+if vim.v.shell_error ~= 0 then
+  error("Unable to check out the pinned nui.nvim revision")
+end
+vim.opt.runtimepath:prepend(nui_root)
 vim.opt.runtimepath:prepend(plugin_root)
 vim.opt.runtimepath:prepend(diffview_root)
 

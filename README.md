@@ -12,8 +12,10 @@ The inbox works independently of Diffview:
 - `:Commentry capture-text` comments on text from the unnamed register.
   `:Commentry capture-text +` uses the system clipboard when a clipboard
   provider is available.
-- `:Commentry inbox` opens the current project's threads with a focused diff
-  beside the selected conversation. `:Commentry inbox all` shows all projects.
+- `:Commentry inbox` opens the current project's unresolved threads. The list
+  is on the left, the conversation in the middle, and any source or diff on the
+  right. Without source content, only the list and conversation are shown.
+  `:Commentry inbox all` shows unresolved threads across all projects.
 - `:Commentry new-thread` starts a project conversation with no selection,
   clipboard contents, or file anchor. Press `n` inside the inbox for the same action.
 
@@ -36,6 +38,18 @@ normal text navigation. Resolving also marks the item read. Reopening preserves
 read state, and later incoming activity can make a resolved item unread again.
 Closing an inbox panel with a native window command
 closes the inbox view; `:Commentry inbox` opens it again.
+Message headers use full-width highlighted bands with bold uppercase author
+labels and non-italic timestamps. Taller windows add a row of header padding;
+short windows keep compact single-row bands. Colors follow the active theme.
+The `CommentryInboxMessageHeader`, `CommentryInboxMessageHuman`,
+`CommentryInboxMessageAgent`, `CommentryInboxMessageTime` and
+`CommentryInboxMessageFoldText` highlight groups can be customized.
+The latest message from `You` and the latest agent message stay expanded by
+default; older messages collapse into one-line author, time and text summaries.
+Consecutive folds stay compact, with one blank row before the next expanded
+message. `za` toggles a message and `zR`
+expands all messages. Manual fold choices survive refreshes and thread switches.
+Messages remain in chronological order, and the reply area is never folded.
 Replies live beneath the conversation in the thread buffer. Press `r` to start
 editing, `:write` to save the reply, then `s` to send it. In the source pane,
 select text visually and press `r` to quote it into the reply with `>` prefixes.
@@ -46,10 +60,23 @@ fixed; saving reloads the latest conversation. Changes to existing history are
 rejected on save. Undo those changes and write only beneath the reply heading.
 The thread buffer keeps normal editing keys such as `i`, `a`, `u`, `d`, and `x`.
 Use the list or source pane for filtering, resolution, and other inbox actions.
-Source and conversation stack below 140 editor columns
-and sit side by side at larger widths. The layout adapts when resized. No
-colorscheme overrides are added. Open Commentry in your normal
-Neovim configuration to use your theme and configured integrations.
+Below 140 editor columns, source content stacks beneath the conversation.
+At larger widths, the conversation is in the middle and source is on the right.
+The source pane appears only when there is captured text, code or a comparison
+to display. Standalone conversations use the full space beside the list. The
+layout adapts when resized without overriding manually resized panes on thread
+selection or refresh. No colorscheme overrides are added. Open Commentry in
+your normal Neovim configuration to use your theme and configured integrations.
+
+Press `/` in the list or `g/` in any inbox panel to find a conversation by
+search. Search previews never mark threads read. `Tab` and `Shift-Tab` cycle
+panels. `gz` maximizes the focused panel and restores its layout on a second
+press. These navigation keys work in normal mode, leaving insert-mode editing
+unchanged. Panel proportions adapt on every resize, not only at the breakpoint.
+Compact status labels distinguish drafts, queued work, requests not yet fetched,
+and requests awaiting answers. Inbox counters show visible threads and unread
+activity. Key hints live in panel statuslines and `?` rather than crowded titles.
+Popups use NUI for consistent borders, padding and resize handling.
 
 ### From copied text to code
 
@@ -89,8 +116,9 @@ collapsed; `za` folds or unfolds any section. Fold choices survive refreshes.
 Agents use `revise` to maintain a short current review title and summary above
 the discussion, and choose `primary_comparison` by its saved ID. Updating a
 summary requires `expected_review` with its current review ID. The original
-capture and messages remain intact. An agent's original finding starts folded
-when its current review replaces that explanation. Human messages stay visible.
+capture and messages remain intact. Original findings follow the same
+message-folding policy. An original finding stays expanded if it is still the
+latest agent message; otherwise it starts folded.
 `comparison_id` replaces an agent's own comparison while retaining its ID and
 prior content in history. These updates become unread without resolving the
 conversation or changing previously submitted requests.
@@ -213,8 +241,11 @@ A newer concurrent reply
 stays unread. `u` explicitly toggles read/unread. Agent CLI reads never consume
 the human reader's unread state.
 
-Press `f` for all, unread, read, open, resolved, or queued filters. Commands such
-as `:Commentry inbox unread` open a project filter directly. `:Commentry inbox
+The default filter is **open**, excluding resolved threads in both project and
+all-project views. Press `f` for all, unread, read, open, resolved, or queued
+filters. Choose **all** or **resolved** to revisit resolved conversations. An
+explicitly requested resolved thread remains visible until `R` or a filter
+change. Commands such as `:Commentry inbox unread` open a project filter directly. `:Commentry inbox
 all` still selects all projects; use `f` to filter that scope. A thread opened
 from the unread filter remains visible while you read it. `R` or changing filters
 reapplies the filter. External writes refresh approximately every 1.5 seconds
@@ -550,16 +581,23 @@ not delete the Executor inbox.
 Required:
 
 - Neovim 0.10+
+- [`nui.nvim`](https://github.com/MunifTanjim/nui.nvim) for padded, resizable popups
 - The Commentry CLI on PATH, configured with `commentry executor login`
 - The Commentry Executor app
 
 Optional integrations:
 
 - `diffview.nvim` for reviewing Git changes and capturing either diff side
+- `snacks.nvim` for fuzzy conversation search with Markdown previews. Without it,
+  conversation search uses your configured `vim.ui.select` provider
 - Rex for clipboard capture and delivery to an existing coding agent
 
 ```lua
-{ "corymhall/commentry.nvim", opts = {} }
+{
+  "corymhall/commentry.nvim",
+  dependencies = { "MunifTanjim/nui.nvim" },
+  opts = {},
+}
 ```
 
 ## Setup

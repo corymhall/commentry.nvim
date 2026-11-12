@@ -14,6 +14,7 @@ require("lazy.minit").setup({
     {
       dir = vim.uv.cwd(),
       opts = {},
+      dependencies = { { "MunifTanjim/nui.nvim", commit = "10fc361835c856ba4233ef5ea135b919bf3dce97" } },
     },
     -- { "nvim-lua/plenary.nvim" },
   },

@@ -22,10 +22,14 @@ The project inbox works without Diffview or Snacks.
     register. Use + for the system clipboard when a provider is installed.
 
 :Commentry inbox [all]
-    Open project threads beside their focused source comparison. The default
+    Open unresolved project threads. The list is on the left, the conversation
+    in the middle and source on the right when available. The default
     scope is the canonical Git worktree root, or the containing directory
-    outside Git. The all scope includes every project. Branch provenance is
-    recorded but does not filter threads. Worktrees have separate scopes.
+    outside Git. The all scope includes unresolved threads from every project.
+    Use f and choose all or resolved to revisit resolved threads. An explicitly
+    requested resolved thread stays visible until R or a filter change.
+    Branch provenance is recorded but does not filter threads. Worktrees have
+    separate scopes.
 
 :Commentry new-thread
     Create a standalone project conversation with no file or copied excerpt.
@@ -74,6 +78,19 @@ are saved for delivery. It reports counts and failures, or that nothing is new.
 Failed requests require explicit retry after inspection. gs always uses queue
 mode, independently of m.
 
+Message headers use full-width highlighted bands, bold uppercase author labels
+and non-italic timestamps. Taller windows add header padding; short windows
+keep single-row bands. The colors follow the active theme. Customize these
+highlight groups to override them: CommentryInboxMessageHeader,
+CommentryInboxMessageHuman, CommentryInboxMessageAgent,
+CommentryInboxMessageTime and CommentryInboxMessageFoldText.
+The latest message from You and the latest agent message start expanded.
+All older messages start folded into one-line author, time and text summaries.
+Consecutive folds stay compact, with one blank row before the next expanded
+message. za toggles a message; zR expands all. Manual fold choices survive
+refreshes and thread switches. Chronological order
+and full message text are preserved. The reply area is never folded.
+
 Replies are edited directly in the thread buffer below the Reply heading.
 Use :write to save a comment, then s to send the saved conversation. Saving
 again with an empty reply does not add a duplicate. Visual r in the source pane
@@ -117,8 +134,9 @@ sections. Fold choices survive refreshes. There is no comparison mode picker.
 Agents use revise to maintain a current review title and summary above the
 discussion. primary_comparison selects a saved comparison by ID. An update
 requires expected_review equal to the current review ID. The original capture
-and chronological messages stay intact. The original agent finding starts
-folded when its current review replaces it. Human messages stay visible.
+and chronological messages stay intact. Original findings follow the same
+message-folding policy. They stay expanded if still the latest agent message;
+otherwise they start folded.
 comparison_id replaces an agent's own comparison at its existing ID. Prior
 review and comparison versions remain in history. These updates become unread
 without resolving the conversation or rewriting submitted requests.
@@ -142,8 +160,19 @@ range, and available Git HEAD, branch and original blob. The source pane shows
 the relevant surrounding region. Edited selections remain visible as Outdated
 with an approximate diff. Missing files retain the original excerpt. Original
 captures never change. Conversation resolution and location state are separate.
-Narrow editors stack source and conversation beside the list.
-At 140 columns and above they sit side by side. Resizing adapts the layout.
+The conversation is in the middle and source is on the right. Without captured
+text, code or comparisons, the source pane is hidden and only the list and
+conversation remain. Below 140 columns, source stacks below the conversation.
+At 140 columns and above they sit side by side. Resizing adapts the layout,
+including proportions when staying on the same side of the breakpoint.
+Thread selection and refresh preserve manually resized panes.
+/ in the list or g/ in any panel finds a conversation. Search previews never
+mark threads read. Tab and Shift-Tab cycle panels in normal mode. gz maximizes
+the current panel; pressing it again restores the layout. Insert-mode editing
+is unchanged. Compact status labels distinguish Draft, Queued, Not fetched and
+Awaiting answer. Inbox counters show visible threads and unread activity.
+Key hints live in panel statuslines and ?. NUI provides padded, resizable
+composer and details popups. Commentry does not configure Snacks globally.
 Commentry does not set a colorscheme. Use your normal Neovim configuration to
 inherit its theme and integrations.
 Titles and compact location/status labels keep the inbox scannable. Diffs show
@@ -458,11 +487,14 @@ branch comparison mode and an OS-wide capture shortcut are not implemented yet.
 INSTALL                                           *commentry.install*
 
 Required dependencies:
-    Neovim 0.10+, the Commentry CLI and the Commentry Executor app.
+    Neovim 0.10+, nui.nvim, the Commentry CLI and the Commentry Executor app.
+    Add "MunifTanjim/nui.nvim" to your plugin manager dependencies.
     Configure the connection with commentry executor login/use.
 
 Optional integrations:                           *commentry.dependencies*
     diffview.nvim for capture from Git changes.
+    snacks.nvim for fuzzy conversation search with Markdown previews.
+    Without Snacks, search uses your configured vim.ui.select provider.
     Rex for external capture and delivery to existing agent panes.
 
 SETUP                                             *commentry.setup*

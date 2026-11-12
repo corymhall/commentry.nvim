@@ -63,11 +63,12 @@ local ok, err = xpcall(function()
         dofile(vim.env.COMMENTRY_REPO_ROOT .. "/capture/composer.lua")
         vim.api.nvim_buf_set_lines(0,0,-1,false,{"Can we make this error more useful?", "", "Show both candidate locations so I can choose the right one."})
         return true
-      ]], {},
-    },5000)
+      ]],
+      {},
+    }, 5000)
     bridge:wait_for_flush(5000)
     local snapshot = bridge.screen:snapshot("rpc-capture")
-    Bridge.write_snapshot_files(snapshot,bridge.screen,out_dir,"rpc-capture")
+    Bridge.write_snapshot_files(snapshot, bridge.screen, out_dir, "rpc-capture")
     return
   end
   if scenario == "inbox" then
@@ -104,7 +105,11 @@ local ok, err = xpcall(function()
           '    if clock() >= deadline then return nil, "timeout" end',
         })
         assert(store.create({project = capture.project, title = "Explain this test failure", body = "Include both candidate locations in this error.", source = {kind = "text", lines = {"Found two matching excerpts.", "Unable to choose a destination."}}}))
-        assert(store.create({project = capture.project, title = "A general project question", body = "Can we make the next milestone smaller?", source = {kind = "text", lines = {}, origin = "general"}}))
+        local general = assert(store.create({project = capture.project, title = "A general project question", body = "Can we make the next milestone smaller?", source = {kind = "text", lines = {}, origin = "general"}}))
+        assert(store.update(general, {kind = "reply", author = "Agent", body = "Yes. Ship source navigation first, then improve the thread layout."}))
+        assert(store.update(general, {kind = "reply", author = "You", body = "Keep the existing captures and reply drafts intact."}))
+        assert(store.update(general, {kind = "reply", author = "Agent", body = "Agreed. Those invariants stay unchanged; this is a presentation change."}))
+        assert(store.update(general, {kind = "reply", author = "Agent", body = "I will keep the header bands distinct from the folded history."}))
         local question = assert(store.create({project = capture.project, title = "Return errors at the retry deadline", author = "Codex", body = "The timeout branch returns nil without explaining why. The parser wrapper and tests also need review.", source = {kind = "text", lines = {"From our chat: retries share a ten second deadline."}, origin = "clipboard"}}))
         local location = assert(require("commentry.inbox.source").capture(buf, 3, 6))
         local excerpt_first = math.max(1, location.source.first - 1)
@@ -128,7 +133,8 @@ local ok, err = xpcall(function()
     bridge:wait_for_flush(5000)
     local snapshot = bridge.screen:snapshot("rpc-inbox")
     Bridge.write_snapshot_files(snapshot, bridge.screen, out_dir, "rpc-inbox")
-    bridge:request("nvim_exec_lua", { [[
+    bridge:request("nvim_exec_lua", {
+      [[
       assert(require("commentry.inbox.store").update(_G.commentry_capture_question, {
         kind = "acknowledge", claim_id = _G.commentry_capture_claim.claim_id,
       }))
@@ -137,11 +143,14 @@ local ok, err = xpcall(function()
         if map.lhs == "R" then map.callback(); break end
       end
       return true
-    ]], {} }, 5000)
+    ]],
+      {},
+    }, 5000)
     bridge:wait_for_flush(5000)
     local fetched = bridge.screen:snapshot("rpc-inbox-fetched")
     Bridge.write_snapshot_files(fetched, bridge.screen, out_dir, "rpc-inbox-fetched")
-    bridge:request("nvim_exec_lua", { [[
+    bridge:request("nvim_exec_lua", {
+      [[
       local view = _G.commentry_capture_view
       vim.api.nvim_set_current_win(view.source_win)
       for row, line in ipairs(vim.api.nvim_buf_get_lines(view.source_buf, 0, -1, false)) do
@@ -160,27 +169,52 @@ local ok, err = xpcall(function()
       vim.api.nvim_win_set_cursor(view.thread_win, {vim.api.nvim_buf_line_count(view.thread_buf), 0})
       vim.cmd('normal! zb')
       return true
-    ]], {} }, 5000)
+    ]],
+      {},
+    }, 5000)
     bridge:wait_for_flush(5000)
     local reply = bridge.screen:snapshot("rpc-inbox-reply")
     Bridge.write_snapshot_files(reply, bridge.screen, out_dir, "rpc-inbox-reply")
-    bridge:request("nvim_exec_lua", { [[
+    bridge:request("nvim_exec_lua", {
+      [[
       local view = _G.commentry_capture_view
       for _, map in ipairs(vim.api.nvim_buf_get_keymap(view.list_buf, "n")) do
         if map.lhs == "gf" then map.callback(); break end
       end
       return true
-    ]], {} }, 5000)
+    ]],
+      {},
+    }, 5000)
     bridge:wait_for_flush(5000)
     local code = bridge.screen:snapshot("rpc-inbox-code")
     Bridge.write_snapshot_files(code, bridge.screen, out_dir, "rpc-inbox-code")
+    bridge:request("nvim_exec_lua", {
+      [[
+      local view = _G.commentry_capture_view
+      for _, thread in ipairs(assert(require("commentry.inbox.store").list(view.project))) do
+        if thread.source.origin == "general" then
+          require("commentry.inbox").open(nil, { project = thread.project, thread = thread.id })
+          assert(not vim.api.nvim_win_is_valid(view.source_win))
+          break
+        end
+      end
+      return true
+    ]],
+      {},
+    }, 5000)
+    bridge:wait_for_flush(5000)
+    local thread_only = bridge.screen:snapshot("rpc-inbox-thread-only")
+    Bridge.write_snapshot_files(thread_only, bridge.screen, out_dir, "rpc-inbox-thread-only")
     return
   end
-  bridge:request("nvim_exec_lua", { [[
+  bridge:request("nvim_exec_lua", {
+    [[
     vim.env.COMMENTRY_INBOX_DIR = vim.fn.getcwd() .. "/inbox-data"
     vim.cmd("Commentry open")
     return true
-  ]], {} }, 5000)
+  ]],
+    {},
+  }, 5000)
 
   bridge:wait_until(5000, function()
     local result = bridge:request("nvim_exec_lua", {
@@ -237,7 +271,8 @@ local ok, err = xpcall(function()
   end
 
   if scenario == "diffview" then
-    bridge:request("nvim_exec_lua", { [[
+    bridge:request("nvim_exec_lua", {
+      [[
       local source_buf = vim.api.nvim_get_current_buf()
       vim.cmd("normal! Vj")
       local comment
@@ -259,23 +294,31 @@ local ok, err = xpcall(function()
       vim.cmd.redraw()
       return true
 
-    ]], {} }, 5000)
+    ]],
+      {},
+    }, 5000)
     -- Drain scheduled buffer-enter redraws after the composer closes before
     -- recording the sign column. One earlier flush may still belong to it.
     local flushes = bridge.screen.flushes
     bridge:request("nvim_command", { "redraw!" }, 5000)
-    bridge:wait_until(5000, function() return bridge.screen.flushes > flushes end)
+    bridge:wait_until(5000, function()
+      return bridge.screen.flushes > flushes
+    end)
     local snapshot = bridge.screen:snapshot("rpc-diffview-inbox")
     Bridge.write_snapshot_files(snapshot, bridge.screen, out_dir, "rpc-diffview-inbox")
-    bridge:request("nvim_exec_lua", { [[
+    bridge:request("nvim_exec_lua", {
+      [[
       require("commentry.inbox.locations").open_at_cursor()
       assert(vim.api.nvim_buf_get_name(0) == "commentry://inbox", "Thread did not open")
       return true
-    ]], {} }, 5000)
+    ]],
+      {},
+    }, 5000)
     bridge:wait_for_flush(5000)
     local inbox = bridge.screen:snapshot("rpc-diffview-thread")
     Bridge.write_snapshot_files(inbox, bridge.screen, out_dir, "rpc-diffview-thread")
-    bridge:request("nvim_exec_lua", { [[
+    bridge:request("nvim_exec_lua", {
+      [[
       local buf = vim.api.nvim_get_current_buf()
       for _, map in ipairs(vim.api.nvim_buf_get_keymap(buf, "n")) do
         if map.lhs == "ge" then map.callback(); break end
@@ -283,7 +326,9 @@ local ok, err = xpcall(function()
       assert(vim.api.nvim_get_current_buf() ~= buf, "Pending editor did not open")
       assert(vim.api.nvim_buf_get_lines(0, 0, 1, false)[1] == "Can this name explain the changed value?", "Missing saved body")
       return true
-    ]], {} }, 5000)
+    ]],
+      {},
+    }, 5000)
     bridge:wait_for_flush(5000)
     local editor = bridge.screen:snapshot("rpc-pending-review-editor")
     Bridge.write_snapshot_files(editor, bridge.screen, out_dir, "rpc-pending-review-editor")

@@ -100,6 +100,24 @@ describe("commentry.health", function()
     assert.are.same(0, #seen.warn)
   end)
 
+  it("reports an actionable error when NUI is missing", function()
+    local seen = capture_health()
+    healthy_dependencies()
+    local original_popup = package.loaded["nui.popup"]
+    local original_preload = package.preload["nui.popup"]
+    package.loaded["nui.popup"] = nil
+    package.preload["nui.popup"] = function()
+      error("NUI deliberately absent")
+    end
+    local success, err = pcall(function()
+      require("commentry.health").check()
+    end)
+    package.loaded["nui.popup"] = original_popup
+    package.preload["nui.popup"] = original_preload
+    assert.is_true(success, tostring(err))
+    assert.is_true(contains_message(seen.error, "add MunifTanjim/nui.nvim"))
+  end)
+
   it("warns when logger config values are invalid", function()
     local seen = capture_health()
     healthy_dependencies({

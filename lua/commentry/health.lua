@@ -79,6 +79,11 @@ function M.check()
   start("commentry")
   version_health()
   setup_health()
+  if pcall(require, "nui.popup") then
+    ok("nui.nvim available for inbox popups")
+  else
+    error("nui.nvim is required; add MunifTanjim/nui.nvim to your plugin dependencies")
+  end
   if pcall(require, "diffview") then
     ok("diffview.nvim available for diff capture")
   else

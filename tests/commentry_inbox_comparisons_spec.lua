@@ -143,7 +143,7 @@ describe("review presentation", function()
     assert.is_true(ok, tostring(err))
   end)
 
-  it("shows the revised explanation before discussion and preserves the original finding in a fold", function()
+  it("shows the current review and folds an original finding when a newer agent message exists", function()
     local buf = vim.api.nvim_create_buf(false, true)
     local win = vim.api.nvim_get_current_win()
     local previous = vim.api.nvim_win_get_buf(win)
@@ -163,6 +163,7 @@ describe("review presentation", function()
           body = "Old confusing explanation\nwith implementation details",
         },
         { author = "You", at = "2026-10-20T10:01:00Z", body = "Does this affect Java?" },
+        { author = "Agent", at = "2026-10-20T10:02:00Z", body = "Yes, Java uses the same converted references." },
       },
     }
     local ok, err = pcall(function()
@@ -171,10 +172,12 @@ describe("review presentation", function()
       local contents = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
       assert.is_true(contents:find("Backticks prevent", 1, true) < contents:find("Discussion", 1, true))
       assert.is_truthy(contents:find("Old confusing explanation", 1, true))
-      assert.are.same(view.review_original_first, vim.fn.foldclosed(view.review_original_first))
+      local original = view.message_presentation.messages[1]
+      assert.are.same(original.first, vim.fn.foldclosed(original.first))
       local reply = assert(contents:find("Does this affect Java?", 1, true))
       assert.is_true(reply < assert(contents:find("Reply /", 1, true)))
-      thread.messages[1].author = "You"
+      -- With no newer agent reply, the original finding is the latest agent message.
+      table.remove(thread.messages)
       Render.conversation(view, thread)
       for row, line in ipairs(vim.api.nvim_buf_get_lines(buf, 0, -1, false)) do
         if line == "Old confusing explanation" then

@@ -1,4 +1,5 @@
 local M = {}
+local Conversation = require("commentry.inbox.conversation")
 local Reply = require("commentry.inbox.reply")
 local ns = vim.api.nvim_create_namespace("commentry.inbox.ui")
 
@@ -7,7 +8,13 @@ function M.highlights()
     Title = "Title",
     Muted = "Comment",
     Accent = "Special",
+    Human = "Special",
+    Agent = "Identifier",
     Selection = "Visual",
+    Active = "PmenuSel",
+    Unread = "Special",
+    Border = "FloatBorder",
+    Success = "DiagnosticOk",
     Warning = "DiagnosticWarn",
     Added = "DiffAdd",
     Removed = "DiffDelete",
@@ -15,6 +22,7 @@ function M.highlights()
   }) do
     vim.api.nvim_set_hl(0, "CommentryInbox" .. name, { default = true, link = target })
   end
+  Conversation.highlights()
 end
 
 function M.clip(text, width)
@@ -28,7 +36,29 @@ function M.clip(text, width)
     end
     out = out .. char
   end
-  return out .. "..."
+  return width < 3 and string.rep(".", math.max(0, width)) or out .. "..."
+end
+
+function M.status(thread, outdated)
+  for _, item in ipairs(thread.queue) do
+    if item.status == "failed" then
+      return "Failed", "Warning"
+    end
+  end
+  if thread.pending then
+    return "Draft", "Accent"
+  end
+  for _, item in ipairs(thread.queue) do
+    if item.status == "pending" then
+      return "Queued", "Accent"
+    elseif item.status == "claimed" then
+      return item.acknowledged_at and "Awaiting answer" or "Not fetched", "Accent"
+    end
+  end
+  if outdated then
+    return "Outdated", "Warning"
+  end
+  return thread.resolved and "Resolved" or "Open", thread.resolved and "Success" or "Muted"
 end
 
 function M.write(buf, contents, filetype)
@@ -45,40 +75,34 @@ function M.mark(buf, row, group, opts)
 end
 
 function M.list(view)
-  local width = vim.api.nvim_win_get_width(view.list_win) - 3
+  local width = math.max(1, vim.api.nvim_win_get_width(view.list_win) - 3)
   local rows = {}
   for _, thread in ipairs(view.threads) do
-    rows[#rows + 1] = (thread.unread and " * " or "   ") .. M.clip(thread.title, width - 1)
+    rows[#rows + 1] = (thread.unread and " * " or "   ") .. M.clip(thread.title, width)
   end
-  M.write(view.list_buf, #rows > 0 and rows or { "  Your inbox is empty" }, "text")
+  M.write(
+    view.list_buf,
+    #rows > 0 and rows or { "", "  No conversations", "", "  n  New thread", "  f  Change filter" },
+    "text"
+  )
+  -- Buffer replacement clears the namespace, including the previous selection.
+  view.selection_mark = nil
   for index, thread in ipairs(view.threads) do
-    local status = thread.pending and "Pending review" or thread.resolved and "Resolved" or "Open"
-    if view.outdated[thread.id] then
-      status = status .. " / Outdated"
-    end
-    for _, item in ipairs(thread.queue) do
-      if item.status == "failed" then
-        status = status .. " / Failed"
-        break
-      end
-      if item.status == "pending" or item.status == "claimed" then
-        status = status
-          .. " / "
-          .. (
-            item.status == "pending" and "Queued"
-            or item.acknowledged_at and "Fetched / Awaiting answer"
-            or "Submitted / Not acknowledged"
-          )
-        break
-      end
-    end
+    local status, group = M.status(thread, view.outdated[thread.id])
     local location = thread.source.kind == "file" and vim.fs.basename(thread.source.path) .. ":" .. thread.source.first
-      or thread.source.origin == "general" and "Project thread"
-      or "Copied text"
-    local metadata = "  " .. M.clip(status .. " / " .. location, width)
-    local highlight = view.outdated[thread.id] and "CommentryInboxWarning" or "CommentryInboxMuted"
+      or thread.source.origin == "general" and "Project"
+      or "Text"
+    local label = M.clip(status, width)
+    local remaining = width - vim.fn.strdisplaywidth(label) - 3
+    local metadata = { { "   " .. label, "CommentryInbox" .. group } }
+    if remaining > 3 then
+      metadata[#metadata + 1] = { " / " .. M.clip(location, remaining), "CommentryInboxMuted" }
+    end
+    if thread.unread then
+      M.mark(view.list_buf, index - 1, "Unread")
+    end
     vim.api.nvim_buf_set_extmark(view.list_buf, ns, index - 1, 0, {
-      virt_lines = { { { metadata, highlight } }, { { "", "CommentryInboxMuted" } } },
+      virt_lines = { metadata, { { "", "CommentryInboxMuted" } } },
     })
   end
 end
@@ -88,7 +112,7 @@ function M.selection(view, row)
     pcall(vim.api.nvim_buf_del_extmark, view.list_buf, ns, view.selection_mark)
   end
   view.selection_mark = vim.api.nvim_buf_set_extmark(view.list_buf, ns, row - 1, 0, {
-    line_hl_group = "CommentryInboxSelection",
+    line_hl_group = "CommentryInboxActive",
     virt_text = { { ">", "CommentryInboxAccent" } },
     virt_text_pos = "overlay",
     priority = 150,
@@ -251,8 +275,20 @@ function M.source(view, thread, sections)
   view.source_fold_win = view.source_win
 end
 
+function M.decorate_conversation(view)
+  Conversation.decorate(view, view.reply and view.reply.presentation)
+end
+
+function M.clear_conversation(view)
+  Conversation.remember(view)
+  Conversation.apply(view, nil)
+end
+
 function M.conversation(view, thread)
+  Conversation.remember(view)
   if view.reply and view.reply.id == thread.id and vim.bo[view.thread_buf].modified then
+    -- Resize message chrome without replacing frozen history or reply text.
+    Conversation.decorate(view, view.reply.presentation)
     return
   end
   local status = thread.pending and "Pending review" or thread.resolved and "Resolved" or "Open"
@@ -276,69 +312,59 @@ function M.conversation(view, thread)
     end
   end
   local review = thread.review
+  local headings = {}
   if review then
+    headings[#headings + 1] = #rows
     rows[#rows + 1] = "Current review / " .. review.author
     vim.list_extend(rows, vim.split(review.summary, "\n", { plain = true }))
+    headings[#headings + 1] = #rows + 1
     vim.list_extend(rows, { "", "Discussion", "" })
   end
-  local authors = {}
-  local original_fold
+  local messages, latest = {}, {}
+  for index, message in ipairs(thread.messages) do
+    latest[message.author == "You" and "human" or "agent"] = index
+  end
   for index, message in ipairs(thread.messages) do
     local at = message.at:match("T(%d%d:%d%d)") or message.at
     if message.at:sub(1, 10) ~= os.date("!%Y-%m-%d") then
       at = message.at:sub(1, 10) .. " " .. at
     end
-    authors[#authors + 1] = { row = #rows, length = #message.author }
-    rows[#rows + 1] = (review and index == 1 and message.author == review.author and "Original finding / " or "")
+    local label = (review and index == 1 and message.author == review.author and "Original finding / " or "")
       .. message.author
-      .. "  "
-      .. at
-    local first = #rows
+    local header = label .. "  " .. at
+    local first = #rows + 1
+    rows[first] = header
     vim.list_extend(rows, vim.split(message.body, "\n", { plain = true }))
-    if review and index == 1 and message.author == review.author then
-      original_fold = { first, #rows }
-    end
-    vim.list_extend(rows, { "", "" })
+    messages[#messages + 1] = {
+      id = message.id or tostring(index) .. ":" .. message.author,
+      first = first,
+      last = #rows + 1,
+      header = header,
+      label_length = #label,
+      human = message.author == "You",
+      default_closed = index ~= latest[message.author == "You" and "human" or "agent"],
+      summary = vim.fn.strcharpart(vim.trim(message.body:gsub("%s+", " ")), 0, 160),
+    }
+    rows[#rows + 1] = ""
   end
+  local presentation = {
+    thread_id = thread.id,
+    messages = messages,
+    headings = headings,
+    status_group = view.outdated[thread.id] and "Warning" or "Muted",
+    reply_row = #rows,
+  }
   local dirty
   rows, dirty = Reply.prepare(view, thread, rows)
+  if not dirty then
+    view.reply.presentation = presentation
+  end
   M.write(view.thread_buf, rows, "markdown")
   vim.bo[view.thread_buf].modifiable = not thread.pending
   vim.bo[view.thread_buf].modified = dirty
-  if dirty then
-    -- Restored drafts retain their displayed history. Folds from the previous
-    -- thread must not hide a reply or unrelated messages in that frozen text.
-    if view.thread_win and vim.api.nvim_win_is_valid(view.thread_win) then
-      vim.api.nvim_win_call(view.thread_win, function()
-        vim.cmd("normal! zE")
-      end)
-    end
-    return
-  end
-  if view.thread_win and vim.api.nvim_win_is_valid(view.thread_win) then
-    vim.api.nvim_win_call(view.thread_win, function()
-      local same = view.review_thread == thread.id
-      local closed = not same or vim.fn.foldclosed(view.review_original_first or 1) ~= -1
-      vim.wo.foldmethod, vim.wo.foldenable = "manual", true
-      vim.wo.foldtext = "getline(v:foldstart) . ' / za expand'"
-      vim.cmd("normal! zE")
-      if original_fold and original_fold[2] > original_fold[1] then
-        vim.cmd(original_fold[1] .. "," .. original_fold[2] .. "fold")
-        if not closed then
-          vim.cmd(original_fold[1] .. "foldopen")
-        end
-      end
-      view.review_original_first = original_fold and original_fold[1]
-      view.review_thread = thread.id
-    end)
-  end
-  M.mark(view.thread_buf, #view.reply.prefix - 2, "Accent")
-  M.mark(view.thread_buf, 0, "Title")
-  M.mark(view.thread_buf, 1, view.outdated[thread.id] and "Warning" or "Muted")
-  for _, author in ipairs(authors) do
-    M.mark(view.thread_buf, author.row, "Muted")
-    M.mark(view.thread_buf, author.row, "Accent", { end_row = author.row, end_col = author.length, priority = 110 })
-  end
+  -- A restored draft carries the presentation for its frozen history, not the
+  -- newer messages that may have arrived while another thread was selected.
+  Conversation.apply(view, view.reply.presentation)
 end
 
 return M
