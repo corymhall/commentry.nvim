@@ -43,6 +43,50 @@ func TestBatchNotificationKeepsClaimsAndSnapshotsSeparate(t *testing.T) {
 	}
 }
 
+// TestAttachBatchesPendingRequests covers requests queued before selection.
+func TestAttachBatchesPendingRequests(t *testing.T) {
+	f := fakeRex(t)
+	var threads []string
+	for i := range 5 {
+		captured := fmt.Sprintf("Original capture %d", i)
+		thread := f.execute(t, inbox.Request{Action: "create", Project: f.project, Body: fmt.Sprintf("Question %d", i), Text: &captured}).(string)
+		f.execute(t, inbox.Request{Action: "queue", Thread: thread})
+		threads = append(threads, thread)
+	}
+	if _, err := Attach(t.Context(), f.directory, f.project, f.agent.ID); err != nil {
+		t.Fatal(err)
+	}
+	if sent, err := DispatchOnAttach(t.Context(), f.directory, f.project); err != nil || sent != 5 {
+		t.Fatalf("attach delivery sent=%d, err=%v", sent, err)
+	}
+	items := batchNotification(t, f)
+	checkBatchClaims(t, f, items, threads)
+	f.execute(t, inbox.Request{Action: "finish", Thread: items[0].Thread, ClaimIDs: items[0].ClaimIDs, Author: "codex", Body: "Answer"})
+	checkBatchCompletion(t, f, threads)
+	if sent, err := DispatchOnAttach(t.Context(), f.directory, f.project); err != nil || sent != 0 || len(f.deliveries(t)) != 1 {
+		t.Fatalf("attach replayed requests: sent=%d, err=%v", sent, err)
+	}
+}
+
+// TestAttachPreservesSteeringOrder verifies mixed delivery modes.
+func TestAttachPreservesSteeringOrder(t *testing.T) {
+	f := fakeRex(t)
+	for _, mode := range []string{"queue", "steer", "queue"} {
+		thread := f.execute(t, inbox.Request{Action: "create", Project: f.project, Body: mode}).(string)
+		f.execute(t, inbox.Request{Action: "queue", Thread: thread, Mode: mode})
+	}
+	if _, err := Attach(t.Context(), f.directory, f.project, f.agent.ID); err != nil {
+		t.Fatal(err)
+	}
+	if sent, err := DispatchOnAttach(t.Context(), f.directory, f.project); err != nil || sent != 3 {
+		t.Fatalf("attach delivery sent=%d, err=%v", sent, err)
+	}
+	writes := f.deliveries(t)
+	if len(writes) != 3 || writes[0]["action"] != "agent_queue" || writes[1]["action"] != "agent_steer" || writes[2]["action"] != "agent_queue" {
+		t.Fatalf("incorrect delivery order: %v", writes)
+	}
+}
+
 // TestUncertainBatchRetainsEveryClaimWithoutReplay checks lost receipts.
 func TestUncertainBatchRetainsEveryClaimWithoutReplay(t *testing.T) {
 	f := fakeRex(t)

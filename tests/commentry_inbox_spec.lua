@@ -65,6 +65,53 @@ describe("universal inbox", function()
     return result
   end
 
+  it("shows a saved reply as unsent until its own snapshot is queued", function()
+    local id = create("Initial question")
+    assert(Store.enqueue(id, nil, { defer_delivery = true }))
+    assert(Store.update(id, { kind = "reply", author = "Pi", body = "Answer" }))
+    local view = require("commentry.inbox").open("all", { thread = id })
+    vim.api.nvim_set_current_win(view.thread_win)
+    vim.api.nvim_buf_set_lines(view.thread_buf, -1, -1, false, { "A follow-up" })
+    vim.cmd.write()
+    local Render = require("commentry.inbox.render")
+    assert.are.same("Unsent", Render.status(assert(Store.get(id)), false))
+    local ns = vim.api.nvim_get_namespaces()["commentry.inbox.ui"]
+    local marks = vim.api.nvim_buf_get_extmarks(view.list_buf, ns, 0, -1, { details = true })
+    assert.is_truthy(vim.inspect(marks):find("Unsent", 1, true))
+    assert(Store.enqueue(id, nil, { defer_delivery = true }))
+    assert.are.same("Queued", Render.status(assert(Store.get(id)), false))
+  end)
+
+  it("copies a selected thread reference without changing the thread", function()
+    local id = create("A separate task")
+    assert(Store.update(id, { kind = "reply", author = "Agent", body = "Private context" }))
+    local before = assert(Store.get(id))
+    local view = require("commentry.inbox").open("all", { thread = id })
+    local original_has, original_setreg = vim.fn.has, vim.fn.setreg
+    local copied
+    vim.fn.has = function(name)
+      return name == "clipboard" and 1 or original_has(name)
+    end
+    vim.fn.setreg = function(register, value)
+      assert.are.same("+", register)
+      copied = value
+      return 0
+    end
+    local ok, err = pcall(function()
+      keys(view).gy()
+    end)
+    vim.fn.has, vim.fn.setreg = original_has, original_setreg
+    assert(ok, err)
+    assert.is_truthy(copied:find("Project: " .. root, 1, true))
+    assert.is_truthy(copied:find("Thread: " .. id, 1, true))
+    assert.is_falsy(copied:find("Private context", 1, true))
+    assert.are.same(before, assert(Store.get(id)))
+    local maps = vim.api.nvim_buf_get_keymap(view.thread_buf, "n")
+    assert.is_truthy(vim.tbl_filter(function(map)
+      return map.lhs == "gy"
+    end, maps)[1])
+  end)
+
   it("shows saved comments as persistent cards in ordinary unsaved buffers", function()
     local original = file({ "start", "selected", "end" }, 2)
     vim.api.nvim_set_current_buf(buf)

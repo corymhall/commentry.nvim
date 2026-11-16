@@ -76,7 +76,9 @@ history are not repeated in the paste.
 In the all-projects view it uses the selected thread's project. Resolved threads,
 agent-only notes and previously delivered comments are skipped. Existing pending
 requests are delivered without adding copies. With no attached agent, requests
-are saved for delivery. It reports counts and failures, or that nothing is new.
+are saved for delivery. Attaching batches pending queue requests into one
+notification with separate claims. Pending steer requests stay separate and
+preserve delivery order. It reports counts and failures, or that nothing is new.
 Failed requests require explicit retry after inspection. gs always uses queue
 mode, independently of m.
 
@@ -174,11 +176,14 @@ conversation remain. Below 140 columns, source stacks below the conversation.
 At 140 columns and above they sit side by side. Resizing adapts the layout,
 including proportions when staying on the same side of the breakpoint.
 Thread selection and refresh preserve manually resized panes.
+Press gy in any inbox panel to copy the selected thread's project path and ID
+to the system clipboard. Paste the reference into another agent session to ask
+it to read the thread. Copying does not send or mark the thread read.
 / in the list or g/ in any panel finds a conversation. Search previews never
 mark threads read. Tab and Shift-Tab cycle panels in normal mode. gz maximizes
 the current panel; pressing it again restores the layout. Insert-mode editing
-is unchanged. Compact status labels distinguish Draft, Queued, Not fetched and
-Awaiting answer. Inbox counters show visible threads and unread activity.
+is unchanged. Compact status labels distinguish Draft, Unsent, Queued, Not
+fetched and Awaiting answer. Inbox counters show visible threads and unread activity.
 Key hints live in panel statuslines and ?. NUI provides padded, resizable
 composer and details popups. Commentry does not configure Snacks globally.
 Commentry does not set a colorscheme. Use your normal Neovim configuration to
@@ -319,7 +324,9 @@ External agents and capture tools can invoke scripts/commentry-inbox from the
 plugin checkout. It reads one JSON request from stdin and returns one JSON
 response, by forwarding to the Go backend with commentry rpc. Neovim is not
 required by the external CLI. Build with mise run build or install with
-mise run install-commentry. The commentry executable must be on PATH for
+mise run install-commentry. The checked build fails if PATH selects a different
+commentry executable. Install the new binary or adjust PATH, and ensure Neovim
+uses the same PATH. The commentry executable must be on PATH for
 Neovim, Rex and external tools. For a checkout build, add its bin/ to PATH.
 Supported requests include:
 >

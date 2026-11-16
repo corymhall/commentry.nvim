@@ -74,13 +74,18 @@ layout adapts when resized without overriding manually resized panes on thread
 selection or refresh. No colorscheme overrides are added. Open Commentry in
 your normal Neovim configuration to use your theme and configured integrations.
 
+Press `gy` in any inbox panel to copy a reference to the selected thread to
+the system clipboard. Paste it into another agent session to ask it to read
+the thread. The reference contains the project path and thread ID, not the
+conversation contents. It does not send or mark the thread read.
+
 Press `/` in the list or `g/` in any inbox panel to find a conversation by
 search. Search previews never mark threads read. `Tab` and `Shift-Tab` cycle
 panels. `gz` maximizes the focused panel and restores its layout on a second
 press. These navigation keys work in normal mode, leaving insert-mode editing
 unchanged. Panel proportions adapt on every resize, not only at the breakpoint.
-Compact status labels distinguish drafts, queued work, requests not yet fetched,
-and requests awaiting answers. Inbox counters show visible threads and unread
+Compact status labels distinguish drafts, saved unsent replies, queued work,
+requests not yet fetched, and requests awaiting answers. Inbox counters show visible threads and unread
 activity. Key hints live in panel statuslines and `?` rather than crowded titles.
 Popups use NUI for consistent borders, padding and resize handling.
 
@@ -376,8 +381,10 @@ human message per request, with an explicit truncation flag. Captures and full
 history stay behind the context tools. In the all-projects view it uses the selected thread's project.
 Resolved threads, agent-only notes and already delivered comments are skipped.
 Existing pending requests are delivered without adding copies. With no agent
-attached, requests are saved for delivery. The result reports sent, saved and
-skipped counts, or threads needing attention. Failed requests still require
+attached, requests are saved for delivery. Attaching an agent batches pending
+queue requests into one notification, with separate claims for each thread.
+Pending steer requests remain separate and preserve their delivery order. The
+result reports sent, saved and skipped counts, or threads needing attention. Failed requests still require
 explicit retry after inspection.
 
 The new-thread composer uses `Ctrl-s` to save and `Ctrl-d` to save and send.
@@ -515,7 +522,9 @@ separate project scopes.
 ### Capture and agent replies outside Neovim
 
 Build the Go client with `mise run build`, or install it with
-`mise run install-commentry`. The `commentry` executable must be on PATH for
+`mise run install-commentry`. The checked build fails if a different `commentry`
+executable appears first on PATH. Install the new binary or adjust PATH, and
+ensure Neovim uses the same PATH. The `commentry` executable must be on PATH for
 Neovim, Rex and external tools. For a checkout build, add the checkout's `bin/`
 directory to PATH.
 

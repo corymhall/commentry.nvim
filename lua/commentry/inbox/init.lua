@@ -938,6 +938,31 @@ function M.open(scope, opts)
         end,
         "Inspect thread and Git provenance",
       },
+      gy = {
+        function()
+          local thread = selected(view)
+          if not thread then
+            return
+          end
+          if vim.fn.has("clipboard") == 0 then
+            Util.warn("A clipboard provider is required to copy a thread")
+            return
+          end
+          local text = table.concat({
+            "Read this Commentry inbox thread and use it as context for my request.",
+            "Project: " .. thread.project,
+            "Thread: " .. thread.id,
+            "Keep replies in the same thread.",
+          }, "\n")
+          local ok, err = pcall(vim.fn.setreg, "+", text)
+          if not ok or err ~= 0 then
+            Util.error("Could not copy thread: " .. tostring(err))
+            return
+          end
+          Util.info("Thread reference copied to clipboard")
+        end,
+        "Copy thread reference for another agent",
+      },
       ["?"] = {
         function()
           details({
@@ -959,6 +984,7 @@ function M.open(scope, opts)
             "s       Queue or send the selected thread",
             "gs      Send all new project comments to the agent queue",
             "gn      Notify again or explicitly hand off outstanding work",
+            "gy      Copy thread reference for another agent",
             "S       Attach an existing project agent",
             "a       Attached agent status and delivery",
             "t       Retry a failed request",
@@ -986,7 +1012,7 @@ function M.open(scope, opts)
       -- delete and other ordinary text keys available in its normal mode.
       if
         buf ~= view.thread_buf
-        or vim.tbl_contains({ "r", "ge", "gd", "s", "gs", "q", "?", "gf", "gl", "g/", "gz" }, key)
+        or vim.tbl_contains({ "r", "ge", "gd", "s", "gs", "q", "?", "gf", "gl", "g/", "gz", "gy" }, key)
       then
         vim.keymap.set("n", key, mapping[1], { buffer = buf, desc = mapping[2] })
       end

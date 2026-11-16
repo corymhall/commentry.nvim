@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/corymhall/commentry.nvim/executor"
 	"github.com/corymhall/commentry.nvim/inbox"
 )
+
+const batchQueueMode = "queue"
 
 // DispatchBatch submits pending requests in one native queue write.
 // Every item retains its own claim, answer and uncertain-delivery recovery.
@@ -37,6 +40,79 @@ func DispatchBatch(ctx context.Context, directory, project string, queueIDs []st
 	return dispatchBatch(ctx, store, a, directory, queueIDs)
 }
 
+// DispatchOnAttach batches pending queue requests while preserving the order of
+// any steering requests, which must still be submitted individually.
+func DispatchOnAttach(ctx context.Context, directory, project string) (int, error) {
+	project, err := inbox.Project(ctx, project)
+	if err != nil {
+		return 0, err
+	}
+	directory, err = dataDirectory(directory)
+	if err != nil {
+		return 0, err
+	}
+	store, err := inbox.Open(ctx, directory)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = store.Close() }()
+	a, err := store.Agent(ctx, project)
+	if err != nil || a.ID == "" {
+		return 0, err
+	}
+	if _, err = sessionState(ctx, a); err != nil {
+		return 0, err
+	}
+	result, err := store.Execute(ctx, inbox.Request{Action: "list", Project: project})
+	if err != nil {
+		return 0, err
+	}
+	threads, ok := result.([]inbox.Thread)
+	if !ok {
+		return 0, fmt.Errorf("unexpected inbox list response")
+	}
+	return dispatchAttached(ctx, store, a, directory, threads)
+}
+
+func dispatchAttached(ctx context.Context, store *inbox.Store, a inbox.Agent, directory string, threads []inbox.Thread) (int, error) {
+	var pending []inbox.Queued
+	for _, thread := range threads {
+		for _, request := range thread.Queue {
+			if request.Status == "pending" {
+				pending = append(pending, request)
+			}
+		}
+	}
+	sort.SliceStable(pending, func(i, j int) bool { return pending[i].Clock < pending[j].Clock })
+	sent := 0
+	var ids []string
+	flush := func() error {
+		if len(ids) == 0 {
+			return nil
+		}
+		count, err := dispatchBatch(ctx, store, a, directory, ids)
+		sent += count
+		ids = nil
+		return err
+	}
+	for _, request := range pending {
+		if request.Mode == batchQueueMode {
+			ids = append(ids, request.ID)
+			continue
+		}
+		if err := flush(); err != nil {
+			return sent, err
+		}
+		count, err := dispatchPending(ctx, store, a, directory, "", request.ID)
+		sent += count
+		if err != nil {
+			return sent, err
+		}
+	}
+	err := flush()
+	return sent, err
+}
+
 func dispatchBatch(ctx context.Context, store *inbox.Store, a inbox.Agent, directory string, queueIDs []string) (int, error) {
 	items := []map[string]string{}
 	for _, queueID := range queueIDs {
@@ -52,7 +128,7 @@ func dispatchBatch(ctx context.Context, store *inbox.Store, a inbox.Agent, direc
 			continue
 		} // Another dispatcher may already own this exact request.
 		items = append(items, item)
-		if item["mode"] != "queue" {
+		if item["mode"] != batchQueueMode {
 			return 0, failBatch(ctx, store, items, fmt.Errorf("batch delivery requires queue mode"))
 		}
 	}
@@ -64,7 +140,7 @@ func dispatchBatch(ctx context.Context, store *inbox.Store, a inbox.Agent, direc
 		err = fmt.Errorf("project agent selection changed during delivery")
 	}
 	if err == nil {
-		err = deliver(ctx, a, batchPrompt(items, a, directory), "queue", directory)
+		err = deliver(ctx, a, batchPrompt(items, a, directory), batchQueueMode, directory)
 	}
 	if err != nil {
 		return 0, failBatch(ctx, store, items, err)

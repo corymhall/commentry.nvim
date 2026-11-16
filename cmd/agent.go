@@ -21,7 +21,7 @@ func newAgent(directory *string) *cobra.Command {
 		if err != nil {
 			return emit(command, nil, err)
 		}
-		sent, dispatchErr := agent.Dispatch(command.Context(), *directory, a.Project, "", "")
+		sent, dispatchErr := agent.DispatchOnAttach(command.Context(), *directory, a.Project)
 		result := map[string]any{"agent": a, "sent": sent}
 		if dispatchErr != nil {
 			result["delivery_error"] = dispatchErr.Error()

@@ -57,8 +57,9 @@ description = "Apply Go lint fixes through hk"
 run = "hk fix --all"
 
 [tasks.build]
-description = "Lint, test, and build the Go CLI"
+description = "Lint, test, and build the Go CLI, checking the PATH backend"
 depends = ["lint_go", "test_go", "build_go"]
+run = "bash scripts/check-backend"
 
 [tasks.build_go]
 description = "Compile the Go backend for Neovim and CLI use"
@@ -70,10 +71,11 @@ run = "go run ."
 
 [tasks.install-commentry]
 description = "Build and install the Go CLI to ~/.local/bin"
-depends = ["build"]
+depends = ["lint_go", "test_go", "build_go"]
 run = """
 mkdir -p "$HOME/.local/bin"
 install -m 0755 bin/commentry "$HOME/.local/bin/commentry"
+bash scripts/check-backend
 """
 
 [tasks.health]

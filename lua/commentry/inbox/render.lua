@@ -39,6 +39,36 @@ function M.clip(text, width)
   return width < 3 and string.rep(".", math.max(0, width)) or out .. "..."
 end
 
+-- Queue snapshots contain the message IDs that were submitted together.
+local function has_unsent_reply(thread)
+  if thread.resolved then
+    return false
+  end
+  local latest
+  for _, message in ipairs(thread.messages or {}) do
+    if message.author == "You" then
+      latest = message.id
+    end
+  end
+  if not latest then
+    return false
+  end
+  for _, request in ipairs(thread.queue) do
+    if request.status ~= "cancelled" then
+      local encoded = (request.message or ""):match("\n({.*})$")
+      local ok, payload = pcall(vim.json.decode, encoded or "")
+      if ok and type(payload) == "table" and type(payload.messages) == "table" then
+        for _, message in ipairs(payload.messages) do
+          if message.id == latest then
+            return false
+          end
+        end
+      end
+    end
+  end
+  return true
+end
+
 function M.status(thread, outdated)
   for _, item in ipairs(thread.queue) do
     if item.status == "failed" then
@@ -47,6 +77,9 @@ function M.status(thread, outdated)
   end
   if thread.pending then
     return "Draft", "Accent"
+  end
+  if has_unsent_reply(thread) then
+    return "Unsent", "Accent"
   end
   for _, item in ipairs(thread.queue) do
     if item.status == "pending" then

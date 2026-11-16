@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+installed=$(command -v commentry || true)
+if [[ -n "$installed" ]] && ! cmp -s "$root/bin/commentry" "$installed"; then
+  printf 'Commentry backend on PATH differs from this build: %s\n' "$installed" >&2
+  printf 'Run mise run install-commentry, then check that Neovim uses the same PATH.\n' >&2
+  exit 1
+fi
