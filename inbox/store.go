@@ -95,18 +95,32 @@ func Open(ctx context.Context, directory string) (*Store, error) {
 }
 
 func (s *Store) initialize(ctx context.Context) error {
+	const currentVersion = 4
 	var version int
 	if err := s.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
 		return err
 	}
-	if version > 3 {
-		return fmt.Errorf("unsupported inbox database version %d", version)
-	}
-	if version == 3 {
+	if version == currentVersion {
 		return nil
 	}
-	_, err := s.db.ExecContext(ctx, `BEGIN IMMEDIATE;
- CREATE TABLE IF NOT EXISTS threads (
+	if version > currentVersion {
+		return fmt.Errorf("unsupported inbox database version %d", version)
+	}
+	// Recheck under the writer lock so concurrent initializers cannot apply
+	// the same migration twice. Normal opens need no writer reservation.
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err = tx.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
+		return err
+	}
+	if version > currentVersion {
+		return fmt.Errorf("unsupported inbox database version %d", version)
+	}
+	if version < 3 {
+		if _, err = tx.ExecContext(ctx, ` CREATE TABLE IF NOT EXISTS threads (
  position INTEGER PRIMARY KEY AUTOINCREMENT,
  id TEXT NOT NULL UNIQUE,
  project TEXT NOT NULL,
@@ -133,9 +147,29 @@ func (s *Store) initialize(ctx context.Context) error {
  receipt TEXT NOT NULL CHECK(json_valid(receipt)),
  PRIMARY KEY(project,request_id)
  );
- PRAGMA user_version=3;
- COMMIT;`)
-	return err
+`); err != nil {
+			return err
+		}
+	}
+	if version < 4 {
+		if _, err = tx.ExecContext(ctx, `ALTER TABLE threads ADD COLUMN inbox TEXT NOT NULL DEFAULT '';
+CREATE INDEX threads_inbox ON threads(inbox,position);
+ALTER TABLE changes ADD COLUMN inbox TEXT NOT NULL DEFAULT '';
+CREATE INDEX changes_inbox ON changes(inbox,sequence);
+ALTER TABLE publications RENAME TO publications_previous;
+CREATE TABLE publications (
+ inbox TEXT NOT NULL DEFAULT '', project TEXT NOT NULL, request_id TEXT NOT NULL,
+ fingerprint TEXT NOT NULL, receipt TEXT NOT NULL CHECK(json_valid(receipt)),
+ PRIMARY KEY(inbox,project,request_id)
+);
+INSERT INTO publications(project,request_id,fingerprint,receipt)
+ SELECT project,request_id,fingerprint,receipt FROM publications_previous;
+DROP TABLE publications_previous;
+PRAGMA user_version=4;`); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // Close releases database resources.
@@ -159,6 +193,10 @@ func (s *Store) Revision(ctx context.Context) (int64, error) {
 
 // Changes returns at most 100 changes through a stable revision boundary.
 func (s *Store) Changes(ctx context.Context, project string, cursor int64) (Changes, error) {
+	return s.changes(ctx, project, "", cursor)
+}
+
+func (s *Store) changes(ctx context.Context, project, inbox string, cursor int64) (Changes, error) {
 	result := Changes{Changes: []Change{}, Cursor: cursor}
 	if project != "" {
 		var err error
@@ -171,7 +209,11 @@ func (s *Store) Changes(ctx context.Context, project string, cursor int64) (Chan
 		return result, fmt.Errorf("cursor cannot be negative")
 	}
 	if s.remote != nil {
-		err := s.remote.Call(ctx, "changes", map[string]any{"project": project, "cursor": cursor}, &result)
+		input := map[string]any{"project": project, "cursor": cursor}
+		if inbox != "" {
+			input["inbox"] = inbox
+		}
+		err := s.remote.Call(ctx, "changes", input, &result)
 		return result, err
 	}
 	// Bound the page before querying, so a concurrent commit cannot be skipped
@@ -181,15 +223,15 @@ func (s *Store) Changes(ctx context.Context, project string, cursor int64) (Chan
 		return result, err
 	}
 	result.Revision = revision
-	rows, err := s.db.QueryContext(ctx, `SELECT sequence,thread,project,kind,at FROM changes
- WHERE sequence>? AND sequence<=? AND (?='' OR project=?) ORDER BY sequence LIMIT 100`, cursor, revision, project, project)
+	rows, err := s.db.QueryContext(ctx, `SELECT sequence,thread,project,inbox,kind,at FROM changes
+ WHERE sequence>? AND sequence<=? AND (?='' OR project=?) AND (inbox=? OR (?='' AND ?='')) ORDER BY sequence LIMIT 100`, cursor, revision, project, project, inbox, inbox, project)
 	if err != nil {
 		return result, err
 	}
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var change Change
-		if err = rows.Scan(&change.Sequence, &change.Thread, &change.Project, &change.Kind, &change.At); err != nil {
+		if err = rows.Scan(&change.Sequence, &change.Thread, &change.Project, &change.Inbox, &change.Kind, &change.At); err != nil {
 			return result, err
 		}
 		result.Changes = append(result.Changes, change)
@@ -226,7 +268,11 @@ func load(ctx context.Context, db queryer, id string) (Thread, error) {
 }
 
 func list(ctx context.Context, db queryer, project string) ([]Thread, error) {
-	rows, err := db.QueryContext(ctx, "SELECT state FROM threads WHERE (?='' OR project=?) ORDER BY position", project, project)
+	return listInbox(ctx, db, project, "")
+}
+
+func listInbox(ctx context.Context, db queryer, project, inbox string) ([]Thread, error) {
+	rows, err := db.QueryContext(ctx, "SELECT state FROM threads WHERE (?='' OR project=?) AND (inbox=? OR (?='' AND ?='')) ORDER BY position", project, project, inbox, inbox, project)
 	if err != nil {
 		return nil, err
 	}
@@ -251,12 +297,12 @@ func save(ctx context.Context, tx *sql.Tx, thread Thread, kind string) error {
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO threads(id,project,state) VALUES(?,?,?)
- ON CONFLICT(id) DO UPDATE SET state=excluded.state`, thread.ID, thread.Project, string(raw))
+	_, err = tx.ExecContext(ctx, `INSERT INTO threads(id,project,inbox,state) VALUES(?,?,?,?)
+ ON CONFLICT(id) DO UPDATE SET state=excluded.state`, thread.ID, thread.Project, thread.Inbox, string(raw))
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, "INSERT INTO changes(thread,project,kind,at) VALUES(?,?,?,?)", thread.ID, thread.Project, kind, time.Now().UTC().Format(time.RFC3339Nano))
+	_, err = tx.ExecContext(ctx, "INSERT INTO changes(thread,project,inbox,kind,at) VALUES(?,?,?,?,?)", thread.ID, thread.Project, thread.Inbox, kind, time.Now().UTC().Format(time.RFC3339Nano))
 	return err
 }
 

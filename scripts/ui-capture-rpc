@@ -367,6 +367,11 @@ run_capture_set() {
       "$scenario/$name.png" >> "$entries_json"
 
     if [[ $scenario == inbox ]]; then
+      rsvg-convert -o "$scenario_dir/rpc-named-inbox.png" "$scenario_dir/rpc-named-inbox.svg"
+      printf '%s\t%s\t%s\n' \
+        "Named cross-project inbox" \
+        "Shared feedback retains each originating project and has no agent delivery controls." \
+        "$scenario/rpc-named-inbox.png" >> "$entries_json"
       rsvg-convert -o "$scenario_dir/rpc-inbox-thread-only.png" "$scenario_dir/rpc-inbox-thread-only.svg"
       printf '%s\t%s\t%s\n' \
         "Conversation without source" \

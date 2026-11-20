@@ -15,9 +15,34 @@ The inbox works independently of Diffview:
 - `:Commentry inbox` opens the current project's unresolved threads. The list
   is on the left, the conversation in the middle, and any source or diff on the
   right. Without source content, only the list and conversation are shown.
-  `:Commentry inbox all` shows unresolved threads across all projects.
+  `:Commentry inbox all` shows unresolved threads across all projects and named inboxes.
+- `:Commentry inbox named agent-friction` opens a named cross-project inbox.
+  Items show their originating project in the list and its full path in the
+  conversation. Use `f` to filter this inbox. Project inboxes exclude these items.
+  Names use up to 64 lowercase letters, digits, underscores or hyphens and start
+  with a letter or digit. Inboxes exist when their first thread is created.
 - `:Commentry new-thread` starts a project conversation with no selection,
   clipboard contents, or file anchor. Press `n` inside the inbox for the same action.
+
+Inside a named inbox, `n` saves a conversation directly to that inbox, recording
+Neovim's current project as its origin. Named inboxes support replies, read state
+and resolution, but no agent queue or delivery. They share the configured backend;
+this does not introduce cross-account sharing or new permissions.
+
+Submit through the CLI or Executor API independently of any harness hook:
+
+```sh
+commentry create --inbox agent-friction --project /path/to/project --author agent --body "Discovery required five calls."
+commentry list --inbox agent-friction
+```
+
+JSON requests and publication manifests accept the same optional `inbox` field.
+Use `publish` with a durable `request_id` for retry-safe submissions. Receipt
+lookups must include the same inbox, originating project and request ID. Omitting
+`inbox` preserves existing project behavior. Omitting both project and inbox from
+listing or change queries includes all destinations. With both, project filters
+the named inbox by origin. Deploy the updated Executor app and its migrations
+before using named inboxes with a configured backend.
 
 New Neovim comments and project threads save as pending reviews. In the inbox,
 `ge` edits a pending comment and `gd` discards it after confirmation. `r` also

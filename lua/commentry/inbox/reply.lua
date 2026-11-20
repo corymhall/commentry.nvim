@@ -23,11 +23,14 @@ function M.prepare(view, thread, history)
   M.remember(view)
   local reply = drafts[thread.id]
   if not reply then
-    local prompt = thread.pending and "Pending review / ge edit / gd discard / s send" or "Reply / :write save / s send"
+    local prompt = thread.inbox and "Reply / :write save"
+      or thread.pending and "Pending review / ge edit / gd discard / s send"
+      or "Reply / :write save / s send"
     local prefix = vim.list_extend(vim.deepcopy(history), { prompt, "" })
     reply = {
       id = thread.id,
       project = thread.project,
+      inbox = thread.inbox,
       incoming = thread.incoming,
       prefix = prefix,
       lines = vim.deepcopy(prefix),
@@ -102,7 +105,7 @@ function M.save(view)
       Util.error(err or "Reply could not be saved")
       return false
     end
-    Util.info("Reply saved. Press s to send.")
+    Util.info(view.reply.inbox and "Reply saved to shared inbox." or "Reply saved. Press s to send.")
   end
   drafts[view.reply.id] = nil
   vim.bo[view.thread_buf].modified = false

@@ -55,14 +55,28 @@ func Project(ctx context.Context, directory string) (string, error) {
 
 func identity(prefix string) string { return prefix + rand.Text() }
 
-// Execute applies one request. Mutations and change records commit atomically.
-func (s *Store) Execute(ctx context.Context, r Request) (any, error) {
+func normalizeScope(ctx context.Context, r Request) (Request, error) {
+	if err := validateInbox(r.Inbox); err != nil {
+		return r, err
+	}
+	if r.Action == "claim" && (r.Project == "" || !label(r.Author) || r.Inbox != "") {
+		return r, fmt.Errorf("claim requires a project inbox and worker author")
+	}
 	if r.Project != "" || r.Action == actionCreate {
 		var err error
 		r.Project, err = Project(ctx, r.Project)
 		if err != nil {
-			return nil, err
+			return r, err
 		}
+	}
+	return r, nil
+}
+
+// Execute applies one request. Mutations and change records commit atomically.
+func (s *Store) Execute(ctx context.Context, r Request) (any, error) {
+	r, err := normalizeScope(ctx, r)
+	if err != nil {
+		return nil, err
 	}
 	if s.remote != nil {
 		return s.remoteExecute(ctx, r)
@@ -71,7 +85,7 @@ func (s *Store) Execute(ctx context.Context, r Request) (any, error) {
 	case "publish":
 		return publicationResult(s.publish(ctx, r))
 	case "publication":
-		return publicationResult(s.publication(ctx, r.Project, r.RequestID))
+		return publicationResult(s.publication(ctx, r.Project, r.RequestID, r.Inbox))
 	case "list":
 		return s.filtered(ctx, r)
 	case "read":
@@ -79,13 +93,10 @@ func (s *Store) Execute(ctx context.Context, r Request) (any, error) {
 	case "revision":
 		return s.Revision(ctx)
 	case "changes":
-		return s.Changes(ctx, r.Project, r.Cursor)
+		return s.changes(ctx, r.Project, r.Inbox, r.Cursor)
 	case "edit-pending", "discard-pending", actionCreate, "attach", actionRevise, "reply", "resolve", "comparison", "archive-comparison", "read-state", modeQueue, "claim", statusComplete, "cancel", "fail", "retry", actionFinish, "acknowledge", "handoff":
 	default:
 		return nil, fmt.Errorf("unknown inbox action: %s", r.Action)
-	}
-	if r.Action == "claim" && (r.Project == "" || !label(r.Author)) {
-		return nil, fmt.Errorf("claim requires an explicit project and worker author")
 	}
 	if r.Author == "" {
 		r.Author = "You"
@@ -122,7 +133,7 @@ func (s *Store) filtered(ctx context.Context, r Request) (any, error) {
 	default:
 		return nil, fmt.Errorf("unknown inbox filter: %s", r.Filter)
 	}
-	threads, err := list(ctx, s.db, r.Project)
+	threads, err := listInbox(ctx, s.db, r.Project, r.Inbox)
 	if err != nil {
 		return nil, err
 	}
@@ -137,7 +148,7 @@ func (s *Store) filtered(ctx context.Context, r Request) (any, error) {
 	}
 	summaries := []map[string]any{}
 	for _, t := range selected {
-		summaries = append(summaries, map[string]any{"id": t.ID, "project": t.Project, "title": t.Title, "pending": t.Pending, "unread": t.Unread, "incoming": t.Incoming, "resolved": t.Resolved, "messages": t.Messages, modeQueue: t.Queue})
+		summaries = append(summaries, map[string]any{"id": t.ID, "inbox": t.Inbox, "project": t.Project, "title": t.Title, "pending": t.Pending, "unread": t.Unread, "incoming": t.Incoming, "resolved": t.Resolved, "messages": t.Messages, modeQueue: t.Queue})
 	}
 	return summaries, nil
 }
@@ -165,6 +176,9 @@ func matches(t Thread, filter string) bool {
 }
 
 func create(ctx context.Context, tx *sql.Tx, r Request) (any, error) {
+	if r.Inbox != "" && r.Pending {
+		return nil, fmt.Errorf("named inbox threads cannot be pending reviews")
+	}
 	if r.Pending && r.Author != "You" {
 		return nil, fmt.Errorf("only human comments can be pending")
 	}
@@ -190,7 +204,7 @@ func create(ctx context.Context, tx *sql.Tx, r Request) (any, error) {
 	if title == "" {
 		title = strings.Split(strings.TrimSpace(r.Body), "\n")[0]
 	}
-	thread := Thread{Pending: r.Pending, ID: identity("t-"), Project: r.Project, Title: title, Source: source, CreatedAt: at, UpdatedAt: at, Messages: []Message{message}, Comparisons: []Event{}, Queue: []Queued{}}
+	thread := Thread{Inbox: r.Inbox, Pending: r.Pending, ID: identity("t-"), Project: r.Project, Title: title, Source: source, CreatedAt: at, UpdatedAt: at, Messages: []Message{message}, Comparisons: []Event{}, Queue: []Queued{}}
 	if r.Author != "You" {
 		thread.Incoming = message.ID
 		thread.Unread = true
@@ -203,9 +217,19 @@ func create(ctx context.Context, tx *sql.Tx, r Request) (any, error) {
 	return thread.ID, nil
 }
 
+func validateDelivery(thread Thread, action string) error {
+	if thread.Inbox != "" && slices.Contains([]string{modeQueue, "retry", "handoff"}, action) {
+		return fmt.Errorf("named inboxes do not support agent delivery")
+	}
+	return nil
+}
+
 func update(ctx context.Context, tx *sql.Tx, r Request) (any, error) {
 	thread, err := load(ctx, tx, r.Thread)
 	if err != nil {
+		return nil, err
+	}
+	if err := validateDelivery(thread, r.Action); err != nil {
 		return nil, err
 	}
 	fingerprint, receipt, err := previousReply(thread, r)

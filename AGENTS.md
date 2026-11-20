@@ -121,6 +121,15 @@ Stop and ask for direction when any of these occur:
 - If you change plugin wiring/health surfaces, run: `mise run health`.
 - Before handoff, report exact commands run and pass/fail results.
 
+## Completion Requires Installation and Deployment
+
+- Work is not done until all affected components are installed, deployed, and verified in their actual runtime. Passing local checks or building artifacts is insufficient.
+- For CLI changes, run `mise run install-commentry` and verify the CLI on PATH matches the new build and is the executable Neovim uses.
+- For Executor changes, deploy the updated app and required migrations to the configured app. Verify the active deployment and affected API behavior. Saved source or a Git commit is not a deployment.
+- For Neovim or Pi integration changes, complete any required installation or reload and verify the active runtime uses the updated code.
+- If activation requires approval, authorization, or user interaction, request it and report the work as incomplete until activation and verification succeed. Do not silently substitute a different installation or deployment target.
+- A task limited to documentation or instructions does not require unrelated installation or deployment. Honor explicit user requests to leave changes undeployed or uninstalled, and report that exception clearly.
+
 ## PR Hygiene Expectations
 
 - Keep PRs scoped and reversible.

@@ -126,6 +126,9 @@ function M.list(view)
     local location = thread.source.kind == "file" and vim.fs.basename(thread.source.path) .. ":" .. thread.source.first
       or thread.source.origin == "general" and "Project"
       or "Text"
+    if not view.project then
+      location = vim.fs.basename(thread.project) .. " / " .. location
+    end
     local label = M.clip(status, width)
     local remaining = width - vim.fn.strdisplaywidth(label) - 3
     local metadata = { { "   " .. label, "CommentryInbox" .. group } }
@@ -338,6 +341,9 @@ function M.conversation(view, thread)
   end
   local rows =
     { thread.title, status .. " / " .. (thread.unread and "Unread / " or "") .. #thread.messages .. " messages", "" }
+  if thread.inbox then
+    vim.list_extend(rows, { "Inbox: " .. thread.inbox, "Project: " .. thread.project, "" })
+  end
   for _, item in ipairs(thread.queue) do
     if item.status == "claimed" then
       vim.list_extend(rows, {

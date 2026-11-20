@@ -25,15 +25,40 @@ The project inbox works without Diffview or Snacks.
     Open unresolved project threads. The list is on the left, the conversation
     in the middle and source on the right when available. The default
     scope is the canonical Git worktree root, or the containing directory
-    outside Git. The all scope includes unresolved threads from every project.
+    outside Git. The all scope includes unresolved threads from every project
+    and named inbox.
     Use f and choose all or resolved to revisit resolved threads. An explicitly
     requested resolved thread stays visible until R or a filter change.
     Branch provenance is recorded but does not filter threads. Worktrees have
     separate scopes.
 
+:Commentry inbox named <name>
+    Open a named cross-project inbox, for example agent-friction. Each item
+    shows its originating project in the list and full project path in the
+    conversation. Use f to filter within this destination. Project inboxes
+    exclude named-inbox threads. Names have at most 64 lowercase letters,
+    digits, underscores or hyphens, starting with a letter or digit.
+    Inboxes exist once their first thread is created.
+    The n key creates a thread here with the current Neovim project as origin.
+    Threads save directly, without pending review or agent delivery. Replies,
+    read state and resolution work normally. These inboxes share the configured
+    backend and do not introduce cross-account sharing or new permissions.
+
+    CLI submission and listing: >
+      commentry create --inbox agent-friction --project /path/to/project --body "Slow discovery"
+      commentry list --inbox agent-friction
+<
+    Executor create/list/changes and publication manifests accept optional inbox.
+    Publish with a durable request_id for safe retries. Receipt lookups use the
+    same inbox, project and request_id. Omitting inbox retains project behavior.
+    Listing or change queries without either scope include all destinations;
+    project plus inbox filters the named inbox by originating project.
+    Deploy the updated Executor app and migrations before using named inboxes.
+
 :Commentry new-thread
     Create a standalone project conversation with no file or copied excerpt.
-    Also available as n inside the inbox.
+    Also available as n inside the inbox. In a named inbox, the composer saves
+    directly to that destination.
 
 Inbox-local keys:
     j/k   Select a thread in the list.
@@ -41,7 +66,7 @@ Inbox-local keys:
     visual r Quote selected source text into the reply.
     visual mc Quote selected conversation text into the reply.
     visual mn New thread composer from selected conversation text.
-    :write Save the inline reply. s sends after saving.
+    :write Save the inline reply. In project inboxes, s sends after saving.
     n     New standalone thread.
     Enter Open the conversation and mark displayed messages read.
     u     Toggle read/unread.
@@ -609,6 +634,7 @@ range highlights follow the current theme.
 COMMANDS                                          *commentry.commands*
 
     :Commentry inbox [all|unread|read|open|resolved|queued]
+    :Commentry inbox named <name>
     :Commentry comment
     :Commentry capture-text [register]
     :Commentry new-thread

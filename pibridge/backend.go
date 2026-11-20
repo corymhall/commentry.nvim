@@ -123,6 +123,7 @@ func compactList(raw json.RawMessage) (json.RawMessage, error) {
 	}
 	type summary struct {
 		ID           string `json:"id"`
+		Inbox        string `json:"inbox,omitempty"`
 		Project      string `json:"project"`
 		Title        string `json:"title"`
 		Unread       bool   `json:"unread"`
@@ -131,23 +132,42 @@ func compactList(raw json.RawMessage) (json.RawMessage, error) {
 	}
 	result := make([]summary, 0, len(threads))
 	for _, thread := range threads {
-		result = append(result, summary{thread.ID, thread.Project, thread.Title, thread.Unread, thread.Resolved, len(thread.Messages)})
+		result = append(result, summary{thread.ID, thread.Inbox, thread.Project, thread.Title, thread.Unread, thread.Resolved, len(thread.Messages)})
 	}
 	return json.Marshal(result)
 }
 
-func scopeCall(ctx context.Context, client *executor.Client, input *invocation, project string) (json.RawMessage, error) {
+func scopeInput(input *invocation, project string) (string, error) {
+	var destination string
+	if raw, ok := input.Input["inbox"]; ok {
+		if json.Unmarshal(raw, &destination) != nil || destination == "" {
+			return "", fmt.Errorf("inbox must be a nonempty name")
+		}
+		if input.Action == "requests.read" || input.Action == "requests.context" || input.Action == "finish" {
+			return "", fmt.Errorf("named inboxes do not support agent delivery")
+		}
+	}
 	if raw, ok := input.Input["project"]; ok {
 		var requested string
 		if json.Unmarshal(raw, &requested) != nil || requested != project {
-			return nil, fmt.Errorf("pi tool is scoped to the current project")
+			return "", fmt.Errorf("pi tool is scoped to the current project")
 		}
 	}
-	raw, err := json.Marshal(project)
+	if destination == "" || input.Action == "create" || input.Action == "publish" {
+		raw, err := json.Marshal(project)
+		if err != nil {
+			return "", err
+		}
+		input.Input["project"] = raw
+	}
+	return destination, nil
+}
+
+func scopeCall(ctx context.Context, client *executor.Client, input *invocation, project string) (json.RawMessage, error) {
+	destination, err := scopeInput(input, project)
 	if err != nil {
 		return nil, err
 	}
-	input.Input["project"] = raw
 	// Request-read validates its own manifest. Other thread operations must not
 	// accidentally use an ID from another project's context.
 	threadJSON, ok := input.Input["thread"]
@@ -164,12 +184,20 @@ func scopeCall(ctx context.Context, client *executor.Client, input *invocation, 
 	}
 	var current struct {
 		Project string `json:"project"`
+		Inbox   string `json:"inbox"`
 	}
 	if err = json.Unmarshal(inspected, &current); err != nil {
 		return nil, err
 	}
-	if current.Project != project {
-		return nil, fmt.Errorf("thread belongs to another project")
+	if destination != "" {
+		if current.Inbox != destination {
+			return nil, fmt.Errorf("thread belongs to another inbox")
+		}
+		// The bridge consumes scope; Executor thread tools take only a thread ID.
+		delete(input.Input, "inbox")
+		delete(input.Input, "project")
+	} else if current.Project != project || current.Inbox != "" {
+		return nil, fmt.Errorf("thread belongs to another project or a named inbox")
 	}
 	// A complete read can reuse this response, including fields introduced
 	// by newer backends. Mutations still run only after scope was checked.

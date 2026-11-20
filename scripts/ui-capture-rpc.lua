@@ -237,6 +237,19 @@ local ok, err = xpcall(function()
     bridge:wait_for_flush(5000)
     local thread_only = bridge.screen:snapshot("rpc-inbox-thread-only")
     Bridge.write_snapshot_files(thread_only, bridge.screen, out_dir, "rpc-inbox-thread-only")
+    bridge:request("nvim_exec_lua", {
+      [[
+      local store = require("commentry.inbox.store")
+      local id = assert(store.create({ inbox = "agent-friction", project = "/work/commentry.nvim", author = "Agent", title = "Discovery required five calls", body = "Finding the right operation took five calls before I could save a reply." }))
+      assert(store.create({ inbox = "agent-friction", project = "/work/another-project", author = "Agent", title = "An error hid its file location", body = "The error did not identify which file needed attention." }))
+      local view = require("commentry.inbox").open(nil, { inbox = "agent-friction", thread = id })
+      vim.api.nvim_set_current_win(view.list_win)
+      return true
+      ]], {},
+    }, 5000)
+    bridge:wait_for_flush(5000)
+    local named = bridge.screen:snapshot("rpc-named-inbox")
+    Bridge.write_snapshot_files(named, bridge.screen, out_dir, "rpc-named-inbox")
     return
   end
   bridge:request("nvim_exec_lua", {

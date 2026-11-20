@@ -96,6 +96,7 @@ const sessionActivity = object({
   claim_ids: array(text).optional(),
 });
 const thread = object({
+  inbox: text.optional(),
   session_activity: array(sessionActivity).optional(),
   pending: boolean().optional(),
   id: text,
@@ -157,6 +158,7 @@ const publishItem = object({
   primary_comparison: text.optional(),
 });
 const publicationOutput = object({
+  inbox: text.optional(),
   project: text,
   request_id: text,
   status: text,
@@ -173,6 +175,7 @@ const publicationOutput = object({
   ).optional(),
 });
 const request = object({
+  inbox: text.optional(),
   session: session.optional(),
   pending: boolean().optional(),
   expected_message: string().optional(),
@@ -207,6 +210,7 @@ const request = object({
   cursor: number().optional(),
 });
 const change = object({
+  inbox: string().optional(),
   sequence: number(),
   thread: text,
   project: text,
@@ -222,7 +226,12 @@ const author = string().default("codex");
 const perform = (sql: SQL, input: Request) => {
   if (input.action === "publish") return publish(sql, input as Publication);
   if (input.action === "publication")
-    return publication(sql, input.project ?? "", input.request_id ?? "");
+    return publication(
+      sql,
+      input.project ?? "",
+      input.request_id ?? "",
+      input.inbox,
+    );
   return reads.has(input.action) ? read(sql, input) : mutate(sql, input);
 };
 
@@ -237,6 +246,7 @@ export default defineApp(
               "Publish 1 to 25 independent review topics with summaries, code excerpts and comparisons in one atomic transaction. Use a durable request_id and unique item keys. Repeating the same request returns the original compact receipt; changed content at the same ID is rejected. For source excerpts set excerpt_first to the file line of lines[0]. No separate create/revise calls needed. Check publications.read after a timeout.",
             input: object({
               project: text,
+              inbox: text.optional(),
               request_id: text,
               author,
               session: session.optional(),
@@ -250,12 +260,16 @@ export default defineApp(
           read: query(
             {
               description:
-                "Check whether an atomic publish committed using project and request_id. Returns complete with the original topic-to-thread receipts, or missing. Does not change read state. A missing response during an in-flight call is not proof it will fail; retry only the same request_id and payload.",
-              input: object({ project: text, request_id: text }),
+                "Check whether an atomic publish committed using project, request_id and the same inbox if supplied. Returns complete with the original topic-to-thread receipts, or missing. Does not change read state. A missing response during an in-flight call is not proof it will fail; retry only the same request_id and payload.",
+              input: object({
+                project: text,
+                inbox: text.optional(),
+                request_id: text,
+              }),
               output: publicationOutput,
             },
             async ({ sql }, input) =>
-              publication(sql, input.project, input.request_id),
+              publication(sql, input.project, input.request_id, input.inbox),
           ),
         }),
         requests: router({
@@ -297,9 +311,10 @@ export default defineApp(
         list: query(
           {
             description:
-              "List project conversations. Omitting project includes all projects. Reads do not mark messages read.",
+              "List conversations. Supply inbox for a named cross-project inbox, optionally filtered by originating project. Project alone lists only that project inbox. Omitting both includes all destinations. Reads do not mark messages read.",
             input: object({
               project: string().optional(),
+              inbox: text.optional(),
               filter: string().optional(),
             }),
             output: array(thread),
@@ -320,9 +335,10 @@ export default defineApp(
         create: mutation(
           {
             description:
-              "Create a project conversation with optional copied text or an immutable file snapshot.",
+              "Create a conversation with optional copied text or an immutable file snapshot. Supply inbox to target a named cross-project inbox; project remains origin provenance. Named inboxes do not support agent delivery.",
             input: object({
               project: text,
+              inbox: text.optional(),
               body: text,
               title: string().optional(),
               text: string().optional(),
@@ -482,6 +498,7 @@ export default defineApp(
               "Read up to 100 committed changes after a cursor. Continue with the returned cursor.",
             input: object({
               project: string().optional(),
+              inbox: text.optional(),
               cursor: number().default(0),
             }),
             output: changes,

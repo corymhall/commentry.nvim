@@ -73,6 +73,7 @@ export interface SessionActivity {
   claim_ids?: readonly string[];
 }
 export interface Thread {
+  inbox?: string;
   session_activity?: SessionActivity[];
   // Editing ends at the first queue commit, not at successful delivery.
   pending?: boolean;
@@ -106,6 +107,7 @@ export interface Agent {
   rex_block?: string;
 }
 export interface Request {
+  inbox?: string;
   session?: Session;
   pending?: boolean;
   // Initial message ID observed by the editor; replaced on each pending edit.
@@ -205,11 +207,21 @@ function load(sql: SqlReader, thread?: string): Thread {
   requireThat(rows.length === 1, "unknown inbox thread: " + thread);
   return JSON.parse(rows[0].state);
 }
-function list(sql: SqlReader, project = ""): Thread[] {
+export function validateInbox(inbox: string | undefined) {
+  requireThat(
+    inbox === undefined ||
+      (typeof inbox === "string" && /^[a-z0-9][a-z0-9_-]{0,63}$/.test(inbox)),
+    "inbox must be a lowercase name of at most 64 letters, digits, underscores or hyphens",
+  );
+}
+function list(sql: SqlReader, project = "", inbox = ""): Thread[] {
   return sql
     .exec<{ state: string }>(
-      "SELECT state FROM threads WHERE (?='' OR project=?) ORDER BY position",
+      "SELECT state FROM threads WHERE (?='' OR project=?) AND (inbox=? OR (?='' AND ?='')) ORDER BY position",
       project,
+      project,
+      inbox,
+      inbox,
       project,
     )
     .toArray()
@@ -219,15 +231,17 @@ function save(sql: SqlReader, t: Thread, kind: string) {
   // The capture stays in state unchanged. Every mutation publishes a cursor in
   // the same transaction so readers cannot miss a committed reply.
   sql.exec(
-    "INSERT INTO threads(id,project,state) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET state=excluded.state",
+    "INSERT INTO threads(id,project,inbox,state) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET state=excluded.state",
     t.id,
     t.project,
+    t.inbox ?? "",
     JSON.stringify(t),
   );
   sql.exec(
-    "INSERT INTO changes(thread,project,kind,at) VALUES(?,?,?,?)",
+    "INSERT INTO changes(thread,project,inbox,kind,at) VALUES(?,?,?,?,?)",
     t.id,
     t.project,
+    t.inbox ?? "",
     kind,
     new Date().toISOString(),
   );
@@ -240,6 +254,7 @@ function revision(sql: SqlReader): number {
     .one().revision;
 }
 export function read(sql: SqlReader, r: Request): unknown {
+  validateInbox(r.inbox);
   if (r.action === "read") return load(sql, r.thread);
   if (r.action === "revision") return revision(sql);
   if (r.action === "changes") {
@@ -258,10 +273,13 @@ export function read(sql: SqlReader, r: Request): unknown {
         kind: string;
         at: string;
       }>(
-        "SELECT sequence,thread,project,kind,at FROM changes WHERE sequence>? AND sequence<=? AND (?='' OR project=?) ORDER BY sequence LIMIT 100",
+        "SELECT sequence,thread,project,inbox,kind,at FROM changes WHERE sequence>? AND sequence<=? AND (?='' OR project=?) AND (inbox=? OR (?='' AND ?='')) ORDER BY sequence LIMIT 100",
         cursor,
         boundary,
         project,
+        project,
+        r.inbox ?? "",
+        r.inbox ?? "",
         project,
       )
       .toArray();
@@ -280,7 +298,7 @@ export function read(sql: SqlReader, r: Request): unknown {
     ["all", "unread", "read", "open", "resolved", "queued"].includes(filter),
     "unknown inbox filter",
   );
-  const threads = list(sql, r.project).filter(
+  const threads = list(sql, r.project, r.inbox).filter(
     (t) =>
       filter === "all" ||
       (filter === "unread" && t.unread) ||
@@ -293,6 +311,7 @@ export function read(sql: SqlReader, r: Request): unknown {
   return r.summary
     ? threads.map((t) => ({
         id: t.id,
+        ...(t.inbox ? { inbox: t.inbox } : {}),
         project: t.project,
         title: t.title,
         pending: !!t.pending,
@@ -412,6 +431,7 @@ function recordSession(t: Thread, r: Request, e: Pick<Event, "id" | "at">) {
 // The caller must own the synchronous SQL transaction.
 export function mutateInside(sql: SqlReader, r: Request): unknown {
   validateSession(r.session);
+  validateInbox(r.inbox);
   requireThat(
     [
       "create",
@@ -449,6 +469,10 @@ export function mutateInside(sql: SqlReader, r: Request): unknown {
       !r.pending || author === "You",
       "only human comments can be pending",
     );
+    requireThat(
+      !r.inbox || !r.pending,
+      "named inbox threads cannot be pending reviews",
+    );
     requireThat(nonempty(r.project), "project is required");
     requireThat(nonempty(r.body), "body is required");
     requireThat(r.title === undefined || label(r.title), "invalid title");
@@ -463,6 +487,7 @@ export function mutateInside(sql: SqlReader, r: Request): unknown {
       ...(r.pending ? { pending: true } : {}),
       id: id("t-"),
       project: r.project,
+      ...(r.inbox ? { inbox: r.inbox } : {}),
       title: r.title ?? r.body.trim().split("\n")[0],
       source,
       created_at: at,
@@ -479,6 +504,7 @@ export function mutateInside(sql: SqlReader, r: Request): unknown {
     return t.id;
   }
   if (r.action === "claim") {
+    requireThat(!r.inbox, "named inboxes do not support agent delivery");
     const items = list(sql, r.project).flatMap((t) =>
       t.queue
         .filter(
@@ -518,6 +544,10 @@ export function mutateInside(sql: SqlReader, r: Request): unknown {
       before: "",
       after: "",
     };
+  requireThat(
+    !t.inbox || !["queue", "retry", "handoff"].includes(r.action),
+    "named inboxes do not support agent delivery",
+  );
   if (r.claim_id) e.claim_id = r.claim_id;
   if (r.queue_id) e.queue_id = r.queue_id;
   // A retry from a replacement session must return the original attribution.
@@ -564,9 +594,10 @@ export function mutateInside(sql: SqlReader, r: Request): unknown {
       if (r.action === "discard-pending") {
         sql.exec("DELETE FROM threads WHERE id=?", t.id);
         sql.exec(
-          "INSERT INTO changes(thread,project,kind,at) VALUES(?,?,?,?)",
+          "INSERT INTO changes(thread,project,inbox,kind,at) VALUES(?,?,?,?,?)",
           t.id,
           t.project,
+          t.inbox ?? "",
           r.action,
           at,
         );
@@ -889,6 +920,7 @@ export function importThreads(sql: SQL, threads: Thread[], agents: Agent[]) {
           nonempty(t.updated_at),
         "invalid imported thread",
       );
+      validateInbox(t.inbox);
       validateSource(t.source);
       requireThat(
         t.attachments === undefined || Array.isArray(t.attachments),

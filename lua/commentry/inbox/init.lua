@@ -56,6 +56,7 @@ local function inspect(thread)
     "",
     "ID       " .. thread.id,
     "Project  " .. thread.project,
+    "Inbox    " .. (thread.inbox or "Project inbox"),
     "Created  " .. thread.created_at,
     "Source   " .. (thread.source.path or thread.source.origin or "Copied text"),
   }
@@ -194,11 +195,19 @@ end
 function M.new_thread(initial, source, project)
   local view = active and vim.api.nvim_get_current_tabpage() == active.tab and active or nil
   project = project or (view and view.project) or Source.project()
-  return compose("New project thread", initial, function(body)
+  local inbox = view and view.inbox
+  local send
+  if not inbox then
+    send = function(id)
+      send_thread(id, view and view.delivery_mode or "queue")
+    end
+  end
+  return compose(inbox and ("New thread / " .. inbox) or "New project thread", initial, function(body)
     local id, err = Store.create({
       project = project,
+      inbox = inbox,
       body = body,
-      pending = true,
+      pending = not inbox,
       source = source or { kind = "text", lines = {}, origin = "general" },
     })
     if not report(id, err) then
@@ -209,9 +218,7 @@ function M.new_thread(initial, source, project)
       refresh(view, id)
     end
     return id
-  end, function(id)
-    send_thread(id, view and view.delivery_mode or "queue")
-  end)
+  end, send)
 end
 
 function M.comment(args)
@@ -302,7 +309,7 @@ local function render_detail(view)
       "",
       "  No threads in this scope",
       "",
-      "  n   Start a project conversation",
+      view.inbox and "  n   Start a conversation in this inbox" or "  n   Start a project conversation",
       "  f   Choose another filter",
       "",
       "  Capture code with :Commentry comment",
@@ -340,7 +347,7 @@ local function render_detail(view)
     end)
     view.detail_thread = thread.id
   end
-  UI.headers(view)
+  UI.headers(view, thread)
 end
 
 refresh = function(view, select_id)
@@ -357,7 +364,7 @@ refresh = function(view, select_id)
   -- Record the revision before reading. A reply committed during the read must
   -- still differ from this stamp so the next poll cannot silently skip it.
   local revision = stamp()
-  local threads, err = Store.list(view.project)
+  local threads, err = Store.list(view.project, { inbox = view.inbox })
   if not report(threads, err) then
     return
   end
@@ -415,7 +422,7 @@ refresh = function(view, select_id)
       end
     end
   end
-  UI.headers(view)
+  UI.headers(view, selected(view))
   view.stamp = revision
 end
 
@@ -502,12 +509,14 @@ function M.open(scope, opts)
     close_view(active)
   end
   local project = Source.project(opts and opts.project)
-  if scope == "all" then
+  local inbox = opts and opts.inbox
+  if scope == "all" or inbox then
     project = nil
   end
   if active and vim.api.nvim_tabpage_is_valid(active.tab) then
     vim.api.nvim_set_current_tabpage(active.tab)
     active.project = project
+    active.inbox = inbox
     active.filter = scope and scope ~= "" and scope ~= "all" and scope or "open"
     active.pin_id = nil
     layout(active)
@@ -521,6 +530,7 @@ function M.open(scope, opts)
   local view = {
     tab = vim.api.nvim_get_current_tabpage(),
     project = project,
+    inbox = inbox,
     context = 4,
     filter = scope and scope ~= "" and scope ~= "all" and scope or "open",
     source_win = -1,
@@ -657,6 +667,11 @@ function M.open(scope, opts)
     render_detail(view)
   end
   vim.keymap.set("n", "/", find_thread, { buffer = view.list_buf, desc = "Find inbox conversation" })
+  local delivery_keys = { s = true, gs = true, gn = true, S = true, a = true, t = true, d = true, m = true }
+  local function shared_thread()
+    local thread = selected(view)
+    return view.inbox or (thread and thread.inbox)
+  end
   for _, buf in ipairs({ view.list_buf, view.source_buf, view.thread_buf }) do
     for key, mapping in pairs({
       ["g/"] = { find_thread, "Find inbox conversation" },
@@ -951,6 +966,7 @@ function M.open(scope, opts)
           local text = table.concat({
             "Read this Commentry inbox thread and use it as context for my request.",
             "Project: " .. thread.project,
+            "Inbox: " .. (thread.inbox or "Project inbox"),
             "Thread: " .. thread.id,
             "Keep replies in the same thread.",
           }, "\n")
@@ -965,31 +981,21 @@ function M.open(scope, opts)
       },
       ["?"] = {
         function()
-          details({
+          local shared = shared_thread()
+          local keys = {
             "Inbox keys",
             "",
             "j / k   Select a thread in the list",
-            "r       Edit pending comment or focus the inline reply",
-            "ge      Edit a pending comment before sending",
-            "gd      Discard a pending comment",
+            shared and "r       Focus the inline reply" or "r       Edit pending comment or focus the inline reply",
             "visual r  Quote a source selection into the reply",
             "visual mc Quote selected thread text into the reply",
             "visual mn Start a new thread from selected thread text",
-            ":write  Save the reply, then s sends it",
-            "n       New standalone project thread",
+            shared and ":write  Save the reply" or ":write  Save the reply, then s sends it",
+            "n       New standalone thread",
             "Enter   Open and mark read",
             "u       Toggle read/unread",
             "f       Filter threads",
-            "m       Choose queue or steer mode",
-            "s       Queue or send the selected thread",
-            "gs      Send all new project comments to the agent queue",
-            "gn      Notify again or explicitly hand off outstanding work",
             "gy      Copy thread reference for another agent",
-            "S       Attach an existing project agent",
-            "a       Attached agent status and delivery",
-            "t       Retry a failed request",
-            "d       Remove the oldest pending queue request",
-            "Ctrl-d  Save and send from the composer",
             "Ctrl-h/j/k/l  Move between panels",
             "Tab / Shift-Tab  Cycle panels",
             "/ in list, g/ anywhere  Find a conversation",
@@ -1003,7 +1009,25 @@ function M.open(scope, opts)
             "i       Inspect capture and Git details",
             "R       Refresh",
             "q       Close inbox",
-          })
+          }
+          if not shared then
+            vim.list_extend(keys, {
+              "",
+              "Project review and delivery",
+              "ge      Edit a pending comment before sending",
+              "gd      Discard a pending comment",
+              "m       Choose queue or steer mode",
+              "s       Queue or send the selected thread",
+              "gs      Send all new project comments to the agent queue",
+              "gn      Notify again or explicitly hand off outstanding work",
+              "S       Attach an existing project agent",
+              "a       Attached agent status and delivery",
+              "t       Retry a failed request",
+              "d       Remove the oldest pending queue request",
+              "Ctrl-d  Save and send from the composer",
+            })
+          end
+          details(keys)
         end,
         "Show inbox help",
       },
@@ -1014,7 +1038,17 @@ function M.open(scope, opts)
         buf ~= view.thread_buf
         or vim.tbl_contains({ "r", "ge", "gd", "s", "gs", "q", "?", "gf", "gl", "g/", "gz", "gy" }, key)
       then
-        vim.keymap.set("n", key, mapping[1], { buffer = buf, desc = mapping[2] })
+        local callback = mapping[1]
+        if delivery_keys[key] then
+          callback = function()
+            if shared_thread() then
+              Util.warn("Named inboxes do not support agent delivery")
+              return
+            end
+            mapping[1]()
+          end
+        end
+        vim.keymap.set("n", key, callback, { buffer = buf, desc = mapping[2] })
       end
     end
     for key, step in pairs({ ["<Tab>"] = 1, ["<S-Tab>"] = -1 }) do

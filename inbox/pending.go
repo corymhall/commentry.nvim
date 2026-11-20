@@ -20,7 +20,7 @@ func updatePending(ctx context.Context, tx *sql.Tx, thread Thread, r Request, ev
 		if _, err := tx.ExecContext(ctx, "DELETE FROM threads WHERE id=?", thread.ID); err != nil {
 			return nil, err
 		}
-		_, err := tx.ExecContext(ctx, "INSERT INTO changes(thread,project,kind,at) VALUES(?,?,?,?)", thread.ID, thread.Project, r.Action, event.At)
+		_, err := tx.ExecContext(ctx, "INSERT INTO changes(thread,project,inbox,kind,at) VALUES(?,?,?,?,?)", thread.ID, thread.Project, thread.Inbox, r.Action, event.At)
 		return event, err
 	}
 	if !nonempty(r.Body) {

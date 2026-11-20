@@ -103,6 +103,7 @@ type SessionActivity struct {
 
 // Thread contains a capture, conversation, comparisons, and read/work state.
 type Thread struct {
+	Inbox           string                  `json:"inbox,omitempty"`
 	SessionActivity []SessionActivity       `json:"session_activity,omitempty"`
 	ReplyReceipts   map[string]ReplyReceipt `json:"reply_receipts,omitempty"`
 	// Pending permits editing the initial human message until the first queue
@@ -131,6 +132,7 @@ type Thread struct {
 
 // Request is the shared CLI and Neovim JSON protocol.
 type Request struct {
+	Inbox   string   `json:"inbox,omitempty"`
 	Session *Session `json:"session,omitempty"`
 	Pending bool     `json:"pending,omitempty"`
 	// ExpectedMessage is the initial message ID observed by an editor. Each
@@ -170,6 +172,7 @@ type Request struct {
 
 // Change identifies a committed mutation for incremental inbox consumers.
 type Change struct {
+	Inbox    string `json:"inbox,omitempty"`
 	Sequence int64  `json:"sequence"`
 	Thread   string `json:"thread"`
 	Project  string `json:"project"`
@@ -182,6 +185,22 @@ type Changes struct {
 	Changes  []Change `json:"changes"`
 	Cursor   int64    `json:"cursor"`
 	Revision int64    `json:"revision"`
+}
+
+func validateInbox(name string) error {
+	if name == "" {
+		return nil
+	}
+	if len(name) > 64 {
+		return fmt.Errorf("inbox name must be at most 64 characters")
+	}
+	for i, c := range name {
+		if c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || i > 0 && (c == '-' || c == '_') {
+			continue
+		}
+		return fmt.Errorf("inbox must be a lowercase name using letters, digits, underscores or hyphens")
+	}
+	return nil
 }
 
 func nonempty(s string) bool { return strings.TrimSpace(s) != "" }

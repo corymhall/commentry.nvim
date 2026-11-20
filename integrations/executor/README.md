@@ -30,6 +30,15 @@ explicit input and output schemas. `rpc` preserves the CLI protocol; its queue
 operation persists a snapshot but never reaches local Rex. `finish` completes
 only supplied active claims and preserves the conversation's resolution state.
 
+Named cross-project inboxes use optional `inbox` on create, list, changes and
+publish, and on publication receipt lookups. `project` remains the originating
+project. Project-only queries exclude named inboxes; unscoped queries include all
+destinations. Named inboxes do not support agent queueing or delivery. Migration
+0003 adds destination indexes and scopes publication receipts by inbox as well as
+project and request ID, preserving existing receipts. Deploy this migration and
+app together before updating clients. Named inboxes use the existing app access
+boundary, not a new cross-account permission model.
+
 Optional acting Pi session metadata is retained in each thread's JSON state as
 `session_activity`; no SQL migration is needed. Deploy the updated app before
 reloading the native Pi extension to enable automatic attribution. Direct

@@ -65,6 +65,40 @@ describe("universal inbox", function()
     return result
   end
 
+  it("opens named inboxes across projects and preserves scope when switching views", function()
+    local ordinary = create("Project topic")
+    local shared = assert(Store.create({ inbox = "agent-friction", project = root, body = "Slow discovery" }))
+    local other =
+      assert(Store.create({ inbox = "agent-friction", project = root .. "/other", body = "Unclear errors" }))
+    assert(Store.create({ inbox = "ideas", project = root, body = "Another destination" }))
+    local view = require("commentry.inbox").open(nil, { inbox = "agent-friction" })
+    assert.equals("agent-friction", view.inbox)
+    assert.is_nil(view.project)
+    assert.equals(2, #view.threads)
+    assert.equals(shared, view.threads[1].id)
+    assert.equals(other, view.threads[2].id)
+    local conversation = table.concat(vim.api.nvim_buf_get_lines(view.thread_buf, 0, -1, false), "\n")
+    assert.is_truthy(conversation:find("Project: " .. root, 1, true))
+    assert.is_truthy(vim.wo[view.list_win].statusline:find("agent-friction", 1, true))
+    require("commentry.inbox").new_thread()
+    local editor = vim.api.nvim_get_current_buf()
+    vim.api.nvim_buf_set_lines(editor, 0, -1, false, { "Another concrete annoyance" })
+    for _, map in ipairs(vim.api.nvim_buf_get_keymap(editor, "n")) do
+      if map.lhs == "<C-S>" or map.lhs == "<C-s>" then
+        map.callback()
+      end
+    end
+    local shared_threads = assert(Store.list(nil, { inbox = "agent-friction" }))
+    assert.equals(3, #shared_threads)
+    assert.is_false(shared_threads[3].pending or false)
+    assert.equals(Source.project(), shared_threads[3].project)
+    assert.equals(0, #shared_threads[3].queue)
+    view = require("commentry.inbox").open(nil, { project = root })
+    assert.is_nil(view.inbox)
+    assert.equals(1, #view.threads)
+    assert.equals(ordinary, view.threads[1].id)
+  end)
+
   it("shows a saved reply as unsent until its own snapshot is queued", function()
     local id = create("Initial question")
     assert(Store.enqueue(id, nil, { defer_delivery = true }))

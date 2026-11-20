@@ -55,6 +55,7 @@ type PublishedItem struct {
 
 // PublishReceipt is durable even if the caller loses the original response.
 type PublishReceipt struct {
+	Inbox     string          `json:"inbox,omitempty"`
 	Project   string          `json:"project"`
 	RequestID string          `json:"request_id"`
 	Status    string          `json:"status"`
@@ -75,13 +76,13 @@ func publicationIdentity(project, requestID string) error {
 	return nil
 }
 
-func (s *Store) publication(ctx context.Context, project, requestID string) (PublishReceipt, error) {
-	result := PublishReceipt{Project: project, RequestID: requestID, Status: "missing"}
+func (s *Store) publication(ctx context.Context, project, requestID, destination string) (PublishReceipt, error) {
+	result := PublishReceipt{Inbox: destination, Project: project, RequestID: requestID, Status: "missing"}
 	if err := publicationIdentity(project, requestID); err != nil {
 		return result, err
 	}
 	var raw string
-	err := s.db.QueryRowContext(ctx, "SELECT receipt FROM publications WHERE project=? AND request_id=?", project, requestID).Scan(&raw)
+	err := s.db.QueryRowContext(ctx, "SELECT receipt FROM publications WHERE project=? AND request_id=? AND inbox=?", project, requestID, destination).Scan(&raw)
 	if errors.Is(err, sql.ErrNoRows) {
 		return result, nil
 	}
@@ -116,7 +117,7 @@ func validatePublication(r Request) error {
 }
 
 func (s *Store) publish(ctx context.Context, r Request) (PublishReceipt, error) {
-	receipt := PublishReceipt{Project: r.Project, RequestID: r.RequestID, Status: "complete", Items: []PublishedItem{}}
+	receipt := PublishReceipt{Inbox: r.Inbox, Project: r.Project, RequestID: r.RequestID, Status: "complete", Items: []PublishedItem{}}
 	if err := validatePublication(r); err != nil {
 		return receipt, err
 	}
@@ -125,7 +126,8 @@ func (s *Store) publish(ctx context.Context, r Request) (PublishReceipt, error) 
 		RequestID string
 		Author    string
 		Items     []PublishItem
-	}{r.Project, r.RequestID, r.Author, r.Items})
+		Inbox     string `json:",omitempty"`
+	}{r.Project, r.RequestID, r.Author, r.Items, r.Inbox})
 	if err != nil {
 		return receipt, err
 	}
@@ -137,7 +139,7 @@ func (s *Store) publish(ctx context.Context, r Request) (PublishReceipt, error) 
 	}
 	defer func() { _ = tx.Rollback() }()
 	var priorHash, raw string
-	err = tx.QueryRowContext(ctx, "SELECT fingerprint,receipt FROM publications WHERE project=? AND request_id=?", r.Project, r.RequestID).Scan(&priorHash, &raw)
+	err = tx.QueryRowContext(ctx, "SELECT fingerprint,receipt FROM publications WHERE project=? AND request_id=? AND inbox=?", r.Project, r.RequestID, r.Inbox).Scan(&priorHash, &raw)
 	if err == nil {
 		if priorHash != fingerprint {
 			return receipt, fmt.Errorf("request_id already used with different content; inspect publication or use a new request_id")
@@ -159,7 +161,7 @@ func (s *Store) publish(ctx context.Context, r Request) (PublishReceipt, error) 
 	if err != nil {
 		return receipt, err
 	}
-	if _, err = tx.ExecContext(ctx, "INSERT INTO publications(project,request_id,fingerprint,receipt) VALUES(?,?,?,?)", r.Project, r.RequestID, fingerprint, string(data)); err != nil {
+	if _, err = tx.ExecContext(ctx, "INSERT INTO publications(project,inbox,request_id,fingerprint,receipt) VALUES(?,?,?,?,?)", r.Project, r.Inbox, r.RequestID, fingerprint, string(data)); err != nil {
 		return receipt, err
 	}
 	err = tx.Commit()
@@ -168,7 +170,7 @@ func (s *Store) publish(ctx context.Context, r Request) (PublishReceipt, error) 
 
 func publishItem(ctx context.Context, tx *sql.Tx, r Request, item PublishItem) (PublishedItem, error) {
 	result := PublishedItem{Key: item.Key, Title: item.Title, Attachments: []EvidenceReceipt{}, Comparisons: []EvidenceReceipt{}}
-	value, err := create(ctx, tx, Request{Project: r.Project, Author: r.Author, Title: item.Title, Body: item.Body, Source: item.Source, Session: r.Session})
+	value, err := create(ctx, tx, Request{Inbox: r.Inbox, Project: r.Project, Author: r.Author, Title: item.Title, Body: item.Body, Source: item.Source, Session: r.Session})
 	if err != nil {
 		return result, err
 	}

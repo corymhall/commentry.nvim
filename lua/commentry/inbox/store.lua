@@ -60,7 +60,7 @@ local function request(input, opts)
 end
 
 function M.list(project, opts)
-  return request({ action = "list", project = project }, opts)
+  return request({ action = "list", project = project, inbox = opts and opts.inbox }, opts)
 end
 
 function M.get(id, opts)

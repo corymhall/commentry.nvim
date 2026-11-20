@@ -142,7 +142,10 @@ func newAction(action string, directory *string) *cobra.Command {
 		command.Use += " <thread>"
 		command.Args = cobra.ExactArgs(1)
 	}
-	flags.StringVar(&request.Project, "project", "", "Project directory, Git root is inferred")
+	flags.StringVar(&request.Project, "project", "", "Originating project directory, Git root is inferred")
+	if action == actionList || action == "create" || action == "changes" || action == "publication" {
+		flags.StringVar(&request.Inbox, "inbox", "", "Named cross-project inbox destination")
+	}
 	flags.StringVar(&request.Author, "author", "", "Author label, defaults to You; required for claim")
 	bindActionFlags(command, &options)
 	command.RunE = func(command *cobra.Command, args []string) error {

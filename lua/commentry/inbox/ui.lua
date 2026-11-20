@@ -96,7 +96,7 @@ local function escape(text)
   return text:gsub("%%", "%%%%"):gsub("[\r\n]", " ")
 end
 
-function M.headers(view)
+function M.headers(view, thread)
   if not vim.api.nvim_win_is_valid(view.list_win) then
     return
   end
@@ -105,7 +105,7 @@ function M.headers(view)
   for _, thread in ipairs(view.threads) do
     unread = unread + (thread.unread and 1 or 0)
   end
-  local scope = view.project and vim.fs.basename(view.project) or "All projects"
+  local scope = view.inbox or (view.project and vim.fs.basename(view.project)) or "All projects"
   local width = vim.api.nvim_win_get_width(view.list_win)
   vim.wo[view.list_win].winbar = "%#CommentryInboxTitle# Inbox %*%=%#CommentryInboxMuted#"
     .. #view.threads
@@ -117,10 +117,12 @@ function M.headers(view)
     vim.wo[view.source_win].winbar = "%#CommentryInboxTitle# Source and changes"
     vim.wo[view.source_win].statusline = " %#CommentryInboxMuted#za fold  gl sections  gf code%=%* %l/%L "
   end
+  local shared = view.inbox or (thread and thread.inbox)
   vim.wo[view.thread_win].winbar = "%#CommentryInboxTitle# Conversation %*%=%#CommentryInboxMuted#"
-    .. view.delivery_mode
+    .. (shared and "Shared inbox" or view.delivery_mode)
     .. " "
-  vim.wo[view.thread_win].statusline = " %#CommentryInboxMuted#r reply  s send  za fold  ? help%=%*%m %l/%L "
+  vim.wo[view.thread_win].statusline = shared and " %#CommentryInboxMuted#r reply  za fold  ? help%=%*%m %l/%L "
+    or " %#CommentryInboxMuted#r reply  s send  za fold  ? help%=%*%m %l/%L "
 end
 
 return M

@@ -83,6 +83,64 @@ func TestSingleReadPreservesTheBackendResponse(t *testing.T) {
 	}
 }
 
+func namedInboxBackend(t *testing.T, writes *atomic.Int32) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var call struct {
+			Tool  string         `json:"tool"`
+			Input map[string]any `json:"input"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&call); err != nil {
+			t.Error(err)
+		}
+		if call.Tool == "read" {
+			_, _ = w.Write([]byte(`{"id":"shared","project":"/another-project","inbox":"agent-friction"}`))
+			return
+		}
+		if call.Tool == "list" {
+			if _, exists := call.Input["project"]; exists {
+				t.Error("named list was narrowed to current origin")
+			}
+			_, _ = w.Write([]byte(`[]`))
+			return
+		}
+		if _, exists := call.Input["inbox"]; exists {
+			t.Error("bridge forwarded inbox to a thread-only tool")
+		}
+		writes.Add(1)
+		_, _ = w.Write([]byte(`{"id":"reply"}`))
+	}))
+}
+
+// TestNamedInboxScope keeps the default project boundary intact.
+func TestNamedInboxScope(t *testing.T) {
+	t.Parallel()
+	var writes atomic.Int32
+	server := namedInboxBackend(t, &writes)
+	defer server.Close()
+	directory, project := connectBackend(t, server.URL), t.TempDir()
+	for _, input := range []string{
+		`{"action":"read","input":{"inbox":"agent-friction","thread":"shared"}}`,
+		`{"action":"list","input":{"inbox":"agent-friction"}}`,
+		`{"action":"reply","input":{"inbox":"agent-friction","thread":"shared","body":"Recorded"}}`,
+	} {
+		if _, err := Call(t.Context(), directory, project, strings.NewReader(input)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, input := range []string{
+		`{"action":"reply","input":{"thread":"shared","body":"Wrong scope"}}`,
+		`{"action":"reply","input":{"inbox":"ideas","thread":"shared","body":"Wrong destination"}}`,
+	} {
+		if _, err := Call(t.Context(), directory, project, strings.NewReader(input)); err == nil {
+			t.Fatal("accepted mismatched destination")
+		}
+	}
+	if writes.Load() != 1 {
+		t.Fatalf("unexpected writes: %d", writes.Load())
+	}
+}
+
 // TestOversizedRequestRejectsValidPrefix prevents truncation before a mutation.
 func TestOversizedRequestRejectsValidPrefix(t *testing.T) {
 	t.Parallel()

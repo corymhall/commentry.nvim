@@ -37,6 +37,21 @@ export function database(filename = ":memory:") {
         "utf8",
       ),
     );
+  if (
+    !db
+      .prepare("PRAGMA table_info(threads)")
+      .all()
+      .some((c) => c.name === "inbox")
+  )
+    db.exec(
+      readFileSync(
+        new URL(
+          "../integrations/executor/migrations/0003_named_inboxes.sql",
+          import.meta.url,
+        ),
+        "utf8",
+      ),
+    );
   const sql = {
     exec(query: string, ...args: (string | number | null)[]) {
       const statement = db.prepare(query),

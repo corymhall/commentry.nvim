@@ -16,6 +16,21 @@ followups in that thread. Do not duplicate reports into another inbox unless
 explicitly requested. Pi may expose a native commentry tool backed by these
 same operations; prefer that tool for supported actions.
 
+## Named inboxes
+
+Use optional `inbox`, such as `agent-friction`, on create, list, changes,
+publish and publications.read to choose a shared cross-project destination.
+Project remains the originating project and session metadata records the actor.
+Names contain up to 64 lowercase letters, digits, underscores or hyphens and
+start with a letter or digit. Project-only queries exclude named inboxes;
+omitting both scopes includes all destinations. Supplying both filters a named
+inbox by origin. Publication retries and receipt lookups must keep the same
+inbox, project and request_id. Named threads support ordinary replies, read
+state and resolution, but no agent queue or delivery. Do not use finish for them.
+With the native Pi adapter, explicitly supply the matching inbox on read,
+reply and evidence updates to cross the default current-project boundary.
+Creating or publishing records the current project; a named list spans origins.
+
 ## Pi session provenance
 
 The native Pi tool supplies its acting session automatically. When calling

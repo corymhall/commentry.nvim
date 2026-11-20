@@ -66,8 +66,13 @@ function M.setup()
   end
   initialized = true
   M.register("inbox", function(_, scope)
+    local name = scope:match("^named ([a-z0-9][a-z0-9_-]*)$")
+    if name and #name <= 64 then
+      require("commentry.inbox").open(nil, { inbox = name })
+      return
+    end
     if not vim.tbl_contains({ "", "all", "unread", "read", "open", "resolved", "queued" }, scope) then
-      Util.error("Use :Commentry inbox [all|unread|read|open|resolved|queued]")
+      Util.error("Use :Commentry inbox [all|unread|read|open|resolved|queued] or :Commentry inbox named <name>")
       return
     end
     require("commentry.inbox").open(scope)

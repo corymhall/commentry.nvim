@@ -8,6 +8,7 @@ import {
   type Attachment,
   type Session,
   validateSession,
+  validateInbox,
 } from "./inbox.js";
 
 export interface PublishItem {
@@ -20,6 +21,7 @@ export interface PublishItem {
   primary_comparison?: string;
 }
 export interface Publication {
+  inbox?: string;
   session?: Session;
   project: string;
   request_id: string;
@@ -27,6 +29,7 @@ export interface Publication {
   items: PublishItem[];
 }
 export interface PublishReceipt {
+  inbox?: string;
   project: string;
   request_id: string;
   status: "complete";
@@ -71,24 +74,28 @@ export function publication(
   sql: SqlReader,
   project: string,
   request_id: string,
+  inbox?: string,
 ): PublishReceipt | { project: string; request_id: string; status: "missing" } {
   identity(project, request_id);
+  validateInbox(inbox);
   const rows = sql
     .exec<{ receipt: string }>(
-      "SELECT receipt FROM publications WHERE project=? AND request_id=?",
+      "SELECT receipt FROM publications WHERE project=? AND request_id=? AND inbox=?",
       project,
       request_id,
+      inbox ?? "",
     )
     .toArray();
   return rows.length
     ? JSON.parse(rows[0].receipt)
-    : { project, request_id, status: "missing" };
+    : { project, request_id, ...(inbox ? { inbox } : {}), status: "missing" };
 }
 export async function publish(
   sql: SQL,
   input: Publication,
 ): Promise<PublishReceipt> {
   identity(input.project, input.request_id);
+  validateInbox(input.inbox);
   validateSession(input.session);
   check(label(input.author), "author is required");
   check(
@@ -127,6 +134,7 @@ export async function publish(
     new TextEncoder().encode(
       canonical({
         project: input.project,
+        ...(input.inbox ? { inbox: input.inbox } : {}),
         request_id: input.request_id,
         author: input.author,
         items: input.items,
@@ -139,9 +147,10 @@ export async function publish(
   return sql.transaction((tx) => {
     const rows = tx
       .exec<{ fingerprint: string; receipt: string }>(
-        "SELECT fingerprint,receipt FROM publications WHERE project=? AND request_id=?",
+        "SELECT fingerprint,receipt FROM publications WHERE project=? AND request_id=? AND inbox=?",
         input.project,
         input.request_id,
+        input.inbox ?? "",
       )
       .toArray();
     if (rows.length) {
@@ -153,6 +162,7 @@ export async function publish(
     }
     const receipt: PublishReceipt = {
       project: input.project,
+      ...(input.inbox ? { inbox: input.inbox } : {}),
       request_id: input.request_id,
       status: "complete",
       items: [],
@@ -160,6 +170,7 @@ export async function publish(
     for (const item of input.items) {
       const common = {
         project: input.project,
+        inbox: input.inbox,
         author: input.author,
         session: input.session,
       };
@@ -211,8 +222,9 @@ export async function publish(
       });
     }
     tx.exec(
-      "INSERT INTO publications(project,request_id,fingerprint,receipt) VALUES(?,?,?,?)",
+      "INSERT INTO publications(project,inbox,request_id,fingerprint,receipt) VALUES(?,?,?,?,?)",
       input.project,
+      input.inbox ?? "",
       input.request_id,
       fingerprint,
       JSON.stringify(receipt),
